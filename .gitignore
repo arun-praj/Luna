@@ -19,6 +19,13 @@
 
 # production
 /build
+!/build/
+!/build/sites-vite-plugin.ts
+
+# Sites build artifacts
+/.vinext/
+/.wrangler/
+/dist/
 
 # local SQLite database
 /.data/

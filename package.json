@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "NPM_CONFIG_LEGACY_PEER_DEPS=true vinext build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate --config backend/db/drizzle.config.ts",
@@ -23,9 +23,9 @@
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
     "radix-ui": "^1.6.7",
-    "react": "19.2.4",
+    "react": "^19.2.8",
     "react-day-picker": "^10.0.1",
-    "react-dom": "19.2.4",
+    "react-dom": "^19.2.8",
     "supertokens-auth-react": "^0.51.2",
     "supertokens-node": "^24.0.3",
     "supertokens-web-js": "^0.16.0",
@@ -34,15 +34,23 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.37.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
+    "@vitejs/plugin-rsc": "^0.5.26",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "react-server-dom-webpack": "^19.2.6",
     "shadcn": "^4.16.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5"
-  }
+    "typescript": "^5",
+    "vinext": "^0.0.50",
+    "vite": "^8.0.13",
+    "wrangler": "^4.92.0"
+  },
+  "type": "module"
 }
