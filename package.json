@@ -14,7 +14,6 @@
     "@dicebear/collection": "^9.4.2",
     "@dicebear/core": "^9.4.3",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^13.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
@@ -36,7 +35,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
