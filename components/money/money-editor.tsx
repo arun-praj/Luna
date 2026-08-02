@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Check, Delete, X } from "lucide-react";
 
 type Operator = "+" | "−" | "×" | "÷";
@@ -26,6 +27,14 @@ export function MoneyEditor({
   onSet,
   title = "Edit amount",
   currency = "NPR",
+  confirmPlacement = "top",
+  confirmLabel = "Set",
+  confirmDisabled = false,
+  topContent,
+  cancelVariant = "icon",
+  cancelLabel = "Cancel money edit",
+  dismissOnBackdrop = true,
+  closeOnEscape = true,
 }: {
   open: boolean;
   value: string;
@@ -33,8 +42,40 @@ export function MoneyEditor({
   onSet: (value: string) => void;
   title?: string;
   currency?: string;
+  confirmPlacement?: "top" | "bottom";
+  confirmLabel?: string;
+  confirmDisabled?: boolean | ((value: string) => boolean);
+  topContent?: React.ReactNode;
+  cancelVariant?: "icon" | "text";
+  cancelLabel?: string;
+  dismissOnBackdrop?: boolean;
+  closeOnEscape?: boolean;
 }) {
-  if (!open) return null;
+  const [isMounted, setIsMounted] = React.useState(open);
+  const [isClosing, setIsClosing] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      const frame = window.requestAnimationFrame(() => {
+        setIsMounted(true);
+        setIsClosing(false);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    if (!isMounted) return;
+    const frame = window.requestAnimationFrame(() => setIsClosing(true));
+    const timer = window.setTimeout(() => {
+      setIsMounted(false);
+      setIsClosing(false);
+    }, 320);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [isMounted, open]);
+
+  if (!isMounted || typeof document === "undefined") return null;
 
   return (
     <MoneyEditorPanel
@@ -44,6 +85,15 @@ export function MoneyEditor({
       onSet={onSet}
       title={title}
       currency={currency}
+      confirmPlacement={confirmPlacement}
+      confirmLabel={confirmLabel}
+      confirmDisabled={confirmDisabled}
+      topContent={topContent}
+      cancelVariant={cancelVariant}
+      cancelLabel={cancelLabel}
+      dismissOnBackdrop={dismissOnBackdrop}
+      closeOnEscape={closeOnEscape}
+      isClosing={isClosing}
     />
   );
 }
@@ -54,19 +104,38 @@ function MoneyEditorPanel({
   onSet,
   title,
   currency,
+  confirmPlacement,
+  confirmLabel,
+  confirmDisabled,
+  topContent,
+  cancelVariant,
+  cancelLabel,
+  dismissOnBackdrop,
+  closeOnEscape,
+  isClosing,
 }: {
   value: string;
   onCancel: () => void;
   onSet: (value: string) => void;
   title: string;
   currency: string;
+  confirmPlacement: "top" | "bottom";
+  confirmLabel: string;
+  confirmDisabled: boolean | ((value: string) => boolean);
+  topContent?: React.ReactNode;
+  cancelVariant: "icon" | "text";
+  cancelLabel: string;
+  dismissOnBackdrop: boolean;
+  closeOnEscape: boolean;
+  isClosing: boolean;
 }) {
   const [draft, setDraft] = React.useState(value || "0");
   const [operator, setOperator] = React.useState<Operator | null>(null);
   const [leftValue, setLeftValue] = React.useState<number | null>(null);
   const [freshEntry, setFreshEntry] = React.useState(false);
+  const isConfirmDisabled = typeof confirmDisabled === "function" ? confirmDisabled(draft) : confirmDisabled;
 
-  const inputDigit = (digit: string) => {
+  const inputDigit = React.useCallback((digit: string) => {
     setDraft((current) => {
       if (freshEntry) {
         setFreshEntry(false);
@@ -77,9 +146,9 @@ function MoneyEditorPanel({
       if (current.replace(".", "").length >= 10) return current;
       return `${current}${digit}`;
     });
-  };
+  }, [freshEntry]);
 
-  const chooseOperator = (nextOperator: Operator) => {
+  const chooseOperator = React.useCallback((nextOperator: Operator) => {
     const current = Number(draft || "0");
     if (leftValue !== null && operator && !freshEntry) {
       const result = calculate(leftValue, current, operator);
@@ -90,37 +159,86 @@ function MoneyEditorPanel({
     }
     setOperator(nextOperator);
     setFreshEntry(true);
-  };
+  }, [draft, freshEntry, leftValue, operator]);
 
-  const equals = () => {
+  const equals = React.useCallback(() => {
     if (leftValue === null || !operator) return;
     const result = calculate(leftValue, Number(draft || "0"), operator);
     setDraft(String(Math.round(result * 100) / 100));
     setLeftValue(null);
     setOperator(null);
     setFreshEntry(true);
-  };
+  }, [draft, leftValue, operator]);
 
-  return (
+  const deleteLastDigit = React.useCallback(() => {
+    setDraft((current) => (current.length > 1 ? current.slice(0, -1) : "0"));
+  }, []);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      if (/^\d$/.test(event.key) || event.key === ".") {
+        event.preventDefault();
+        inputDigit(event.key);
+        return;
+      }
+
+      if (event.key === "Backspace" || event.key === "Delete") {
+        event.preventDefault();
+        deleteLastDigit();
+        return;
+      }
+
+      if (event.key === "Escape" && closeOnEscape) {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+
+      const operators: Record<string, Operator> = {
+        "/": "÷",
+        "*": "×",
+        "-": "−",
+        "+": "+",
+      };
+      const nextOperator = operators[event.key];
+      if (nextOperator) {
+        event.preventDefault();
+        chooseOperator(nextOperator);
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "=") {
+        event.preventDefault();
+        equals();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [chooseOperator, closeOnEscape, deleteLastDigit, equals, inputDigit, onCancel]);
+
+  return createPortal((
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="money-editor-title"
-      className="fixed inset-0 z-[70] flex items-end bg-foreground/25 backdrop-blur-[2px]"
+      className={`fixed inset-0 z-[70] flex items-end bg-foreground/25 backdrop-blur-[2px] ${isClosing ? "drawer-scrim-exit" : "drawer-scrim-enter"}`}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onCancel();
+        if (dismissOnBackdrop && event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="w-full rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)]">
+      <div className={`w-full rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)] ${isClosing ? "drawer-exit" : "drawer-enter"}`}>
         <div className="mx-auto w-full max-w-[480px]">
-          <div className="grid grid-cols-[44px_1fr_64px] items-center">
+          <div className={`grid items-center ${cancelVariant === "text" ? "grid-cols-[72px_1fr_44px]" : confirmPlacement === "top" ? "grid-cols-[44px_1fr_64px]" : "grid-cols-[44px_1fr_44px]"}`}>
             <button
               type="button"
-              aria-label="Cancel money edit"
+              aria-label={cancelLabel}
               onClick={onCancel}
-              className="flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"
+              className={cancelVariant === "text" ? "flex h-11 items-center justify-start rounded-[10px] px-2 text-sm font-semibold text-primary hover:bg-primary-soft" : "flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"}
             >
-              <X aria-hidden="true" className="size-5" />
+              {cancelVariant === "text" ? cancelLabel : <X aria-hidden="true" className="size-5" />}
             </button>
             <div className="min-w-0 px-2 text-center">
               <p id="money-editor-title" className="text-xs font-semibold text-muted-foreground">
@@ -142,16 +260,21 @@ function MoneyEditorPanel({
                 </p>
               ) : null}
             </div>
-            <button
-              type="button"
-              aria-label="Set money amount"
-              onClick={() => onSet(draft || "0")}
-              className="flex h-10 items-center justify-center gap-1 rounded-[10px] border border-primary/20 bg-primary-soft px-3 text-sm font-semibold text-primary"
-            >
-              <Check aria-hidden="true" className="size-4" />
-              Set
-            </button>
+            {confirmPlacement === "top" ? (
+              <button
+                type="button"
+                aria-label="Set money amount"
+                disabled={isConfirmDisabled}
+                onClick={() => onSet(draft || "0")}
+                className="flex h-10 items-center justify-center gap-1 rounded-[10px] border border-primary/20 bg-primary-soft px-3 text-sm font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Check aria-hidden="true" className="size-4" />
+                {confirmLabel}
+              </button>
+            ) : <span aria-hidden="true" />}
           </div>
+
+          {topContent ? <div className="mt-3">{topContent}</div> : null}
 
           <div className="mt-3 grid grid-cols-[1fr_64px] gap-2">
             <div className="grid grid-cols-3 gap-2">
@@ -170,11 +293,7 @@ function MoneyEditorPanel({
               <button
                 type="button"
                 aria-label="Delete last digit"
-                onClick={() =>
-                  setDraft((current) =>
-                    current.length > 1 ? current.slice(0, -1) : "0",
-                  )
-                }
+                onClick={deleteLastDigit}
                 className="flex h-12 items-center justify-center rounded-[11px] bg-card text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] active:bg-expense-soft"
               >
                 <Delete aria-hidden="true" className="size-5" />
@@ -207,8 +326,23 @@ function MoneyEditorPanel({
               </button>
             </div>
           </div>
+
+          {confirmPlacement === "bottom" ? (
+            <div className="mt-4 border-t border-border pt-3">
+              <button
+                type="button"
+                aria-label={confirmLabel}
+                disabled={isConfirmDisabled}
+                onClick={() => onSet(draft || "0")}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-[0_8px_18px_rgb(53_107_104_/_0.15)] transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Check aria-hidden="true" className="size-4" />
+                {confirmLabel}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

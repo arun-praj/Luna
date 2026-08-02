@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `avatar_preset` text DEFAULT 'sunrise' NOT NULL;

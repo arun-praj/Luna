@@ -1,6 +1,6 @@
 # Budget App Design System
 
-Status: Draft v0.1  
+Status: Active v0.2
 Scope: Mobile-first personal budget tracking application  
 Purpose: Source of truth for visual language, interaction patterns, and UI implementation
 
@@ -181,7 +181,7 @@ Mobile is the primary design target. Larger layouts should enhance the same info
 - Preset images and upload controls wrap onto another line instead of shrinking below their usable size.
 - Dense icon grids use three columns below 360px and four columns from 360px upward. Labels may truncate, but their accessible names must remain complete.
 - Preview cards must protect long names and large amounts with `min-width: 0`, truncation, and responsive type sizing.
-- Full-screen pickers must use `100dvh`, respect top and bottom safe areas, and keep their close action in a sticky header.
+- Mobile date and time pickers use a bottom drawer rather than a full-screen page. The drawer respects top and bottom safe areas, has rounded top corners, a dimmed backdrop, a visible drag handle, and a sticky header with explicit close and Done actions.
 
 ## 7. Shape, Border, and Elevation
 
@@ -350,6 +350,18 @@ Use bottom sheets for focused mobile choices such as category, account, date, an
 - Drag handle is supplementary and never the only close mechanism.
 - Primary action remains reachable above the safe area.
 
+### Calendar and transaction time picker
+
+The transaction date/time control uses the mobile bottom-drawer pattern shown in the transaction editor:
+
+- Open from the compact transaction date row; do not open a native browser date popover.
+- Place the calendar near the top of the drawer for thumb-friendly month navigation and date selection.
+- Keep the time control directly below the calendar in its own surface, with a clear “Transaction time” label and the helper text “When it happened in real life.”
+- Offer a few useful quick-time presets, while retaining a standard time input for an exact custom time.
+- Selecting a calendar date updates the draft but does not close the drawer; the user can choose both date and time before tapping Done.
+- Always highlight the current calendar date with a distinct, accessible treatment (for example, a subtle `primary-soft` fill and `primary` outline or ring). The selected transaction date may use a stronger selected style, but the current-date treatment must remain distinguishable when the two are different.
+- Use `transaction_at` for the real-world transaction timestamp. Keep `date` as the calendar-day index used for grouping and filtering; never substitute `createdAt` or `updatedAt` for the transaction’s actual time.
+
 ### Feedback
 
 - Toasts confirm lightweight actions and disappear automatically.
@@ -357,6 +369,16 @@ Use bottom sheets for focused mobile choices such as category, account, date, an
 - Dialogs are reserved for destructive or consequential decisions.
 - Success feedback should be brief and should not block the next task.
 - Skeletons mimic final structure; avoid generic spinners for initial page loading.
+
+### Offline and notification behavior
+
+- User settings are usable offline. The most recent notification settings are cached locally and changes are applied optimistically.
+- Settings synchronize with the backend when connectivity returns. Offline confirmation must say that the change was saved on this device when a server sync is not available.
+- Native notifications use the browser Notification API and the service worker so the same interaction works in a browser and in an installed PWA on mobile.
+- Request notification permission only after an explicit user action such as “Enable alerts.” Never request permission on page load.
+- If permission is denied, keep a visible “How to allow” action and explain that the user must change this site’s permission in browser or device settings. Do not repeatedly trigger a blocked permission prompt.
+- Always provide a “Test notification” action. Disable it until permission is granted and explain why it is unavailable.
+- Push subscription data is optional. Local notification preferences must continue to work without a VAPID key or a network connection.
 
 ## 11. Core Screen Patterns
 
@@ -398,6 +420,11 @@ Avoid placing more than one chart above the fold.
 ### Profile and settings
 
 - Group settings into Account, Preferences, Data, and Security.
+- Keep Personal information, Currency and region, Notifications, and Security as separate bordered sections with consistent 14px card corners.
+- Email is read-only in the profile screen. Name, currency, and avatar use focused edit controls with immediate saved feedback.
+- Notification settings include separate controls for goal milestones, recurring payment due alerts, recurring transaction entry reminders, and low-balance alerts.
+- Recurring transaction entry reminders reveal local time and frequency only when enabled. Use a time input and a custom in-app frequency picker with Daily, Weekly, and Monthly options; do not rely on an unstyled browser-native dropdown.
+- The recurring reminder time is displayed and stored in the user’s local time. Frequency changes save independently and remain available offline.
 - Destructive actions appear at the end, separated from routine settings.
 - Currency, locale, and start-of-week settings explain their downstream effect.
 
@@ -434,11 +461,13 @@ Rules:
 - Focus indicators must remain visible and consistent.
 - All icon-only buttons require accessible names.
 - Inputs require persistent labels and programmatically associated errors.
+- Custom menus expose their expanded state, selected option, and keyboard focus to assistive technology.
 - Charts require a text summary and accessible data representation.
 - Do not communicate budget status by color alone.
 - Support text zoom to 200% without loss of content or action.
 - Support keyboard navigation for all desktop and tablet interactions.
 - Announce saved transactions and validation failures to assistive technology.
+- Permission-denied notification states must include a plain-language recovery action and must not rely on color alone.
 
 ## 14. Content Voice
 
@@ -471,7 +500,9 @@ The first implementation phase should establish:
 7. Budget progress
 8. Chip and filter controls
 9. Bottom sheet and dialog
-10. Empty, loading, error, and toast states
+10. Notification settings and permission states
+11. Custom select / menu control
+12. Empty, loading, error, and toast states
 
 Components should be built as small variants over the shadcn foundation. Avoid creating a separate abstraction until a pattern appears at least twice.
 

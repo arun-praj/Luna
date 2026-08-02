@@ -1,0 +1,1 @@
+ALTER TABLE `accounts` ADD `currency` text DEFAULT 'NPR' NOT NULL;

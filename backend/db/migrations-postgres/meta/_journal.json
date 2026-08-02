@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785521592773,
+      "tag": "0000_amusing_fabian_cortez",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785641293413,
+      "tag": "0001_security_and_password_reset",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785662997630,
+      "tag": "0002_red_paibok",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785664537097,
+      "tag": "0003_tranquil_gamma_corps",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785666504490,
+      "tag": "0004_strange_betty_brant",
+      "breakpoints": true
+    }
+  ]
+}

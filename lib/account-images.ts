@@ -10,6 +10,18 @@ function createAccountImage(seed: string, backgroundColor: string) {
   }).toDataUri();
 }
 
+export function getAccountImageSource(
+  icon: string | null | undefined,
+) {
+  if (icon?.startsWith("/api/") || icon?.startsWith("data:image/")) return icon;
+  if (icon?.startsWith("dicebear:fun-emoji:") || icon === "WalletCards") return null;
+  if (icon === "Digital") return accountImages.esewa;
+  if (icon === "Growth") return accountImages.savings;
+  if (icon === "Everyday") return accountImages.cash;
+  if (icon === "Bank") return accountImages.primary;
+  return null;
+}
+
 export const accountImages = {
   primary: createAccountImage("Primary bank vault", "dcece7"),
   esewa: createAccountImage("Digital wallet mobile", "dcebf5"),

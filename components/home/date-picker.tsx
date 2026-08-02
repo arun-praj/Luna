@@ -1,9 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { format, isBefore, isSameDay, isSameMonth } from "date-fns";
+import { format, isSameDay, isSameMonth, sub } from "date-fns";
 import {
-  ArrowLeft,
   CalendarDays,
   Check,
   ChevronRight,
@@ -34,9 +33,15 @@ const MONTHS = [
 ];
 const UNITS = ["days", "weeks", "months", "years"] as const;
 
-type DateField = "from" | "to";
 type PeriodUnit = (typeof UNITS)[number];
-type FilterMode = "day" | "month" | "custom" | "last" | "all";
+export type FilterMode = "day" | "month" | "custom" | "last" | "all";
+
+export type AppliedPeriod = {
+  mode: FilterMode;
+  label: string;
+  from?: Date;
+  to?: Date;
+};
 
 function formatRange(range: DateRange) {
   if (!range.from) return "Select period";
@@ -58,54 +63,50 @@ function CompactDivider() {
   return <div aria-hidden="true" className="h-px bg-border" />;
 }
 
-export function DatePicker() {
+export function DatePicker({
+  initialMode = "day",
+  initialLabel,
+  triggerLabel,
+  onApply,
+}: {
+  initialMode?: FilterMode;
+  initialLabel?: string;
+  triggerLabel?: string;
+  onApply?: (period: AppliedPeriod) => void;
+} = {}) {
   const [open, setOpen] = React.useState(false);
   const [periodLabel, setPeriodLabel] = React.useState(
-    format(CURRENT_DATE, "MMM d")
+    initialLabel ??
+      (initialMode === "month"
+        ? `${MONTHS[CURRENT_DATE.getMonth()]} ${CURRENT_DATE.getFullYear()}`
+        : format(CURRENT_DATE, "MMM d")),
   );
   const [committedMode, setCommittedMode] =
-    React.useState<FilterMode>("day");
+    React.useState<FilterMode>(initialMode);
   const [draftMode, setDraftMode] = React.useState<FilterMode>("day");
   const [selectedMonth, setSelectedMonth] = React.useState(
-    CURRENT_DATE.getMonth()
+    CURRENT_DATE.getMonth(),
   );
   const [customRange, setCustomRange] = React.useState<DateRange>({
     from: undefined,
     to: undefined,
   });
-  const [activeField, setActiveField] = React.useState<DateField | null>(null);
+  const [calendarOpen, setCalendarOpen] = React.useState(false);
   const [calendarMonth, setCalendarMonth] = React.useState(CURRENT_DATE);
   const [amount, setAmount] = React.useState(4);
   const [unit, setUnit] = React.useState<PeriodUnit>("weeks");
 
   const setOpenState = (nextOpen: boolean) => {
     if (nextOpen) setDraftMode(committedMode);
-    if (!nextOpen) setActiveField(null);
+    if (!nextOpen) setCalendarOpen(false);
     setOpen(nextOpen);
   };
 
-  const chooseCustomDate = (date: Date | undefined) => {
-    if (!date || !activeField) return;
-
-    if (activeField === "from") {
-      setCustomRange((current) => ({
-        from: date,
-        to:
-          current.to && !isBefore(current.to, date) ? current.to : undefined,
-      }));
-      setCalendarMonth(date);
-      setActiveField("to");
-      return;
-    }
-
-    setCustomRange((current) => {
-      if (current.from && isBefore(date, current.from)) {
-        return { from: date, to: current.from };
-      }
-      return { from: current.from ?? date, to: date };
-    });
-    setCalendarMonth(date);
-    setActiveField(null);
+  const chooseCustomRange = (range: DateRange | undefined) => {
+    if (!range) return;
+    setCustomRange(range);
+    setDraftMode("custom");
+    if (range.from) setCalendarMonth(range.from);
   };
 
   const canApply =
@@ -115,21 +116,31 @@ export function DatePicker() {
   const applyFilter = () => {
     if (!canApply) return;
 
+    let nextLabel = periodLabel;
+    let from: Date | undefined;
+    let to: Date | undefined;
     if (draftMode === "month") {
-      setPeriodLabel(`${MONTHS[selectedMonth]} ${CURRENT_DATE.getFullYear()}`);
-    } else if (
-      draftMode === "custom" &&
-      customRange.from &&
-      customRange.to
-    ) {
-      setPeriodLabel(formatRange(customRange));
+      nextLabel = `${MONTHS[selectedMonth]} ${CURRENT_DATE.getFullYear()}`;
+      from = new Date(CURRENT_DATE.getFullYear(), selectedMonth, 1);
+      to = new Date(CURRENT_DATE.getFullYear(), selectedMonth + 1, 0);
+    } else if (draftMode === "custom" && customRange.from && customRange.to) {
+      nextLabel = formatRange(customRange);
+      from = customRange.from;
+      to = customRange.to;
     } else if (draftMode === "last") {
-      setPeriodLabel(formatLastPeriod(amount, unit));
+      nextLabel = formatLastPeriod(amount, unit);
+      from = sub(CURRENT_DATE, { [unit]: amount });
+      to = CURRENT_DATE;
     } else if (draftMode === "all") {
-      setPeriodLabel("All time");
+      nextLabel = "All time";
+    } else {
+      from = CURRENT_DATE;
+      to = CURRENT_DATE;
     }
 
+    setPeriodLabel(nextLabel);
     setCommittedMode(draftMode);
+    onApply?.({ mode: draftMode, label: nextLabel, from, to });
     setOpen(false);
   };
 
@@ -146,7 +157,7 @@ export function DatePicker() {
             aria-hidden="true"
             className="size-[18px] text-primary"
           />
-          <span className="max-w-24 truncate">{periodLabel}</span>
+          <span className="max-w-24 truncate">{triggerLabel ?? periodLabel}</span>
           <ChevronRight
             aria-hidden="true"
             className="size-4 text-muted-foreground"
@@ -200,14 +211,18 @@ export function DatePicker() {
                 <div className="-mx-4 mt-2 flex snap-x gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-5 sm:px-5">
                   {MONTHS.map((month, index) => {
                     const selected = selectedMonth === index;
+                    const current = index === CURRENT_DATE.getMonth();
 
                     return (
                       <button
                         type="button"
                         aria-pressed={selected}
-                        className={`min-h-10 min-w-[64px] snap-start rounded-[9px] border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+                        aria-label={`${month}${current ? " (current month)" : ""}${selected ? " (selected)" : ""}`}
+                        className={`relative flex min-h-10 min-w-[64px] snap-start items-center justify-center gap-1.5 rounded-[9px] border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${current ? "ring-1 ring-income/45 ring-offset-1 ring-offset-background" : ""} ${
                           selected
                             ? "border-primary bg-primary-soft text-primary"
+                            : current
+                              ? "border-income/45 bg-income-soft/60 text-income"
                             : "border-border bg-card text-muted-foreground hover:bg-surface-subtle hover:text-foreground"
                         }`}
                         key={month}
@@ -217,6 +232,7 @@ export function DatePicker() {
                         }}
                       >
                         {month}
+                        {current ? <span aria-hidden="true" className="size-1.5 rounded-full bg-income" /> : null}
                       </button>
                     );
                   })}
@@ -229,39 +245,41 @@ export function DatePicker() {
                 <h2 id="custom-heading" className="text-sm font-semibold">
                   Custom range
                 </h2>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {(["from", "to"] as const).map((field) => {
-                    const date = customRange[field];
-
-                    return (
-                      <button
-                        type="button"
-                        className={`min-h-[56px] rounded-[10px] border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
-                          draftMode === "custom"
-                            ? "border-primary/50 bg-primary-soft/60"
-                            : "border-border bg-card hover:bg-surface-subtle"
-                        }`}
-                        key={field}
-                        onClick={() => {
-                          setDraftMode("custom");
-                          setActiveField(field);
-                          setCalendarMonth(date ?? CURRENT_DATE);
-                        }}
-                      >
-                        <span className="block text-[11px] font-medium capitalize text-muted-foreground">
-                          {field}
-                        </span>
-                        <span
-                          className={`mt-0.5 block truncate text-sm font-semibold ${
-                            date ? "text-foreground" : "text-primary"
-                          }`}
-                        >
-                          {date ? format(date, "MMM d, yyyy") : "Add date"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <button
+                  type="button"
+                  aria-label="Choose custom date range"
+                  className={`mt-2 flex min-h-[60px] w-full items-center justify-between gap-3 rounded-[10px] border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+                    draftMode === "custom"
+                      ? "border-primary/50 bg-primary-soft/60"
+                      : "border-border bg-card hover:bg-surface-subtle"
+                  }`}
+                  onClick={() => {
+                    setDraftMode("custom");
+                    setCalendarMonth(customRange.from ?? CURRENT_DATE);
+                    setCalendarOpen(true);
+                  }}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-medium text-muted-foreground">
+                      Date range
+                    </span>
+                    <span
+                      className={`mt-0.5 block truncate text-sm font-semibold ${
+                        customRange.from && customRange.to
+                          ? "text-foreground"
+                          : "text-primary"
+                      }`}
+                    >
+                      {customRange.from && customRange.to
+                        ? `${format(customRange.from, "MMM d, yyyy")} – ${format(customRange.to, "MMM d, yyyy")}`
+                        : "Select start and end dates"}
+                    </span>
+                  </span>
+                  <CalendarDays
+                    aria-hidden="true"
+                    className="size-5 shrink-0 text-primary"
+                  />
+                </button>
               </section>
 
               <CompactDivider />
@@ -350,33 +368,56 @@ export function DatePicker() {
               </section>
             </div>
 
-            {activeField ? (
-              <div className="fixed inset-0 z-[70] flex h-dvh flex-col overflow-hidden bg-background">
-                <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-                  <button
-                    type="button"
-                    aria-label="Back to period options"
-                    onClick={() => setActiveField(null)}
-                    className="flex size-10 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                  >
-                    <ArrowLeft aria-hidden="true" className="size-5" />
-                  </button>
-                  <h2 className="text-[18px] font-semibold tracking-[-0.025em]">
-                    {activeField === "from" ? "From date" : "To date"}
-                  </h2>
-                  <span />
-                </header>
-                <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                  <div className="w-full max-w-[360px] rounded-[14px] border border-border bg-card p-3">
-                    <Calendar
-                      mode="single"
-                      month={calendarMonth}
-                      onMonthChange={setCalendarMonth}
-                      modifiers={{ today: CURRENT_DATE }}
-                      selected={customRange[activeField]}
-                      onSelect={chooseCustomDate}
-                      className="mx-auto bg-transparent p-0 [--cell-size:2.25rem] min-[360px]:[--cell-size:2.5rem] min-[420px]:[--cell-size:2.75rem]"
-                    />
+            {calendarOpen ? (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="calendar-drawer-title"
+                className="fixed inset-0 z-[70] flex items-end bg-foreground/25"
+              >
+                <div className="drawer-enter flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)]">
+                  <div
+                    className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-foreground/20"
+                    aria-hidden="true"
+                  />
+                  <header className="flex shrink-0 items-center justify-between border-b border-border px-4 pb-3 pt-3">
+                    <button
+                      type="button"
+                      aria-label="Back to period options"
+                      onClick={() => setCalendarOpen(false)}
+                      className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                    >
+                      <X aria-hidden="true" className="size-5" />
+                    </button>
+                    <h2
+                      id="calendar-drawer-title"
+                      className="text-base font-semibold"
+                    >
+                      Choose date range
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarOpen(false)}
+                      className="rounded-[10px] bg-primary-soft px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                    >
+                      Done
+                    </button>
+                  </header>
+                  <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+                    <div className="w-full max-w-[420px] space-y-3">
+                      <Calendar
+                        mode="range"
+                        month={calendarMonth}
+                        onMonthChange={setCalendarMonth}
+                        modifiers={{ today: CURRENT_DATE }}
+                        selected={customRange}
+                        onSelect={chooseCustomRange}
+                        className="w-full rounded-[18px] border border-border bg-card p-4 shadow-[0_18px_50px_rgb(23_32_29_/_0.10)] [--cell-size:2.5rem] min-[420px]:[--cell-size:2.75rem]"
+                      />
+                      <p className="px-1 text-center text-xs text-muted-foreground">
+                        Select a start date, then an end date.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -1,11 +1,14 @@
-import "dotenv/config";
+import { config } from "dotenv";
 import { defineConfig } from "drizzle-kit";
+import { getDatabaseUrl } from "./connection";
+
+config({ path: ".env.local" });
 
 export default defineConfig({
   schema: "./backend/db/schema.ts",
-  out: "./backend/db/migrations",
-  dialect: "sqlite",
+  out: "./backend/db/migrations-postgres",
+  dialect: "postgresql",
   dbCredentials: {
-    url: process.env.SQLITE_DATABASE_PATH ?? ".data/budget.sqlite",
+    url: getDatabaseUrl(),
   },
 });

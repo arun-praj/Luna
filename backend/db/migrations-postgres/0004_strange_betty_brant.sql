@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "pwa_install_dismissed_at" text;

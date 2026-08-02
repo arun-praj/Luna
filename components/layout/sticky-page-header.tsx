@@ -20,7 +20,7 @@ export function StickyPageHeader({
   return (
     <header
       className={cn(
-        "sticky top-0 z-20 border-b bg-background/95 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur transition-[border-color,box-shadow] sm:pt-8",
+        "sticky top-0 z-20 w-[calc(100%+2rem)] self-start border-b bg-background/95 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur transition-[border-color,box-shadow] sm:w-[calc(100%+2.5rem)] sm:pt-8",
         scrolled
           ? "border-border/80 shadow-[0_1px_0_rgb(23_32_29_/_0.02)]"
           : "border-transparent",

@@ -4,7 +4,7 @@ export type Transaction = {
   description: string;
   category: string;
   amount: number;
-  kind: "income" | "expense" | "transfer";
+  kind: "income" | "expense" | "savings" | "transfer" | "adjust_balance";
   date: string;
   dateLabel: string;
   account: string;
@@ -149,7 +149,7 @@ export function getTransaction(id: string) {
 
 export function formatTransactionAmount(transaction: Transaction) {
   const prefix =
-    transaction.kind === "income"
+    transaction.kind === "income" || transaction.kind === "savings"
       ? "+"
       : transaction.kind === "expense"
         ? "−"

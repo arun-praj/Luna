@@ -1,34 +1,415 @@
-import { notFound } from "next/navigation";
+"use client";
 
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
-  CategoryEditor,
-  type CategoryEditorData,
-} from "@/components/categories/category-editor";
+  ArrowDownLeft,
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowUpRight,
+  Banknote,
+  BriefcaseBusiness,
+  CarFront,
+  Clapperboard,
+  Dumbbell,
+  Edit3,
+  Gift,
+  HeartPulse,
+  House,
+  PawPrint,
+  Plane,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingBasket,
+  ShoppingCart,
+  SlidersHorizontal,
+  Sprout,
+  Utensils,
+  WalletCards,
+  GraduationCap,
+} from "lucide-react";
 
-const categories: CategoryEditorData[] = [
-  { id: "housing", name: "Housing", iconIndex: 0, colorIndex: 0 },
-  { id: "dining", name: "Dining", iconIndex: 1, colorIndex: 4 },
-  { id: "shopping", name: "Shopping", iconIndex: 2, colorIndex: 3 },
-  { id: "transport", name: "Transport", iconIndex: 3, colorIndex: 1 },
-  { id: "health", name: "Health", iconIndex: 4, colorIndex: 2 },
-  { id: "insurance", name: "Insurance", iconIndex: 4, colorIndex: 5 },
-  { id: "gifts", name: "Gifts", iconIndex: 5, colorIndex: 4 },
-  { id: "income", name: "Income", iconIndex: 6, colorIndex: 2 },
-];
+import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
+import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { authenticatedFetch } from "@/lib/auth-client";
+import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
+import {
+  ListDataSkeleton,
+  PageDataSkeleton,
+} from "@/components/ui/data-skeleton";
 
-export function generateStaticParams() {
-  return categories.map(({ id }) => ({ id }));
+type Category = {
+  id: string;
+  name: string;
+  type: "expense" | "income";
+  icon: string | null;
+  color: string | null;
+};
+type CategoryTransaction = {
+  id: string;
+  type: "expense" | "income" | "savings" | "transfer" | "adjust_balance";
+  amount: number;
+  notes: string | null;
+  date: string;
+};
+
+const iconMap = {
+  Plants: Sprout,
+  Home: House,
+  Housing: House,
+  Food: Utensils,
+  "Food & Drinks": Utensils,
+  "Online Shopping": ShoppingBag,
+  OnlineShopping: ShoppingBag,
+  ShoppingBag,
+  Shopping: ShoppingCart,
+  "Shopping Cart": ShoppingCart,
+  ShoppingCart,
+  Groceries: ShoppingBasket,
+  Travel: CarFront,
+  Flights: Plane,
+  Health: HeartPulse,
+  Fitness: Dumbbell,
+  "Fitness & Sports": Dumbbell,
+  Gifts: Gift,
+  Work: BriefcaseBusiness,
+  Wallet: WalletCards,
+  Cash: Banknote,
+  Education: GraduationCap,
+  Pets: PawPrint,
+  Pet: PawPrint,
+  Movies: Clapperboard,
+  "Movies & Entertainment": Clapperboard,
+  "Entertainment & Movies": Clapperboard,
+  Insurance: ShieldCheck,
+} as const;
+const transactionMeta = {
+  expense: {
+    label: "Expense",
+    icon: ArrowDownLeft,
+    iconClassName: "bg-expense-soft text-expense",
+    amountClassName: "text-expense",
+    prefix: "−",
+  },
+  income: {
+    label: "Income",
+    icon: ArrowUpRight,
+    iconClassName: "bg-income-soft text-income",
+    amountClassName: "text-income",
+    prefix: "+",
+  },
+  savings: {
+    label: "Savings",
+    icon: WalletCards,
+    iconClassName: "bg-info-soft text-info",
+    amountClassName: "text-info",
+    prefix: "−",
+  },
+  transfer: {
+    label: "Transfer",
+    icon: ArrowLeftRight,
+    iconClassName: "bg-info-soft text-info",
+    amountClassName: "text-info",
+    prefix: "",
+  },
+  adjust_balance: {
+    label: "Balance adjustment",
+    icon: SlidersHorizontal,
+    iconClassName: "bg-primary-soft text-primary",
+    amountClassName: "text-primary",
+    prefix: "",
+  },
+} as const;
+
+function formatAmount(amount: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
-export default async function EditCategoryPage({
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function currentMonthPeriod(): AppliedPeriod {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return {
+    mode: "month",
+    label: new Intl.DateTimeFormat(undefined, {
+      month: "long",
+      year: "numeric",
+    }).format(now),
+    from,
+    to,
+  };
+}
+
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${date}T00:00:00`));
+}
+
+export default function CategoryActivityPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  const category = categories.find((item) => item.id === id);
+  const [backHref, setBackHref] = useState("/categories");
+  const [currentRoute, setCurrentRoute] = useState("/");
+  const [categoryId, setCategoryId] = useState("");
+  const [category, setCategory] = useState<Category | null>(null);
+  const [transactions, setTransactions] = useState<CategoryTransaction[]>([]);
+  const [currency, setCurrency] = useState("NPR");
+  const [period, setPeriod] = useState<AppliedPeriod>(currentMonthPeriod);
+  const [loadedPeriod, setLoadedPeriod] = useState<AppliedPeriod | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  if (!category) notFound();
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setBackHref(getReturnTo("/categories"));
+      setCurrentRoute(getCurrentRoute());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
-  return <CategoryEditor category={category} />;
+  useEffect(() => {
+    let active = true;
+    void params.then(({ id }) => {
+      if (active) setCategoryId(id);
+    });
+    return () => {
+      active = false;
+    };
+  }, [params]);
+
+  useEffect(() => {
+    if (!categoryId) return;
+    let active = true;
+    const query = new URLSearchParams({ categoryId });
+    if (period.from && period.to) {
+      query.set("from", dateKey(period.from));
+      query.set("to", dateKey(period.to));
+    }
+    void Promise.all([
+      authenticatedFetch("/api/categories"),
+      authenticatedFetch(`/api/transactions?${query.toString()}`),
+      authenticatedFetch("/api/auth/me"),
+    ])
+      .then(
+        async ([categoryResponse, transactionResponse, profileResponse]) => {
+          if (!categoryResponse.ok || !transactionResponse.ok)
+            throw new Error(
+              transactionResponse.status === 401
+                ? "Please sign in to view category activity."
+                : "Could not load category activity.",
+            );
+          const categoryResult = (await categoryResponse.json()) as {
+            categories: Category[];
+          };
+          const transactionResult = (await transactionResponse.json()) as {
+            transactions: CategoryTransaction[];
+          };
+          const profileResult = profileResponse.ok
+            ? ((await profileResponse.json()) as {
+                user?: { currency?: string };
+              })
+            : null;
+          const selectedCategory = categoryResult.categories.find(
+            (item) => item.id === categoryId,
+          );
+          if (!selectedCategory) throw new Error("Category not found.");
+          if (active) {
+            setCategory(selectedCategory);
+            setTransactions(transactionResult.transactions);
+            setCurrency(profileResult?.user?.currency ?? "NPR");
+            setLoadedPeriod(period);
+          }
+        },
+      )
+      .catch((reason: unknown) => {
+        if (active)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Could not load category activity.",
+          );
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [categoryId, period]);
+
+  const CategoryIcon = category
+    ? (iconMap[category.icon as keyof typeof iconMap] ?? House)
+    : House;
+  const categoryAccent = category?.color ?? "#e3eee9";
+  const total = useMemo(
+    () =>
+      transactions.reduce((sum, transaction) => sum + transaction.amount, 0),
+    [transactions],
+  );
+  const isLoadingActivity = loadedPeriod !== period;
+
+  if (isLoading) return <PageDataSkeleton label="Loading category" />;
+  if (!category)
+    return (
+      <main className="min-h-dvh bg-background px-4 py-8">
+        <div
+          role="alert"
+          className="mx-auto max-w-[720px] rounded-[14px] border border-expense/25 bg-expense-soft p-4 text-sm text-expense"
+        >
+          {error || "Category not found."}
+        </div>
+      </main>
+    );
+
+  return (
+    <main className="page-route-enter min-h-dvh bg-background">
+      <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
+        <div
+          className="-mx-4 sm:-mx-5"
+          style={{ backgroundColor: categoryAccent }}
+        >
+          <StickyPageHeader className="w-full bg-transparent px-4 pb-3 sm:px-5">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <Link
+                  href={backHref}
+                  aria-label="Back"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  <ArrowLeft aria-hidden="true" className="size-5" />
+                </Link>
+                <div className="min-w-0">
+                  <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">
+                    {category.name}
+                  </h1>
+                  <p className="mt-0.5 truncate text-xs font-medium capitalize text-muted-foreground">
+                    {category.type} category
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={withReturnTo(`/categories/${category.id}/edit`, currentRoute)}
+                aria-label="Edit category"
+                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              >
+                <Edit3 aria-hidden="true" className="size-[18px]" />
+              </Link>
+            </div>
+          </StickyPageHeader>
+          <section
+            aria-label="Category activity summary"
+            className="border-y border-black/10 px-4 py-8 text-center text-foreground sm:px-5"
+          >
+            <div
+              className="mx-auto flex size-12 items-center justify-center rounded-[14px] text-primary"
+              style={{ backgroundColor: "rgba(255,255,255,0.58)" }}
+            >
+              <CategoryIcon aria-hidden="true" className="size-6" />
+            </div>
+            <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Category activity
+            </p>
+            <p className="mt-1 text-[46px] font-bold leading-none tracking-[-0.06em] tabular-nums text-foreground">
+              {formatAmount(total)}
+            </p>
+            <p className="mt-2 text-sm font-semibold uppercase tracking-[0.1em] text-primary">
+              {currency}
+            </p>
+          </section>
+        </div>
+        <section
+          aria-labelledby="category-transactions-heading"
+          className="mt-8"
+        >
+          <div className="flex items-end justify-between gap-3 px-1">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">
+                {period.label}
+              </p>
+              <h2
+                id="category-transactions-heading"
+                className="mt-1 text-[20px] font-semibold tracking-[-0.03em]"
+              >
+                Transactions
+              </h2>
+            </div>
+            <DatePicker
+              initialMode="month"
+              initialLabel={period.label}
+              onApply={setPeriod}
+            />
+          </div>
+          {error ? (
+            <div
+              role="alert"
+              className="mt-4 rounded-[14px] border border-expense/25 bg-expense-soft p-4 text-sm text-expense"
+            >
+              {error}
+            </div>
+          ) : isLoadingActivity ? (
+            <ListDataSkeleton rows={3} />
+          ) : transactions.length === 0 ? (
+            <div className="mt-4 rounded-[14px] border border-dashed border-border-strong bg-card p-8 text-center">
+              <p className="text-sm font-semibold">
+                No transactions {period.mode === "month" ? "this month" : "yet"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Transactions assigned to this category will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-hidden rounded-[14px] border border-border bg-card">
+              {transactions.map((transaction, index) => {
+                const meta = transactionMeta[transaction.type];
+                const Icon = meta.icon;
+                return (
+                  <div
+                    key={transaction.id}
+                    className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-border" : ""}`}
+                  >
+                    <span
+                      className={`flex size-10 shrink-0 items-center justify-center rounded-[11px] ${meta.iconClassName}`}
+                    >
+                      <Icon aria-hidden="true" className="size-[18px]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="truncate text-[14px] font-semibold">
+                          {transaction.notes || meta.label}
+                        </p>
+                        <p
+                          className={`shrink-0 text-[14px] font-semibold tabular-nums ${meta.amountClassName}`}
+                        >
+                          {meta.prefix}
+                          {formatAmount(transaction.amount)} {currency}
+                        </p>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>{meta.label}</span>
+                        <span className="shrink-0">
+                          {formatDate(transaction.date)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  );
 }

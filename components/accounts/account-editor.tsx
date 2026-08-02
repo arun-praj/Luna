@@ -2,13 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
   CircleDollarSign,
+  ChevronDown,
   ImagePlus,
   Landmark,
+  LoaderCircle,
   Palette,
+  Search,
   Smartphone,
   Trash2,
   WalletCards,
@@ -16,14 +20,22 @@ import {
 } from "lucide-react";
 
 import { accountImages } from "@/lib/account-images";
+import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
+import { authenticatedFetch } from "@/lib/auth-client";
+import { navigateWithRouteExit } from "@/lib/route-motion";
+import { getReturnTo } from "@/lib/navigation";
 
 const accountTypes = [
-  { value: "bank", label: "Bank", icon: Landmark },
-  { value: "wallet", label: "Wallet", icon: Smartphone },
-  { value: "savings", label: "Savings", icon: WalletCards },
+  { value: "checking", label: "Bank", icon: Landmark },
+  { value: "general", label: "Wallet", icon: Smartphone },
+  { value: "credit_card", label: "Card", icon: WalletCards },
   { value: "cash", label: "Cash", icon: CircleDollarSign },
+  { value: "savings", label: "Savings", icon: Landmark },
+  { value: "investment", label: "Invest", icon: Palette },
+  { value: "loan", label: "Loan", icon: WalletCards },
+  { value: "other", label: "Other", icon: Smartphone },
 ] as const;
 
 const colorOptions = [
@@ -96,27 +108,73 @@ const imageOptions = [
   { name: "Everyday", src: accountImages.cash },
 ];
 
+const currencyCodes = typeof Intl.supportedValuesOf === "function"
+  ? Intl.supportedValuesOf("currency")
+  : ["NPR", "USD", "EUR", "INR"];
+
+function currencySymbol(code: string) {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: code,
+      currencyDisplay: "narrowSymbol",
+    }).formatToParts(0).find((part) => part.type === "currency")?.value ?? code;
+  } catch {
+    return code;
+  }
+}
+
+function currencyName(code: string) {
+  try {
+    return new Intl.DisplayNames(undefined, { type: "currency" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+function presetColorHex(className: string) {
+  const match = className.match(/bg-\[#([0-9a-f]+)\]/i);
+  return match ? `#${match[1]}` : null;
+}
+
 export type AccountEditorData = {
   id: string;
   name: string;
-  type: string;
-  balance: string;
-  includeInTotal: boolean;
-  colorIndex: number;
-  imageIndex: number;
+  type: "checking" | "cash" | "credit_card" | "general" | "savings" | "investment" | "loan" | "other";
+  currency?: string;
+  currentBalance?: number;
+  balance?: string;
+  includeInTotalBalance?: boolean;
+  includeInTotal?: boolean;
+  allowNegativeBalance?: boolean;
+  backgroundColor?: string | null;
+  icon?: string | null;
+  colorIndex?: number;
+  imageIndex?: number;
 };
 
 export function AccountEditor({
   account,
+  accountId,
 }: {
   account?: AccountEditorData;
+  accountId?: string;
 }) {
-  const isNew = !account;
+  const router = useRouter();
+  const isNew = !account && !accountId;
+  const [backHref, setBackHref] = useState("/accounts");
+  const [loadedAccount, setLoadedAccount] = useState(account);
   const [name, setName] = useState(account?.name ?? "");
-  const [type, setType] = useState(account?.type ?? "");
-  const [balance, setBalance] = useState(account?.balance ?? "0");
+  const [type, setType] = useState<AccountEditorData["type"] | "">(account?.type ?? "");
+  const [currency, setCurrency] = useState(account?.currency ?? "NPR");
+  const [isCurrencyOpen, setIsCurrencyOpen] = useState(false);
+  const [currencySearch, setCurrencySearch] = useState("");
+  const [balance, setBalance] = useState(account?.balance ?? String(account?.currentBalance ?? 0));
   const [includeInTotal, setIncludeInTotal] = useState(
-    account?.includeInTotal ?? true,
+    account?.includeInTotalBalance ?? account?.includeInTotal ?? true,
+  );
+  const [allowNegativeBalance, setAllowNegativeBalance] = useState(
+    account?.allowNegativeBalance ?? false,
   );
   const [balanceEditorOpen, setBalanceEditorOpen] = useState(false);
   const [selectedColor, setSelectedColor] = useState<number | "custom">(
@@ -127,49 +185,114 @@ export function AccountEditor({
     account?.imageIndex ?? 0,
   );
   const [customImage, setCustomImage] = useState<string | null>(null);
+  const [customImageFile, setCustomImageFile] = useState<File | null>(null);
   const [imageError, setImageError] = useState("");
+  const [imageStatus, setImageStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [isLoading, setIsLoading] = useState(Boolean(accountId && !account));
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState("");
 
-  const selectedColorOption =
-    selectedColor === "custom" ? null : colorOptions[selectedColor];
-  const selectedImageSource =
-    selectedImage === "custom" && customImage
-      ? customImage
-      : imageOptions[selectedImage === "custom" ? 0 : selectedImage].src;
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setBackHref(getReturnTo("/accounts"));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
-  const uploadImage = (file: File | undefined) => {
+  useEffect(() => {
+    if (!accountId || account) return;
+    void authenticatedFetch(`/api/accounts/${accountId}`).then(async (response) => {
+      if (!response.ok) throw new Error("Account not found.");
+      const result = await response.json() as { account: AccountEditorData };
+      const loaded = result.account;
+      setLoadedAccount(loaded); setName(loaded.name); setType(loaded.type); setCurrency(loaded.currency ?? "NPR"); setBalance(String(loaded.currentBalance ?? 0)); setIncludeInTotal(loaded.includeInTotalBalance ?? true); setAllowNegativeBalance(loaded.allowNegativeBalance ?? false);
+      const imageIndex = loaded.icon ? imageOptions.findIndex((option) => option.name === loaded.icon) : -1; setSelectedImage(imageIndex >= 0 ? imageIndex : loaded.icon?.startsWith("/api/uploads/account-images/") ? "custom" : 0); if (loaded.icon?.startsWith("/api/uploads/account-images/")) { setCustomImage(loaded.icon); setImageStatus("success"); }
+      const normalizedColor = getAccountBackgroundColor(loaded.backgroundColor, loaded.type); const colorIndex = normalizedColor ? colorOptions.findIndex((option) => option.cardClassName.includes(normalizedColor)) : -1; if (colorIndex >= 0) setSelectedColor(colorIndex); else if (loaded.backgroundColor) { setCustomColor(loaded.backgroundColor); setSelectedColor("custom"); }
+    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load account.")).finally(() => setIsLoading(false));
+  }, [account, accountId]);
+
+  async function saveAccount() {
+    if (!canSave) return;
+    setIsSaving(true); setError("");
+    if (imageStatus === "uploading") { setError("Wait for the image upload to finish."); setIsSaving(false); return; }
+    let imageValue = selectedImage === "custom" ? customImage ?? "Everyday" : imageOptions[selectedImage].name;
+    if (customImageFile) {
+      const formData = new FormData(); formData.set("file", customImageFile);
+      const uploadResponse = await authenticatedFetch("/api/uploads/account-images", { method: "POST", body: formData }).catch(() => null);
+      if (!uploadResponse?.ok) { const result = await uploadResponse?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not upload account image."); setIsSaving(false); return; }
+      const uploadResult = await uploadResponse.json() as { url: string }; imageValue = uploadResult.url;
+    }
+    const backgroundColor = selectedColor === "custom" ? customColor : presetColorHex(colorOptions[selectedColor].cardClassName);
+    const payload = { name: name.trim(), type, currency: currency.trim().toUpperCase(), openingBalance: Number(balance), includeInTotalBalance: includeInTotal, allowNegativeBalance, backgroundColor, icon: imageValue };
+    const id = loadedAccount?.id ?? accountId;
+    const response = await authenticatedFetch(isNew ? "/api/accounts" : `/api/accounts/${id}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+    if (response?.ok) navigateWithRouteExit(() => router.push(backHref)); else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not save account."); }
+    setIsSaving(false);
+  }
+
+  async function deleteAccount() {
+    const id = loadedAccount?.id ?? accountId;
+    if (!id || !window.confirm("Delete this account? Transactions must be reassigned first.")) return;
+    setIsDeleting(true); setError("");
+    const response = await authenticatedFetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => null);
+    if (response?.ok) navigateWithRouteExit(() => router.push(backHref)); else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not delete account."); }
+    setIsDeleting(false);
+  }
+
+  const uploadImage = async (file: File | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setImageError("Choose a valid image file.");
+    if (!(new Set(["image/jpeg", "image/png", "image/webp", "image/gif"])).has(file.type)) {
+      setImageError("Use a JPG, PNG, WebP, or GIF image."); setImageStatus("error");
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setImageError("The image must be smaller than 5 MB.");
+      setImageError("The image must be smaller than 5 MB."); setImageStatus("error");
       return;
     }
 
     const reader = new FileReader();
     reader.onload = () => {
       setCustomImage(String(reader.result));
+      setCustomImageFile(file);
       setSelectedImage("custom");
       setImageError("");
+      setImageStatus("uploading");
     };
     reader.readAsDataURL(file);
+    const formData = new FormData(); formData.set("file", file);
+    const response = await authenticatedFetch("/api/uploads/account-images", { method: "POST", body: formData }).catch(() => null);
+    if (!response?.ok) { const result = await response?.json().catch(() => null) as { error?: string } | null; setImageError(result?.error ?? "Upload failed. Try again."); setImageStatus("error"); return; }
+    const result = await response.json() as { url: string };
+    setCustomImage(result.url); setCustomImageFile(null); setImageStatus("success"); setImageError("");
   };
 
+  const negativeBalanceError = Number(balance) < 0 && !allowNegativeBalance
+    ? "Negative values are not allowed unless you enable Allow negative balance."
+    : "";
+
   const canSave =
-    Boolean(name.trim()) &&
+    name.trim().length >= 1 && name.trim().length <= 100 &&
     Boolean(type) &&
+    /^[A-Za-z]{3}$/.test(currency.trim()) &&
     balance.trim() !== "" &&
-    Number(balance) >= 0;
+    Number.isFinite(Number(balance)) &&
+    !negativeBalanceError;
 
   const displayBalance = formatMoney(balance);
+  const selectedCurrency = currency.toUpperCase();
+  const filteredCurrencies = currencyCodes.filter((code) =>
+    `${code} ${currencyName(code)} ${currencySymbol(code)}`
+      .toLowerCase()
+      .includes(currencySearch.toLowerCase()),
+  );
 
   return (
-    <main className="min-h-dvh overflow-x-hidden animate-in fade-in-0 slide-in-from-right-4 bg-background duration-300 motion-reduce:animate-none">
+    <main className="page-route-enter min-h-dvh overflow-x-clip bg-background">
       <div className="mx-auto w-full max-w-[560px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 grid grid-cols-[44px_1fr_44px] items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
           <Link
-            href="/accounts"
+            href={backHref}
             aria-label={isNew ? "Cancel new account" : "Cancel editing account"}
             className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
@@ -184,56 +307,26 @@ export function AccountEditor({
           <button
             type="button"
             aria-label={isNew ? "Add account" : "Save account changes"}
-            disabled={!canSave}
+            onClick={() => void saveAccount()}
+            disabled={!canSave || isSaving || isLoading || imageStatus === "uploading"}
             className="flex size-11 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"
           >
             <Check aria-hidden="true" className="size-5" />
           </button>
         </StickyPageHeader>
 
-        <section
-          aria-label="Account preview"
-          className={`mt-8 overflow-hidden rounded-[16px] border ${
-            selectedColorOption?.cardClassName ?? ""
-          }`}
-          style={
-            selectedColor === "custom"
-              ? {
-                  backgroundColor: customColor,
-                  borderColor: `color-mix(in srgb, ${customColor}, #17201d 16%)`,
-                }
-              : undefined
-          }
-        >
-          <div className="flex min-h-[108px] items-center gap-3 px-4 py-4 min-[390px]:min-h-[116px] min-[390px]:gap-4 min-[390px]:px-5 min-[390px]:py-5">
-            <Image
-              src={selectedImageSource}
-              alt=""
-              width={52}
-              height={52}
-              className="size-12 shrink-0 rounded-[13px] border border-white/75 bg-white/45 min-[390px]:size-[52px]"
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[17px] font-semibold">
-                {name.trim() || "Your account"}
-              </p>
-              <p className="mt-1 text-xs font-medium capitalize text-muted-foreground">
-                {type ? `${type} account` : "Choose an account type"}
-              </p>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="max-w-[108px] truncate text-[18px] font-semibold tracking-[-0.03em] tabular-nums min-[390px]:max-w-none min-[390px]:text-[20px]">
-                {displayBalance}
-              </p>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                NPR
-              </p>
-            </div>
-          </div>
-          <div className="border-t border-current/10 bg-white/40 px-4 py-2.5 text-xs font-medium text-muted-foreground min-[390px]:px-5">
-            {includeInTotal ? "Included in total balance" : "Excluded from total balance"}
-          </div>
-        </section>
+        {error ? <p role="alert" className="mt-4 rounded-[10px] border border-expense/25 bg-expense-soft px-3 py-2 text-sm text-expense">{error}</p> : null}
+        {isLoading ? <div className="mt-8 flex min-h-60 items-center justify-center text-sm text-muted-foreground">Loading account…</div> : null}
+
+        {!isLoading ? <section aria-labelledby="account-balance-heading" className="mt-6 px-1 py-4 text-center sm:py-6">
+          <p id="account-balance-heading" className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/75">Current balance</p>
+          <button type="button" onClick={() => setBalanceEditorOpen(true)} className="mt-3 block w-full rounded-[12px] outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+            <span className="block text-[48px] font-semibold leading-none tracking-[-0.06em] tabular-nums text-foreground sm:text-[58px]">{displayBalance}</span>
+            <span className="mt-2 block text-sm font-semibold uppercase tracking-[0.12em] text-primary">{currency.toUpperCase()}</span>
+          </button>
+          <p className="mt-4 text-xs text-muted-foreground">Tap the balance to edit</p>
+          {negativeBalanceError ? <p role="alert" className="mx-auto mt-3 max-w-[360px] text-xs font-medium text-expense">{negativeBalanceError}</p> : null}
+        </section> : null}
 
         <section className="mt-5 space-y-6 rounded-[16px] border border-border bg-card p-4 min-[390px]:p-5">
           <div>
@@ -246,8 +339,67 @@ export function AccountEditor({
               onChange={(event) => setName(event.target.value)}
               placeholder="e.g. Salary account"
               maxLength={36}
+              aria-invalid={name.trim().length === 0}
               className="mt-2 h-12 w-full rounded-[10px] border border-input bg-background px-4 text-[15px] outline-none transition-colors placeholder:text-foreground-subtle focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
+          </div>
+
+          <div>
+            <label htmlFor="account-currency" className="text-sm font-semibold">Currency</label>
+            <div className="relative mt-2">
+              <button
+                id="account-currency"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={isCurrencyOpen}
+                onClick={() => setIsCurrencyOpen((open) => !open)}
+                className="flex h-12 w-full items-center gap-3 rounded-[10px] border border-input bg-background px-3 text-left outline-none transition-colors hover:border-border-strong focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary">
+                  {currencySymbol(selectedCurrency)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{currencyName(selectedCurrency)}</span>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{selectedCurrency}</span>
+                </span>
+                <ChevronDown aria-hidden="true" className={`size-4 shrink-0 text-muted-foreground transition-transform ${isCurrencyOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {isCurrencyOpen ? (
+                <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-30 overflow-hidden rounded-[12px] border border-border bg-background p-2 shadow-[0_12px_30px_rgb(23_32_29_/_0.14)]">
+                  <div className="flex items-center gap-2 rounded-[9px] border border-border bg-card px-3">
+                    <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <input
+                      aria-label="Search currencies"
+                      autoFocus
+                      value={currencySearch}
+                      onChange={(event) => setCurrencySearch(event.target.value)}
+                      placeholder="Search currency or code"
+                      className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-foreground-subtle"
+                    />
+                  </div>
+                  <div role="listbox" aria-label="World currencies" className="mt-2 max-h-64 overflow-y-auto">
+                    {filteredCurrencies.length === 0 ? (
+                      <p className="px-3 py-5 text-center text-xs text-muted-foreground">No currencies found.</p>
+                    ) : filteredCurrencies.map((code) => (
+                      <button
+                        key={code}
+                        type="button"
+                        role="option"
+                        aria-selected={selectedCurrency === code}
+                        onClick={() => { setCurrency(code); setIsCurrencyOpen(false); setCurrencySearch(""); }}
+                        className={`flex min-h-11 w-full items-center gap-3 rounded-[9px] px-2 text-left transition-colors hover:bg-surface-subtle focus-visible:bg-primary-soft focus-visible:outline-none ${selectedCurrency === code ? "bg-primary-soft" : ""}`}
+                      >
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-subtle text-xs font-semibold text-primary">{currencySymbol(code)}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{currencyName(code)}</span><span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{code}</span></span>
+                        {selectedCurrency === code ? <Check aria-hidden="true" className="size-4 shrink-0 text-primary" /> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Choose the currency used by this account.</p>
           </div>
 
           <fieldset>
@@ -277,28 +429,6 @@ export function AccountEditor({
             </div>
           </fieldset>
 
-          <div>
-            <p className="text-sm font-semibold">
-              Starting balance
-            </p>
-            <button
-              type="button"
-              aria-label="Edit starting balance"
-              onClick={() => setBalanceEditorOpen(true)}
-              className="relative mt-2 flex min-h-12 w-full items-center rounded-[10px] border border-input bg-background px-4 outline-none transition-colors hover:border-primary/40 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
-            >
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
-                NPR
-              </span>
-              <span className="ml-auto pl-12 text-right text-[16px] font-semibold tabular-nums">
-                {displayBalance}
-              </span>
-            </button>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Tap to open the numpad and calculator
-            </p>
-          </div>
-
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold">Include in total balance</p>
@@ -318,6 +448,31 @@ export function AccountEditor({
               <span
                 className={`absolute left-0 top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${
                   includeInTotal ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-start justify-between gap-4 border-t border-border pt-5">
+            <div>
+              <p className="text-sm font-semibold">Allow negative balance</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Negative values are not allowed unless you enable this.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label="Allow negative balance"
+              aria-checked={allowNegativeBalance}
+              onClick={() => { setAllowNegativeBalance((current) => !current); setError(""); }}
+              className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+                allowNegativeBalance ? "bg-primary" : "bg-border-strong"
+              }`}
+            >
+              <span
+                className={`absolute left-0 top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${
+                  allowNegativeBalance ? "translate-x-6" : "translate-x-1"
                 }`}
               />
             </button>
@@ -350,6 +505,7 @@ export function AccountEditor({
                   />
                 </button>
               ))}
+              {customImage ? <button type="button" aria-label="Custom uploaded image" aria-pressed={selectedImage === "custom"} onClick={() => setSelectedImage("custom")} className={`rounded-[12px] border p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selectedImage === "custom" ? "border-primary bg-primary-soft" : "border-border bg-background"}`}><Image src={customImage} alt="" width={44} height={44} className="size-11 rounded-[9px] object-cover" /></button> : null}
               <label
                 className={`flex h-[54px] min-w-[104px] cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-dashed px-3 text-xs font-semibold transition-colors focus-within:ring-2 focus-within:ring-primary/35 ${
                   selectedImage === "custom"
@@ -364,16 +520,15 @@ export function AccountEditor({
                   className="sr-only"
                   onChange={(event) => uploadImage(event.target.files?.[0])}
                 />
-                <ImagePlus aria-hidden="true" className="size-5" />
-                Upload
+                {imageStatus === "uploading" ? <LoaderCircle aria-hidden="true" className="size-5 animate-spin" /> : <ImagePlus aria-hidden="true" className="size-5" />}
+                {imageStatus === "uploading" ? "Uploading…" : "Upload"}
               </label>
             </div>
             <p
-              className={`mt-2 text-xs ${
-                imageError ? "text-expense" : "text-muted-foreground"
-              }`}
+              aria-live="polite"
+              className={`mt-2 text-xs ${imageError ? "text-expense" : imageStatus === "success" ? "text-income" : "text-muted-foreground"}`}
             >
-              {imageError || "Upload a custom image up to 5 MB."}
+              {imageError || (imageStatus === "success" ? "Image uploaded successfully." : "Upload a custom image up to 5 MB.")}
             </p>
           </fieldset>
 
@@ -435,13 +590,15 @@ export function AccountEditor({
           <section className="mt-8 border-t border-border pt-6">
             <button
               type="button"
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[11px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense transition-colors hover:border-expense/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-expense/30"
+              onClick={() => void deleteAccount()}
+              disabled={isDeleting || isLoading}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[11px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense transition-colors hover:border-expense/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-expense/30 disabled:opacity-60"
             >
               <Trash2 aria-hidden="true" className="size-[18px]" />
-              Delete account
+              {isDeleting ? "Deleting…" : "Delete account"}
             </button>
             <p className="mt-2 text-center text-xs leading-5 text-muted-foreground">
-              Transactions in this account will need to be reassigned.
+              Transactions in this account will be assigned to another account.
             </p>
           </section>
         ) : null}

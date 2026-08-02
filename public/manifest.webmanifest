@@ -1,0 +1,28 @@
+{
+  "name": "Luna",
+  "short_name": "Luna",
+  "id": "/",
+  "lang": "en",
+  "dir": "ltr",
+  "description": "A clear, calm view of your balance, cash flow, and recent activity.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f7f8f6",
+  "theme_color": "#356b68",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

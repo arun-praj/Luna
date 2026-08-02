@@ -1,0 +1,1 @@
+ALTER TABLE `accounts` ADD `allow_negative_balance` integer DEFAULT false NOT NULL;

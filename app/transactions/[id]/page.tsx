@@ -1,14 +1,5 @@
-import { notFound } from "next/navigation";
-
 import { TransactionDetail } from "@/components/transactions/transaction-detail";
-import { getTransaction, transactions } from "@/lib/transactions";
-
-export function generateStaticParams() {
-  return [
-    { id: "new" },
-    ...transactions.map((transaction) => ({ id: transaction.id })),
-  ];
-}
+import type { Transaction } from "@/lib/transactions";
 
 export default async function TransactionPage({
   params,
@@ -20,33 +11,29 @@ export default async function TransactionPage({
   const { id } = await params;
   const { type } = await searchParams;
   const initialKind =
-    type === "expense" || type === "income" || type === "transfer"
+    type === "expense" || type === "income" || type === "savings" || type === "transfer" || type === "adjust_balance"
       ? type
       : undefined;
-  const transaction =
-    id === "new"
-      ? {
-          id: "new",
-          title: "New transaction",
-          description: "",
-          category: "",
-          amount: 0,
-          kind: "expense" as const,
-          date: "2026-07-30",
-          dateLabel: "Thursday, July 30",
-          account: "",
-          icon: "receipt" as const,
-          iconClassName: "bg-primary-soft text-primary",
-        }
-      : getTransaction(id);
-
-  if (!transaction) notFound();
+  const transaction = {
+    id,
+    title: "",
+    description: "",
+    category: "",
+    amount: 0,
+    kind: (initialKind ?? "expense") as Transaction["kind"],
+    date: new Date().toISOString().slice(0, 10),
+    dateLabel: "",
+    account: "",
+    icon: "receipt" as const,
+    iconClassName: "bg-primary-soft text-primary",
+  };
 
   return (
     <TransactionDetail
       transaction={transaction}
       isNew={id === "new"}
-      initialKind={initialKind}
+      initialKind={initialKind ?? "expense"}
+      guidedNew={id === "new" && (initialKind === undefined || initialKind === "expense" || initialKind === "income")}
     />
   );
 }

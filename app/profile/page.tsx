@@ -1,118 +1,626 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Bell,
   ChevronRight,
-  CircleDollarSign,
+  Check,
+  Landmark,
+  LockKeyhole,
   LogOut,
-  ShieldCheck,
-  UserRound,
+  Pencil,
+  X,
+  Tags,
+  WalletCards,
 } from "lucide-react";
 
-import { arunAvatar } from "@/lib/avatar";
+import { AVATAR_PRESETS, avatarForPreset } from "@/lib/avatar";
+import { authenticatedFetch, loginPathFor, signOut } from "@/lib/auth-client";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { NotificationSettingsCard } from "@/components/notifications/notification-settings";
+import { SecuritySettingsCard } from "@/components/profile/security-settings";
+import { PrivacySettingsCard } from "@/components/profile/privacy-settings";
+import { PageDataSkeleton } from "@/components/ui/data-skeleton";
+import { withReturnTo } from "@/lib/navigation";
+import { AppTutorial } from "@/components/tutorial/app-tutorial";
 
-const profileSections = [
-  {
-    label: "Personal information",
-    description: "Name, email, and profile image",
-    icon: UserRound,
-  },
-  {
-    label: "Currency and region",
-    description: "NPR · Nepal",
-    icon: CircleDollarSign,
-  },
-  {
-    label: "Notifications",
-    description: "Budget alerts and reminders",
-    icon: Bell,
-  },
-  {
-    label: "Security",
-    description: "Password and connected devices",
-    icon: ShieldCheck,
-  },
-];
+type ProfileUser = {
+  id: string;
+  name: string;
+  email: string;
+  currency: string;
+  lastLoginAt: string | null;
+  avatarPreset: string;
+  emailVerifiedAt: string | null;
+};
+
+const CURRENCY_CODES =
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("currency")
+    : ["NPR", "USD", "EUR", "INR"];
+
+function currencySymbol(code: string) {
+  try {
+    return (
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: code,
+        currencyDisplay: "narrowSymbol",
+      })
+        .formatToParts(0)
+        .find((part) => part.type === "currency")?.value ?? code
+    );
+  } catch {
+    return code;
+  }
+}
+
+function currencyName(code: string) {
+  try {
+    return (
+      new Intl.DisplayNames(undefined, { type: "currency" }).of(code) ?? code
+    );
+  } catch {
+    return code;
+  }
+}
+
+function formatLocalDateTime(value: string | null) {
+  if (!value) return "Not available";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
 
 export default function ProfilePage() {
+  const router = useRouter();
+  const [user, setUser] = useState<ProfileUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
+  const [isAvatarPickerClosing, setIsAvatarPickerClosing] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [nameMessage, setNameMessage] = useState("");
+  const [isCurrencyPickerOpen, setIsCurrencyPickerOpen] = useState(false);
+  const [isCurrencyPickerClosing, setIsCurrencyPickerClosing] = useState(false);
+  const [currencySearch, setCurrencySearch] = useState("");
+  const [isSavingCurrency, setIsSavingCurrency] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const avatarCloseTimer = useRef<number | null>(null);
+  const currencyCloseTimer = useRef<number | null>(null);
+  const routeCloseTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void authenticatedFetch("/api/auth/me")
+      .then(async (response) => {
+        if (!response.ok) {
+          router.replace(loginPathFor("/profile"));
+          return;
+        }
+        const result = (await response.json()) as { user: ProfileUser };
+        if (active) setUser(result.user);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarCloseTimer.current !== null) {
+        window.clearTimeout(avatarCloseTimer.current);
+      }
+      if (currencyCloseTimer.current !== null) {
+        window.clearTimeout(currencyCloseTimer.current);
+      }
+      if (routeCloseTimer.current !== null) {
+        window.clearTimeout(routeCloseTimer.current);
+      }
+    };
+  }, []);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+    await signOut();
+    router.replace("/login");
+  }
+
+  async function handleAvatarSelect(avatarPreset: string) {
+    setIsSavingAvatar(true);
+    const response = await authenticatedFetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatarPreset }),
+    });
+    if (response.ok) {
+      const result = (await response.json()) as { user: ProfileUser };
+      setUser(result.user);
+      window.localStorage.setItem(
+        "cocomelon.avatar-preset",
+        result.user.avatarPreset,
+      );
+      closeAvatarPicker();
+    }
+    setIsSavingAvatar(false);
+  }
+
+  function openAvatarPicker() {
+    if (avatarCloseTimer.current !== null) {
+      window.clearTimeout(avatarCloseTimer.current);
+      avatarCloseTimer.current = null;
+    }
+    setIsAvatarPickerClosing(false);
+    setIsAvatarPickerOpen(true);
+  }
+
+  function closeAvatarPicker() {
+    if (!isAvatarPickerOpen || isAvatarPickerClosing) return;
+    if (avatarCloseTimer.current !== null) {
+      window.clearTimeout(avatarCloseTimer.current);
+    }
+    setIsAvatarPickerClosing(true);
+    avatarCloseTimer.current = window.setTimeout(() => {
+      setIsAvatarPickerOpen(false);
+      setIsAvatarPickerClosing(false);
+      avatarCloseTimer.current = null;
+    }, 320);
+  }
+
+  function startEditingName() {
+    if (!user) return;
+    setEditedName(user.name);
+    setNameMessage("");
+    setIsEditingName(true);
+  }
+
+  function cancelEditingName() {
+    setIsEditingName(false);
+    setNameMessage("");
+  }
+
+  async function saveName() {
+    setIsSavingName(true);
+    setNameMessage("");
+    const response = await authenticatedFetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editedName }),
+    });
+    if (response.ok) {
+      const result = (await response.json()) as { user: ProfileUser };
+      setUser(result.user);
+      setIsEditingName(false);
+      setNameMessage("Saved");
+    } else {
+      setNameMessage("Could not save name");
+    }
+    setIsSavingName(false);
+  }
+
+  async function saveCurrency(currency: string) {
+    setIsSavingCurrency(true);
+    const response = await authenticatedFetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currency }),
+    });
+    if (response.ok) {
+      const result = (await response.json()) as { user: ProfileUser };
+      setUser(result.user);
+      closeCurrencyPicker();
+      setCurrencySearch("");
+    }
+    setIsSavingCurrency(false);
+  }
+
+  function openCurrencyPicker() {
+    if (currencyCloseTimer.current !== null) {
+      window.clearTimeout(currencyCloseTimer.current);
+      currencyCloseTimer.current = null;
+    }
+    setIsCurrencyPickerClosing(false);
+    setIsCurrencyPickerOpen(true);
+  }
+
+  function closeCurrencyPicker() {
+    if (!isCurrencyPickerOpen || isCurrencyPickerClosing) return;
+    if (currencyCloseTimer.current !== null) {
+      window.clearTimeout(currencyCloseTimer.current);
+    }
+    setIsCurrencyPickerClosing(true);
+    currencyCloseTimer.current = window.setTimeout(() => {
+      setIsCurrencyPickerOpen(false);
+      setIsCurrencyPickerClosing(false);
+      currencyCloseTimer.current = null;
+    }, 320);
+  }
+
+  function navigateBack() {
+    if (isLeaving) return;
+    document.body.dataset.routeTransition = "return";
+    setIsLeaving(true);
+    routeCloseTimer.current = window.setTimeout(() => {
+      router.push("/");
+      routeCloseTimer.current = null;
+    }, 300);
+  }
+
+  if (isLoading || !user) {
+    return <PageDataSkeleton label="Loading profile" />;
+  }
+
   return (
-    <main className="min-h-screen animate-in fade-in-0 slide-in-from-right-4 duration-300 motion-reduce:animate-none bg-background">
+    <main
+      className={`min-h-screen bg-background ${isLeaving ? "profile-route-exit" : "profile-route-enter"}`}
+    >
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={navigateBack}
             aria-label="Back to home"
             className="flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
             <ArrowLeft aria-hidden="true" className="size-5" />
-          </Link>
+          </button>
           <h1 className="text-[24px] font-semibold tracking-[-0.035em]">
             Profile
           </h1>
         </StickyPageHeader>
 
-        <section className="mt-10 flex flex-col items-center text-center">
-          <Image
-            src={arunAvatar}
-            alt="Arun's Fun Emoji avatar"
-            width={88}
-            height={88}
-            unoptimized
-            priority
-            className="size-[88px] rounded-[18px] border border-border bg-primary-soft"
-          />
+        <section data-tour="profile-page" className="mt-10 flex flex-col items-center text-center">
+          <div className="relative">
+            <Image
+              src={avatarForPreset(user.avatarPreset)}
+              alt={`${user.name}'s avatar`}
+              width={88}
+              height={88}
+              unoptimized
+              priority
+              className="size-[88px] rounded-[18px] border border-border bg-primary-soft"
+            />
+            <button
+              type="button"
+              aria-label="Choose profile icon"
+              onClick={openAvatarPicker}
+              className="absolute -bottom-2 -right-2 flex size-9 items-center justify-center rounded-full border-4 border-background bg-primary text-primary-foreground shadow-sm transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <Pencil aria-hidden="true" className="size-3.5" />
+            </button>
+          </div>
           <h2 className="mt-4 text-[22px] font-semibold tracking-[-0.03em]">
-            Arun
+            {user.name}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            arun@example.com
+          <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            {user.emailVerifiedAt ? (
+              <span
+                aria-label="Email verified"
+                title="Email verified"
+                className="inline-flex size-4 items-center justify-center rounded-full bg-income-soft text-income"
+              >
+                <Check aria-hidden="true" className="size-3" strokeWidth={2.5} />
+              </span>
+            ) : null}
+            {user.email}
           </p>
         </section>
 
-        <section aria-label="Profile settings" className="mt-10">
-          <div className="overflow-hidden rounded-[14px] border border-border bg-card">
-            {profileSections.map((item, index) => {
-              const Icon = item.icon;
+        <nav aria-label="Profile quick links" className="mt-6 overflow-hidden rounded-[14px] border border-border bg-card">
+          {[
+            { href: withReturnTo("/accounts", "/profile"), label: "Accounts", icon: WalletCards },
+            { href: withReturnTo("/categories", "/profile"), label: "Categories", icon: Tags },
+            { href: withReturnTo("/savings-instruments", "/profile"), label: "Saving Instruments", icon: Landmark },
+          ].map(({ href, label, icon: Icon }, index) => (
+            <Link key={href} href={href} className={`flex min-h-[64px] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${index > 0 ? "border-t border-border" : ""}`}>
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary"><Icon aria-hidden="true" className="size-[18px]" /></span>
+              <span className="min-w-0 flex-1 text-[15px] font-semibold">{label}</span>
+              <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-foreground-subtle" />
+            </Link>
+          ))}
+        </nav>
 
-              return (
+        {isAvatarPickerOpen ? (
+          <div
+            className={`fixed inset-0 z-50 grid place-items-center bg-foreground/30 px-4 ${isAvatarPickerClosing ? "profile-scrim-exit" : "profile-scrim-enter"}`}
+            role="presentation"
+            onMouseDown={closeAvatarPicker}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="avatar-picker-title"
+              className={`w-full max-w-[430px] rounded-[18px] border border-border bg-background p-5 shadow-xl ${isAvatarPickerClosing ? "profile-picker-exit" : "profile-picker-enter"}`}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2
+                    id="avatar-picker-title"
+                    className="text-lg font-semibold"
+                  >
+                    Choose your icon
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pick an icon that feels like you.
+                  </p>
+                </div>
                 <button
                   type="button"
-                  className={`flex min-h-[72px] w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${
-                    index > 0 ? "border-t border-border" : ""
-                  }`}
-                  key={item.label}
+                  onClick={closeAvatarPicker}
+                  className="text-sm font-semibold text-muted-foreground"
                 >
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
-                    <Icon aria-hidden="true" className="size-[18px]" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-semibold">
-                      {item.label}
-                    </span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                      {item.description}
-                    </span>
-                  </span>
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="size-5 shrink-0 text-foreground-subtle"
-                  />
+                  Close
                 </button>
-              );
-            })}
+              </div>
+              <div className="mt-5 grid grid-cols-5 gap-3">
+                {AVATAR_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    disabled={isSavingAvatar}
+                    onClick={() => void handleAvatarSelect(preset.id)}
+                    aria-label={`Choose ${preset.label} icon`}
+                    className={`rounded-[12px] p-1 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${user.avatarPreset === preset.id ? "bg-primary/15 ring-2 ring-primary" : ""}`}
+                  >
+                    <Image
+                      src={avatarForPreset(preset.id)}
+                      alt=""
+                      width={58}
+                      height={58}
+                      unoptimized
+                      className="size-full rounded-[10px]"
+                    />
+                    <span className="mt-1 block truncate text-[10px] text-muted-foreground">
+                      {preset.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {isCurrencyPickerOpen ? (
+          <div
+            className={`fixed inset-0 z-50 flex items-end bg-foreground/30 ${isCurrencyPickerClosing ? "profile-scrim-exit" : "profile-scrim-enter"}`}
+            role="presentation"
+            onMouseDown={closeCurrencyPicker}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="currency-picker-title"
+              className={`flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)] ${isCurrencyPickerClosing ? "drawer-exit" : "drawer-enter"}`}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div
+                className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-foreground/20"
+                aria-hidden="true"
+              />
+              <header className="flex shrink-0 items-center justify-between border-b border-border px-4 pb-3 pt-3">
+                <button
+                  type="button"
+                  aria-label="Close currency picker"
+                  onClick={closeCurrencyPicker}
+                  className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
+                <div className="min-w-0 text-center">
+                  <h2
+                    id="currency-picker-title"
+                    className="text-base font-semibold"
+                  >
+                    Choose your currency
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    Browse all currencies supported by your device.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCurrencyPicker}
+                  className="rounded-[10px] bg-primary-soft px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  Done
+                </button>
+              </header>
+              <div className="min-h-0 overflow-y-auto px-4">
+                <input
+                  autoFocus
+                  value={currencySearch}
+                  onChange={(event) => setCurrencySearch(event.target.value)}
+                  placeholder="Search currency or code"
+                  className="mt-4 min-h-11 w-full rounded-[10px] border border-border bg-card px-3 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"
+                />
+                <div className="mt-3 space-y-1 pb-2">
+                  {CURRENCY_CODES.filter((code) =>
+                    `${code} ${currencyName(code)}`
+                      .toLowerCase()
+                      .includes(currencySearch.toLowerCase()),
+                  ).map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      disabled={isSavingCurrency}
+                      onClick={() => void saveCurrency(code)}
+                      className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-2 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${user.currency === code ? "bg-primary-soft" : ""}`}
+                    >
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary">
+                        {currencySymbol(code)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">
+                          {currencyName(code)}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {code}
+                        </span>
+                      </span>
+                      {user.currency === code ? (
+                        <Check
+                          aria-hidden="true"
+                          className="size-4 text-primary"
+                        />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        <section
+          aria-labelledby="personal-information-heading"
+          className="mt-10 overflow-hidden rounded-[14px] border border-border bg-card"
+        >
+          <div className="border-b border-border px-4 py-4">
+            <h2
+              id="personal-information-heading"
+              className="text-[15px] font-semibold"
+            >
+              Personal information
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Keep your profile details up to date.
+            </p>
+          </div>
+          <div className="space-y-4 px-4 py-4">
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <label
+                  htmlFor="profile-name"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  Name
+                </label>
+                {!isEditingName ? (
+                  <button
+                    type="button"
+                    onClick={startEditingName}
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-primary hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                  >
+                    <Pencil aria-hidden="true" className="size-3.5" /> Edit
+                  </button>
+                ) : null}
+              </div>
+              {isEditingName ? (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    id="profile-name"
+                    value={editedName}
+                    onChange={(event) => setEditedName(event.target.value)}
+                    autoFocus
+                    maxLength={100}
+                    className="min-h-11 min-w-0 flex-1 rounded-[10px] border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveName()}
+                    disabled={isSavingName}
+                    aria-label="Save name"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground disabled:opacity-60"
+                  >
+                    <Check aria-hidden="true" className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelEditingName}
+                    disabled={isSavingName}
+                    aria-label="Cancel name edit"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-[10px] border border-border text-muted-foreground disabled:opacity-60"
+                  >
+                    <X aria-hidden="true" className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-1 text-sm font-medium">{user.name}</p>
+              )}
+              {nameMessage ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {nameMessage}
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <span>Email address</span>
+                <LockKeyhole aria-hidden="true" className="size-3" />
+              </div>
+              <p
+                aria-readonly="true"
+                className="mt-1 text-sm text-muted-foreground"
+              >
+                {user.email}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Email cannot be changed here.
+              </p>
+            </div>
           </div>
         </section>
 
+        <section
+          aria-labelledby="currency-heading"
+          className="mt-6 overflow-hidden rounded-[14px] border border-border bg-card"
+        >
+          <button
+            type="button"
+            onClick={openCurrencyPicker}
+            className="flex min-h-[72px] w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35"
+          >
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+              {currencySymbol(user.currency)}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                id="currency-heading"
+                className="block text-[15px] font-semibold"
+              >
+                Currency
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {currencyName(user.currency)} · {user.currency}
+              </span>
+            </span>
+            <Pencil
+              aria-hidden="true"
+              className="size-4 text-foreground-subtle"
+            />
+          </button>
+        </section>
+
+        <NotificationSettingsCard userId={user.id} />
+        <SecuritySettingsCard />
+
+        <PrivacySettingsCard />
+
         <button
           type="button"
+          onClick={handleSignOut}
+          disabled={isSigningOut}
           className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-[10px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense transition-colors hover:bg-expense/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-expense/25"
         >
           <LogOut aria-hidden="true" className="size-[18px]" />
-          Sign out
+          {isSigningOut ? "Signing out…" : "Sign out"}
         </button>
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">
+          Last login: {formatLocalDateTime(user.lastLoginAt)}
+        </p>
       </div>
+      <AppTutorial mode="profile" />
     </main>
   );
 }

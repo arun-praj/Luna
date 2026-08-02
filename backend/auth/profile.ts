@@ -7,9 +7,14 @@ export type PublicUserProfile = {
   email: string;
   phone: string | null;
   currency: string;
+  onboardingCompleted: boolean;
+  tutorialStartedAt: string | null;
+  tutorialCompletedAt: string | null;
   otpEnabled: boolean;
   emailVerifiedAt: string | null;
   phoneVerifiedAt: string | null;
+  lastLoginAt: string | null;
+  avatarPreset: string;
   createdAt: string;
 };
 
@@ -20,9 +25,14 @@ export function toPublicUserProfile(user: User): PublicUserProfile {
     email: user.email,
     phone: user.phone ?? null,
     currency: user.currency,
+    onboardingCompleted: user.onboardingCompleted,
+    tutorialStartedAt: user.tutorialStartedAt ?? null,
+    tutorialCompletedAt: user.tutorialCompletedAt ?? null,
     otpEnabled: user.otpEnabled,
     emailVerifiedAt: user.emailVerifiedAt ?? null,
     phoneVerifiedAt: user.phoneVerifiedAt ?? null,
+    lastLoginAt: user.lastLoginAt ?? null,
+    avatarPreset: user.avatarPreset,
     createdAt: user.createdAt,
   };
 }
