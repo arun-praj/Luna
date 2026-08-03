@@ -2,6 +2,7 @@
 
 const BIOMETRIC_ENABLED_KEY = "cocomelon.biometric-lock-enabled";
 const BIOMETRIC_CREDENTIAL_KEY = "cocomelon.biometric-lock-credential";
+const BIOMETRIC_USER_KEY = "cocomelon.biometric-lock-user";
 
 function bytesToBase64Url(bytes: ArrayBuffer | Uint8Array) {
   const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -22,13 +23,23 @@ function randomChallenge() {
   return challenge;
 }
 
-export function isBiometricLockEnabled() {
-  return window.localStorage.getItem(BIOMETRIC_ENABLED_KEY) === "true" && Boolean(window.localStorage.getItem(BIOMETRIC_CREDENTIAL_KEY));
+export function isBiometricLockEnabled(userId?: string) {
+  const enabled = window.localStorage.getItem(BIOMETRIC_ENABLED_KEY) === "true";
+  const credential = window.localStorage.getItem(BIOMETRIC_CREDENTIAL_KEY);
+  const registeredUserId = window.localStorage.getItem(BIOMETRIC_USER_KEY);
+  return enabled && Boolean(credential) && (!userId || registeredUserId === userId);
 }
 
 export function disableBiometricLock() {
   window.localStorage.removeItem(BIOMETRIC_ENABLED_KEY);
   window.localStorage.removeItem(BIOMETRIC_CREDENTIAL_KEY);
+  window.localStorage.removeItem(BIOMETRIC_USER_KEY);
+}
+
+export function clearBiometricLockForDifferentUser(userId: string) {
+  const registeredUserId = window.localStorage.getItem(BIOMETRIC_USER_KEY);
+  const hasStoredLock = window.localStorage.getItem(BIOMETRIC_ENABLED_KEY) === "true" || Boolean(window.localStorage.getItem(BIOMETRIC_CREDENTIAL_KEY));
+  if (hasStoredLock && registeredUserId !== userId) disableBiometricLock();
 }
 
 export function canUseBiometricLock() {
@@ -69,6 +80,7 @@ export async function enableBiometricLock(user: { id: string; name: string; emai
   if (!(credential instanceof PublicKeyCredential)) throw new Error("Could not create a device unlock credential.");
   window.localStorage.setItem(BIOMETRIC_CREDENTIAL_KEY, bytesToBase64Url(credential.rawId));
   window.localStorage.setItem(BIOMETRIC_ENABLED_KEY, "true");
+  window.localStorage.setItem(BIOMETRIC_USER_KEY, user.id);
 }
 
 export async function unlockWithBiometric() {

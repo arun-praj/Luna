@@ -1,36 +1,44 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Fingerprint, LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
-import { getAccessToken, signOut } from "@/lib/auth-client";
-import { canUseBiometricLock, disableBiometricLock, isBiometricLockEnabled, unlockWithBiometric } from "@/lib/biometric-lock";
+import { getAccessTokenSubject, signOut } from "@/lib/auth-client";
+import { canUseBiometricLock, clearBiometricLockForDifferentUser, disableBiometricLock, isBiometricLockEnabled, unlockWithBiometric } from "@/lib/biometric-lock";
 
 const publicPaths = new Set(["/login", "/signup", "/forgot-password", "/reset-password", "/onboarding"]);
 
 export function BiometricLockGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const wasPublic = useRef(publicPaths.has(pathname));
   const [isReady, setIsReady] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const evaluateLock = () => {
       if (publicPaths.has(pathname)) {
-        wasPublic.current = true;
         setIsReady(true);
         setIsLocked(false);
         return;
       }
-      if (!wasPublic.current && isReady) return;
-      wasPublic.current = false;
-      setIsLocked(Boolean(getAccessToken()) && isBiometricLockEnabled());
+      const userId = getAccessTokenSubject();
+      if (!userId) {
+        setIsReady(true);
+        setIsLocked(false);
+        return;
+      }
+      clearBiometricLockForDifferentUser(userId);
+      setIsLocked(isBiometricLockEnabled(userId));
       setIsReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [isReady, pathname]);
+    };
+    const timer = window.setTimeout(evaluateLock, 0);
+    window.addEventListener("cocomelon:auth-changed", evaluateLock);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("cocomelon:auth-changed", evaluateLock);
+    };
+  }, [pathname]);
 
   async function unlock() {
     setIsBusy(true);

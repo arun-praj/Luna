@@ -10,7 +10,7 @@ import { biometricErrorMessage, disableBiometricLock, enableBiometricLock, isBio
 type Status = { enabled: boolean; backupCodesRemaining: number };
 type Setup = { secret: string; qrCodeDataUrl: string };
 
-export function SecuritySettingsCard() {
+export function SecuritySettingsCard({ userId }: { userId: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -18,7 +18,7 @@ export function SecuritySettingsCard() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const [isBiometricEnabled, setIsBiometricEnabled] = useState(() => typeof window !== "undefined" && isBiometricLockEnabled());
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(() => typeof window !== "undefined" && isBiometricLockEnabled(userId));
   const [isBiometricSupported, setIsBiometricSupported] = useState<boolean | null>(null);
   const [isBiometricBusy, setIsBiometricBusy] = useState(false);
   const [biometricMessage, setBiometricMessage] = useState("");

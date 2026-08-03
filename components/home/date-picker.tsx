@@ -11,6 +11,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { type DateRange } from "react-day-picker";
 import { Dialog } from "radix-ui";
 
@@ -67,12 +68,18 @@ export function DatePicker({
   initialMode = "day",
   initialLabel,
   triggerLabel,
+  triggerAriaLabel,
+  triggerIcon,
   onApply,
+  footer,
 }: {
   initialMode?: FilterMode;
   initialLabel?: string;
   triggerLabel?: string;
+  triggerAriaLabel?: string;
+  triggerIcon?: LucideIcon;
   onApply?: (period: AppliedPeriod) => void;
+  footer?: (apply: () => void, canApply: boolean) => React.ReactNode;
 } = {}) {
   const [open, setOpen] = React.useState(false);
   const [periodLabel, setPeriodLabel] = React.useState(
@@ -95,6 +102,7 @@ export function DatePicker({
   const [calendarMonth, setCalendarMonth] = React.useState(CURRENT_DATE);
   const [amount, setAmount] = React.useState(4);
   const [unit, setUnit] = React.useState<PeriodUnit>("weeks");
+  const TriggerIcon = triggerIcon ?? CalendarDays;
 
   const setOpenState = (nextOpen: boolean) => {
     if (nextOpen) setDraftMode(committedMode);
@@ -149,11 +157,11 @@ export function DatePicker({
       <Dialog.Trigger asChild>
         <button
           type="button"
-          aria-label={`Choose reporting period, currently ${periodLabel}`}
+          aria-label={triggerAriaLabel ?? `Choose reporting period, currently ${periodLabel}`}
           onClick={() => setOpenState(true)}
           className="flex min-h-11 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3.5 text-sm font-semibold text-foreground shadow-[0_1px_2px_rgb(23_32_29_/_0.03)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
         >
-          <CalendarDays
+          <TriggerIcon
             aria-hidden="true"
             className="size-[18px] text-primary"
           />
@@ -367,6 +375,12 @@ export function DatePicker({
                 </button>
               </section>
             </div>
+
+            {footer ? (
+              <div className="shrink-0 border-t border-border bg-background px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+                {footer(applyFilter, canApply)}
+              </div>
+            ) : null}
 
             {calendarOpen ? (
               <div

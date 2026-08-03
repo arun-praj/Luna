@@ -26,6 +26,7 @@ import { PrivacySettingsCard } from "@/components/profile/privacy-settings";
 import { PageDataSkeleton } from "@/components/ui/data-skeleton";
 import { withReturnTo } from "@/lib/navigation";
 import { AppTutorial } from "@/components/tutorial/app-tutorial";
+import { DataExportButton } from "@/components/profile/data-export";
 
 type ProfileUser = {
   id: string;
@@ -277,6 +278,9 @@ export default function ProfilePage() {
           <h1 className="text-[24px] font-semibold tracking-[-0.035em]">
             Profile
           </h1>
+          <div className="ml-auto">
+            <DataExportButton currency={user.currency} />
+          </div>
         </StickyPageHeader>
 
         <section data-tour="profile-page" className="mt-10 flex flex-col items-center text-center">
@@ -603,7 +607,7 @@ export default function ProfilePage() {
         </section>
 
         <NotificationSettingsCard userId={user.id} />
-        <SecuritySettingsCard />
+        <SecuritySettingsCard userId={user.id} />
 
         <PrivacySettingsCard />
 

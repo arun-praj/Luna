@@ -35,6 +35,20 @@ export function notifyAuthExpired() {
 export function getAccessToken() {
   return window.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
+
+export function getAccessTokenSubject() {
+  const token = getAccessToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(
+      window.atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { sub?: string };
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function setAccessToken(token: string) {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
