@@ -38,8 +38,8 @@ export async function GET(request: Request) {
   if (accountId) filters.push(eq(transactions.accountId, accountId));
   if (categoryId) filters.push(eq(transactions.categoryId, categoryId));
   if (savingsInstrumentId) filters.push(eq(transactions.savingsInstrumentId, savingsInstrumentId));
-  if (from) filters.push(sql`${transactions.date}::date >= ${from}::date` as never);
-  if (to) filters.push(sql`${transactions.date}::date <= ${to}::date` as never);
+  if (from) filters.push(sql`${transactions.date} >= ${from}` as never);
+  if (to) filters.push(sql`${transactions.date} <= ${to}` as never);
   if (status === "synced" || status === "pending" || status === "failed") filters.push(eq(transactions.syncStatus, status));
   if (search) {
     const pattern = `%${search.toLowerCase()}%`;

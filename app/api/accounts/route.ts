@@ -34,8 +34,8 @@ export async function GET(request: Request) {
     .from(transactions)
     .where(and(
       eq(transactions.userId, userId),
-      sql`${transactions.date}::date >= ${monthStart}::date`,
-      sql`${transactions.date}::date < ${nextMonthStart}::date`,
+      sql`${transactions.date} >= ${monthStart}`,
+      sql`${transactions.date} < ${nextMonthStart}`,
     ))
     .groupBy(transactions.accountId, transactions.type)
     ;
@@ -66,10 +66,15 @@ export async function POST(request: Request) {
   if ((openingBalance ?? 0) < 0 && !allowNegativeBalance) return errorResponse("Negative balances are disabled. Enable Allow negative balance to use a negative opening balance.", 400);
   const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
   const id = randomUUID();
-  await db.transaction(async (tx) => {
-    if (input.isDefault) await tx.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId));
-    await tx.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
-  });
+  const insertAccount = db.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
+  if (input.isDefault) {
+    await db.batch([
+      db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId)),
+      insertAccount,
+    ]);
+  } else {
+    await db.batch([insertAccount]);
+  }
   const [account] = await db.select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))).limit(1);
   return NextResponse.json({ account }, { status: 201 });
 }
@@ -87,10 +92,8 @@ export async function PATCH(request: Request) {
     new Set(requested).size !== owned.length ||
     requested.some((id) => !ownedSet.has(id))
   ) return errorResponse("Account order does not match your accounts", 400);
-  await db.transaction(async (tx) => {
-    for (const [index, id] of requested.entries()) {
-      await tx.update(accounts).set({ displayOrder: index }).where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
-    }
-  });
+  for (const [index, id] of requested.entries()) {
+    await db.update(accounts).set({ displayOrder: index }).where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
+  }
   return NextResponse.json({ accounts: await db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(asc(accounts.displayOrder), asc(accounts.name)) });
 }

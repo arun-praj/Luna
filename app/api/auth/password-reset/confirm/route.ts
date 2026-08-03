@@ -20,10 +20,10 @@ export async function POST(request: Request) {
   if (!resetToken) return errorResponse("This password reset link is invalid or has expired", 400);
 
   const now = new Date().toISOString();
-  await db.transaction(async (tx) => {
-    await tx.update(users).set({ passwordHash: await hashPassword(parsed.data.password), updatedAt: now }).where(eq(users.id, resetToken.userId));
-    await tx.update(passwordResetTokens).set({ usedAt: now }).where(eq(passwordResetTokens.id, resetToken.id));
-  });
+  await db.batch([
+    db.update(users).set({ passwordHash: await hashPassword(parsed.data.password), updatedAt: now }).where(eq(users.id, resetToken.userId)),
+    db.update(passwordResetTokens).set({ usedAt: now }).where(eq(passwordResetTokens.id, resetToken.id)),
+  ]);
   await revokeAllSessions(resetToken.userId);
   return NextResponse.json({ message: "Password updated. You can now log in." });
 }

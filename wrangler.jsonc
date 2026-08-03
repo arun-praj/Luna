@@ -1,0 +1,38 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"main": "./worker/index.ts",
+	"name": "frontend",
+	"compatibility_date": "2026-08-01",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"routes": [
+		{
+			"pattern": "luna.arunprajapati.com",
+			"custom_domain": true
+		}
+	],
+	"assets": {
+		"directory": "dist/client",
+		"not_found_handling": "none",
+		"binding": "ASSETS"
+	},
+	"vars": {
+		"APP_URL": "https://luna.arunprajapati.com"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "luna",
+			"database_id": "b1e9928d-52d8-4f2d-9463-d0281314eba9",
+			"migrations_dir": "backend/db/migrations-d1"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "R2",
+			"bucket_name": "budgeyy"
+		}
+	]
+}

@@ -4,11 +4,11 @@
 
 ### A calmer way to manage money — online or offline.
 
-Luna is a local-first personal finance Progressive Web App for tracking balances, cash flow, spending, and savings without losing access when the network disappears.
+Luna is a local-first personal finance Progressive Web App for tracking balances, cash flow, spending, and savings without losing access when the network disappears. Cloudflare D1 is the deployed SQLite source of truth.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.2-black?logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-remote_source_of_truth-336791?logo=postgresql&logoColor=white)
+![Cloudflare D1](https://img.shields.io/badge/Cloudflare_D1-SQLite_remote_source_of_truth-f38020?logo=cloudflare&logoColor=white)
 ![PWA](https://img.shields.io/badge/PWA-offline--ready-5a8f7b?logo=pwa&logoColor=white)
 
 </div>
@@ -20,7 +20,7 @@ Luna is a local-first personal finance Progressive Web App for tracking balances
 
 ## Why Luna?
 
-Most budgeting tools assume a reliable connection and make money management feel heavy. Luna keeps the interface focused and the important data available on the device, while synchronizing with the authenticated PostgreSQL API whenever the connection returns.
+Most budgeting tools assume a reliable connection and make money management feel heavy. Luna keeps the interface focused and the important data available on the device, while synchronizing with the authenticated D1-backed API whenever the connection returns.
 
 ## Features
 
@@ -63,7 +63,7 @@ Browser / installed PWA
         └── Next.js 16 route handlers
               ├── JWT + refresh-token authentication
               ├── Drizzle ORM
-              └── PostgreSQL remote source of truth
+              └── Cloudflare D1 (SQLite) remote source of truth
 ```
 
 The sync contract is documented in [`backend/BACKEND.md`](backend/BACKEND.md). The database schema is documented in [`SCHEMA.md`](SCHEMA.md).
@@ -72,7 +72,6 @@ The sync contract is documented in [`backend/BACKEND.md`](backend/BACKEND.md). T
 
 - Node.js 20 or newer
 - npm 10 or newer
-- PostgreSQL 14 or newer
 - A modern browser with IndexedDB and service-worker support
 - SMTP credentials are optional for password reset and email verification flows
 
@@ -81,7 +80,6 @@ The sync contract is documented in [`backend/BACKEND.md`](backend/BACKEND.md). T
 From the project directory:
 
 ```bash
-cd frontend
 npm install
 cp .env.example .env.local
 ```
@@ -90,7 +88,6 @@ Open `.env.local` and set at least:
 
 ```env
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
-DATABASE_URL=postgresql://username:password@localhost:5432/luna
 APP_URL=http://localhost:3000
 ```
 
@@ -100,11 +97,10 @@ Generate a strong local secret with:
 openssl rand -base64 48
 ```
 
-Create the database schema and seed the demo account:
+Create the local D1 schema:
 
 ```bash
-npm run db:migrate
-npm run db:seed
+npm run db:migrate:d1:local
 ```
 
 Start the development server:
@@ -115,35 +111,21 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Demo account
+## Production build and deployment
 
-The seed script creates or updates this development-only account by default:
-
-```text
-Email:    arun@example.com
-Password: password123
-```
-
-Override the demo identity before seeding if needed:
-
-```env
-DEMO_USER_EMAIL=you@example.com
-DEMO_USER_PASSWORD=use-a-local-password
-DEMO_USER_NAME=Your Name
-```
-
-Do not use the default demo credentials in a public deployment.
-
-## Production build
-
-Build and run the production server with:
+Build locally with:
 
 ```bash
 npm run build
-npm run start
 ```
 
-The app listens on port `3000` and binds to `0.0.0.0`, which makes it suitable for a reverse proxy or Cloudflare Tunnel. Keep the application and database private behind the proxy; do not expose PostgreSQL directly to the internet.
+Run the Cloudflare Worker locally, including its D1 binding, with:
+
+```bash
+npm run preview
+```
+
+Pushes to `main` run [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), which applies pending D1 migrations, builds the app, and deploys the Worker. Configure the GitHub Actions secrets described in [`backend/BACKEND.md`](backend/BACKEND.md) first.
 
 Useful checks:
 
@@ -151,10 +133,19 @@ Useful checks:
 npm run lint
 ```
 
-After changing the Drizzle schema, generate a migration with:
+After changing the D1 Drizzle schema, generate and apply a migration with:
+
+```bash
+npm run db:generate:d1
+npm run db:migrate:d1:local
+npm run db:migrate:d1:remote
+```
+
+The PostgreSQL schema is retained separately for local PostgreSQL tooling and migrations:
 
 ```bash
 npm run db:generate
+npm run db:migrate
 ```
 
 ## Environment variables
@@ -162,7 +153,6 @@ npm run db:generate
 | Variable | Required | Purpose |
 | --- | :---: | --- |
 | `AUTH_JWT_SECRET` | Yes | Signs short-lived access tokens and protects encrypted auth data. |
-| `DATABASE_URL` | Yes | PostgreSQL connection string. |
 | `APP_URL` | Recommended | Base URL used in password-reset links. |
 | `SMTP_HOST` | Optional | SMTP server for password reset and verification email. |
 | `SMTP_PORT` | Optional | SMTP port, usually `587`. |
@@ -172,9 +162,9 @@ npm run db:generate
 | `SMTP_FROM` | Optional | Sender address. |
 | `CRON_SECRET` | Optional | Protects the account-deletion cleanup endpoint. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Optional | Enables browser push notification subscriptions. |
-| `R2_ENDPOINT` and related `R2_*` values | Optional | Enables remote receipt/image storage. |
+| `R2` Worker binding | Configured | Stores receipt and image uploads in the Cloudflare R2 `budgeyy` bucket. |
 
-See [`.env.example`](.env.example) for the starter configuration.
+`DATABASE_URL` is only needed for the retained PostgreSQL tooling. See [`.env.example`](.env.example) for the starter configuration.
 
 ## Local-first behavior
 
@@ -190,7 +180,7 @@ The offline database is isolated per user and never stores passwords, OTP codes,
 
 ```text
 app/                 Next.js routes, pages, and API handlers
-backend/             PostgreSQL schema, auth, domain logic, and migrations
+backend/             D1/PostgreSQL schemas, auth, domain logic, and migrations
 components/          UI and feature components
 lib/offline/          RxDB database, sync queue, and offline types
 public/               PWA manifest, service worker, and static assets
@@ -199,7 +189,7 @@ scripts/              Development and database helper scripts
 
 ## Deployment notes
 
-Luna can run on a small home server or Raspberry Pi for an early, low-traffic deployment. A Cloudflare Tunnel is a good zero-cost way to provide HTTPS without opening inbound router ports. For production data, keep automated PostgreSQL backups off the host and treat local storage as replaceable.
+Luna deploys as a Cloudflare Worker at `luna.arunprajapati.com` with Cloudflare D1. Keep production secrets in Worker secrets and apply D1 migrations before deploying application code.
 
 ## Status
 

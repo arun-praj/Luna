@@ -87,10 +87,10 @@ export async function rotateRefreshToken(rawToken: string) {
   const expiresAt = new Date(issuedAt.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000);
   const nextId = randomUUID();
 
-  await db.transaction(async (tx) => {
-    await tx.update(refreshTokens).set({ revokedAt: issuedAt.toISOString(), revokedReason: "rotated" }).where(and(eq(refreshTokens.id, current.id), isNull(refreshTokens.revokedAt)));
-    await tx.insert(refreshTokens).values({ id: nextId, userId: current.userId, tokenHash: hashToken(nextToken), parentTokenId: current.id, deviceLabel: current.deviceLabel, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString() });
-  });
+  await db.batch([
+    db.update(refreshTokens).set({ revokedAt: issuedAt.toISOString(), revokedReason: "rotated" }).where(and(eq(refreshTokens.id, current.id), isNull(refreshTokens.revokedAt))),
+    db.insert(refreshTokens).values({ id: nextId, userId: current.userId, tokenHash: hashToken(nextToken), parentTokenId: current.id, deviceLabel: current.deviceLabel, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString() }),
+  ]);
 
   return { userId: current.userId, accessToken: await createAccessToken(current.userId), refreshToken: nextToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
 }

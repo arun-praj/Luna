@@ -1,8 +1,7 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
-import { r2Bucket, r2Client, r2Configured } from "@/backend/storage/r2";
+import { r2Bucket, r2Configured } from "@/backend/storage/r2";
 
 export const runtime = "nodejs";
 
@@ -20,7 +19,10 @@ export async function POST(request: Request) {
   if (file.size > 5 * 1024 * 1024) return errorResponse("The image must be smaller than 5 MB", 400);
   const key = `savings-images/${userId}/${randomUUID()}.${extensions[file.type]}`;
   try {
-    await r2Client().send(new PutObjectCommand({ Bucket: r2Bucket(), Key: key, Body: Buffer.from(await file.arrayBuffer()), ContentType: file.type, CacheControl: "public, max-age=31536000, immutable", Metadata: { userId } }));
+    await r2Bucket().put(key, await file.arrayBuffer(), {
+      httpMetadata: { contentType: file.type, cacheControl: "public, max-age=31536000, immutable" },
+      customMetadata: { userId },
+    });
     return NextResponse.json({ key, url: `/api/uploads/savings-images/${key.split("/").map(encodeURIComponent).join("/")}` }, { status: 201 });
   } catch {
     return errorResponse("Could not upload image", 502);

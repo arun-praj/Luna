@@ -6,7 +6,7 @@ import type { z } from "zod";
 import { transactionInput } from "@/backend/domain/validation";
 
 export type TransactionInput = z.infer<typeof transactionInput>;
-type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DatabaseExecutor = typeof db;
 
 const BALANCE_ADJUSTMENT_CATEGORY = "Balance adjustment";
 
@@ -27,7 +27,7 @@ type AccountBalanceChange = {
 };
 
 async function assertProjectedAccountBalances(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: DatabaseExecutor,
   userId: string,
   changes: AccountBalanceChange[],
 ) {
@@ -52,7 +52,7 @@ function assertPositiveAmount(input: TransactionInput) {
   if (input.type !== "adjust_balance" && input.amount <= 0) throw new Error("Transaction amount must be positive");
 }
 
-async function assertReferences(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], userId: string, input: TransactionInput) {
+async function assertReferences(tx: DatabaseExecutor, userId: string, input: TransactionInput) {
   const [account] = await tx.select().from(accounts).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, userId))).limit(1);
   if (!account) throw new Error("Account not found");
   if (input.transferToAccountId) {
@@ -80,7 +80,7 @@ async function assertReferences(tx: Parameters<Parameters<typeof db.transaction>
   }
 }
 
-async function applyEffect(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], row: typeof transactions.$inferSelect, direction: 1 | -1) {
+async function applyEffect(tx: DatabaseExecutor, row: typeof transactions.$inferSelect, direction: 1 | -1) {
   const delta = balanceDelta(row.type, row.amount) * direction;
   await tx.update(accounts).set({ currentBalance: sql`${accounts.currentBalance} + ${delta}` }).where(eq(accounts.id, row.accountId));
   if (row.type === "transfer" && row.transferToAccountId) await tx.update(accounts).set({ currentBalance: sql`${accounts.currentBalance} + ${-delta}` }).where(eq(accounts.id, row.transferToAccountId));
@@ -92,11 +92,11 @@ async function applyEffect(tx: Parameters<Parameters<typeof db.transaction>[0]>[
   if (row.savingsInstrumentId && row.type === "savings") await tx.update(savingsInstruments).set({ currentBalance: sql`${savingsInstruments.currentBalance} + ${row.amount * direction}` }).where(eq(savingsInstruments.id, row.savingsInstrumentId));
 }
 
-async function history(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], transactionId: string, userId: string, changeType: "created" | "updated" | "deleted", oldValues?: unknown, newValues?: unknown) {
+async function history(tx: DatabaseExecutor, transactionId: string, userId: string, changeType: "created" | "updated" | "deleted", oldValues?: unknown, newValues?: unknown) {
   await tx.insert(transactionHistory).values({ id: randomUUID(), transactionId, changedBy: userId, changeType, oldValues: oldValues ? JSON.stringify(oldValues) : null, newValues: newValues ? JSON.stringify(newValues) : null, changedAt: new Date().toISOString() });
 }
 
-async function getOrCreateBalanceAdjustmentCategory(tx: DatabaseTransaction, userId: string) {
+async function getOrCreateBalanceAdjustmentCategory(tx: DatabaseExecutor, userId: string) {
   const [existing] = await tx
     .select()
     .from(categories)
@@ -121,7 +121,7 @@ async function getOrCreateBalanceAdjustmentCategory(tx: DatabaseTransaction, use
 }
 
 export async function createBalanceAdjustment(
-  tx: DatabaseTransaction,
+  tx: DatabaseExecutor,
   userId: string,
   accountId: string,
   nextBalance: number,
@@ -177,59 +177,53 @@ export async function createBalanceAdjustment(
 
 export async function createTransaction(userId: string, input: TransactionInput) {
   assertPositiveAmount(input);
-  return db.transaction(async (tx) => {
-    if (input.clientGeneratedId) {
-      const [existing] = await tx.select().from(transactions).where(eq(transactions.clientGeneratedId, input.clientGeneratedId)).limit(1);
-      if (existing && existing.userId === userId) return existing;
-    }
-    await assertReferences(tx, userId, input);
-    await assertProjectedAccountBalances(tx, userId, [{ accountId: input.accountId, type: input.type, amount: input.amount, transferToAccountId: input.transferToAccountId, direction: 1 }]);
-    const timestamp = new Date().toISOString();
-    const row = {
-      id: randomUUID(), userId, accountId: input.accountId, type: input.type, amount: input.amount,
-      categoryId: input.categoryId ?? null, title: input.title, notes: input.notes ?? null, tags: JSON.stringify(input.tags ?? []),
-      isRecurring: input.isRecurring ?? false, recurringTemplateId: input.recurringTemplateId ?? null,
-      receiptImageUrl: input.receiptImageUrl ?? null, goalId: input.goalId ?? null,
-      savingsInstrumentId: input.savingsInstrumentId ?? null, transferToAccountId: input.transferToAccountId ?? null,
-      date: input.date, transactionAt: input.transactionAt ?? `${input.date}T12:00:00.000Z`, syncStatus: "synced" as const, clientGeneratedId: input.clientGeneratedId ?? null,
-      createdAt: timestamp, updatedAt: timestamp,
-    };
-    const [created] = await tx.insert(transactions).values(row).returning();
-    if (!created) throw new Error("Unable to create transaction");
-    await applyEffect(tx, created, 1);
-    await history(tx, created.id, userId, "created", undefined, serializeTransaction(created));
-    return created;
-  });
+  if (input.clientGeneratedId) {
+    const [existing] = await db.select().from(transactions).where(eq(transactions.clientGeneratedId, input.clientGeneratedId)).limit(1);
+    if (existing && existing.userId === userId) return existing;
+  }
+  await assertReferences(db, userId, input);
+  await assertProjectedAccountBalances(db, userId, [{ accountId: input.accountId, type: input.type, amount: input.amount, transferToAccountId: input.transferToAccountId, direction: 1 }]);
+  const timestamp = new Date().toISOString();
+  const row = {
+    id: randomUUID(), userId, accountId: input.accountId, type: input.type, amount: input.amount,
+    categoryId: input.categoryId ?? null, title: input.title, notes: input.notes ?? null, tags: JSON.stringify(input.tags ?? []),
+    isRecurring: input.isRecurring ?? false, recurringTemplateId: input.recurringTemplateId ?? null,
+    receiptImageUrl: input.receiptImageUrl ?? null, goalId: input.goalId ?? null,
+    savingsInstrumentId: input.savingsInstrumentId ?? null, transferToAccountId: input.transferToAccountId ?? null,
+    date: input.date, transactionAt: input.transactionAt ?? `${input.date}T12:00:00.000Z`, syncStatus: "synced" as const, clientGeneratedId: input.clientGeneratedId ?? null,
+    createdAt: timestamp, updatedAt: timestamp,
+  };
+  const [created] = await db.insert(transactions).values(row).returning();
+  if (!created) throw new Error("Unable to create transaction");
+  await applyEffect(db, created, 1);
+  await history(db, created.id, userId, "created", undefined, serializeTransaction(created));
+  return created;
 }
 
 export async function updateTransaction(userId: string, id: string, input: TransactionInput) {
   assertPositiveAmount(input);
-  return db.transaction(async (tx) => {
-    const [old] = await tx.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1);
-    if (!old) throw new Error("Transaction not found");
-    await assertReferences(tx, userId, input);
-    await assertProjectedAccountBalances(tx, userId, [
-      { accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 },
-      { accountId: input.accountId, type: input.type, amount: input.amount, transferToAccountId: input.transferToAccountId, direction: 1 },
-    ]);
-    await applyEffect(tx, old, -1);
-    const updatedAt = new Date().toISOString();
-    const [next] = await tx.update(transactions).set({ accountId: input.accountId, type: input.type, amount: input.amount, categoryId: input.categoryId ?? null, title: input.title, notes: input.notes ?? null, tags: JSON.stringify(input.tags ?? []), isRecurring: input.isRecurring ?? false, recurringTemplateId: input.recurringTemplateId ?? null, receiptImageUrl: input.receiptImageUrl ?? null, goalId: input.goalId ?? null, savingsInstrumentId: input.savingsInstrumentId ?? null, transferToAccountId: input.transferToAccountId ?? null, date: input.date, transactionAt: input.transactionAt ?? `${input.date}T12:00:00.000Z`, updatedAt }).where(eq(transactions.id, id)).returning();
-    if (!next) throw new Error("Unable to update transaction");
-    await applyEffect(tx, next, 1);
-    await history(tx, id, userId, "updated", serializeTransaction(old), serializeTransaction(next));
-    return next;
-  });
+  const [old] = await db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1);
+  if (!old) throw new Error("Transaction not found");
+  await assertReferences(db, userId, input);
+  await assertProjectedAccountBalances(db, userId, [
+    { accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 },
+    { accountId: input.accountId, type: input.type, amount: input.amount, transferToAccountId: input.transferToAccountId, direction: 1 },
+  ]);
+  await applyEffect(db, old, -1);
+  const updatedAt = new Date().toISOString();
+  const [next] = await db.update(transactions).set({ accountId: input.accountId, type: input.type, amount: input.amount, categoryId: input.categoryId ?? null, title: input.title, notes: input.notes ?? null, tags: JSON.stringify(input.tags ?? []), isRecurring: input.isRecurring ?? false, recurringTemplateId: input.recurringTemplateId ?? null, receiptImageUrl: input.receiptImageUrl ?? null, goalId: input.goalId ?? null, savingsInstrumentId: input.savingsInstrumentId ?? null, transferToAccountId: input.transferToAccountId ?? null, date: input.date, transactionAt: input.transactionAt ?? `${input.date}T12:00:00.000Z`, updatedAt }).where(eq(transactions.id, id)).returning();
+  if (!next) throw new Error("Unable to update transaction");
+  await applyEffect(db, next, 1);
+  await history(db, id, userId, "updated", serializeTransaction(old), serializeTransaction(next));
+  return next;
 }
 
 export async function deleteTransaction(userId: string, id: string) {
-  return db.transaction(async (tx) => {
-    const [old] = await tx.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1);
-    if (!old) throw new Error("Transaction not found");
-    await assertProjectedAccountBalances(tx, userId, [{ accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 }]);
-    await applyEffect(tx, old, -1);
-    await history(tx, id, userId, "deleted", serializeTransaction(old));
-    await tx.delete(transactions).where(eq(transactions.id, id));
-    return old;
-  });
+  const [old] = await db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1);
+  if (!old) throw new Error("Transaction not found");
+  await assertProjectedAccountBalances(db, userId, [{ accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 }]);
+  await applyEffect(db, old, -1);
+  await history(db, id, userId, "deleted", serializeTransaction(old));
+  await db.delete(transactions).where(eq(transactions.id, id));
+  return old;
 }

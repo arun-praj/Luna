@@ -35,19 +35,17 @@ export async function POST(request: Request) {
 
   const timestamp = new Date().toISOString();
   const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
-  await db.transaction(async (tx) => {
-    await tx.update(users).set({ name: parsed.data.name, currency: parsed.data.currency, avatarPreset: parsed.data.avatarPreset, onboardingCompleted: true, updatedAt: timestamp }).where(eq(users.id, userId));
-    for (const [index, account] of parsed.data.accounts.entries()) {
-      await tx.insert(accounts).values({
-        id: randomUUID(), userId, name: account.name, type: account.type, currency: user?.currency ?? "NPR",
-        currentBalance: 0, isDefault: index === 0, displayOrder: index, backgroundColor: account.color,
-        icon: null, includeInTotalBalance: true,
-      });
-    }
-    for (const category of parsed.data.categories) {
-      await tx.insert(categories).values({ id: randomUUID(), userId, name: category.name, type: category.type, icon: category.icon, color: category.color });
-    }
-  });
+  await db.update(users).set({ name: parsed.data.name, currency: parsed.data.currency, avatarPreset: parsed.data.avatarPreset, onboardingCompleted: true, updatedAt: timestamp }).where(eq(users.id, userId));
+  for (const [index, account] of parsed.data.accounts.entries()) {
+    await db.insert(accounts).values({
+      id: randomUUID(), userId, name: account.name, type: account.type, currency: user?.currency ?? "NPR",
+      currentBalance: 0, isDefault: index === 0, displayOrder: index, backgroundColor: account.color,
+      icon: null, includeInTotalBalance: true,
+    });
+  }
+  for (const category of parsed.data.categories) {
+    await db.insert(categories).values({ id: randomUUID(), userId, name: category.name, type: category.type, icon: category.icon, color: category.color });
+  }
 
   const [updatedUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   return updatedUser ? NextResponse.json({ user: { id: updatedUser.id, name: updatedUser.name, onboardingCompleted: updatedUser.onboardingCompleted } }) : errorResponse("Authentication required", 401);

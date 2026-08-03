@@ -28,13 +28,9 @@ export async function PATCH(request: Request, { params }: Context) {
   const nextBalance = openingBalance ?? current.currentBalance;
   if (nextBalance < 0 && !allowNegativeBalance) return errorResponse("Negative balances are disabled. Enable Allow negative balance before saving this balance.", 400);
   const updates = input;
-  await db.transaction(async (tx) => {
-    if (updates.isDefault) await tx.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId));
-    await tx.update(accounts).set(updates).where(eq(accounts.id, id));
-    if (openingBalance !== undefined) {
-      await createBalanceAdjustment(tx, userId, id, openingBalance);
-    }
-  });
+  if (updates.isDefault) await db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId));
+  if (Object.keys(updates).length > 0) await db.update(accounts).set(updates).where(eq(accounts.id, id));
+  if (openingBalance !== undefined) await createBalanceAdjustment(db, userId, id, openingBalance);
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
   return NextResponse.json({ account });
 }
