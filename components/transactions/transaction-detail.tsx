@@ -74,14 +74,6 @@ const transactionTypes = [
     iconClassName: "bg-income-soft text-income",
     foregroundClassName: "text-income",
   },
-  {
-    value: "adjust_balance",
-    label: "Adjust balance",
-    description: "Correct an account balance",
-    icon: Banknote,
-    iconClassName: "bg-surface-subtle text-foreground",
-    foregroundClassName: "text-foreground",
-  },
 ] satisfies Array<{
   value: Transaction["kind"];
   label: string;
@@ -319,7 +311,18 @@ export function TransactionDetail({
         : kind === "transfer"
           ? ArrowLeftRight
           : Plus;
-  const selectedType = transactionTypes.find((type) => type.value === kind);
+  const selectedType =
+    transactionTypes.find((type) => type.value === kind) ??
+    (kind === "adjust_balance"
+      ? {
+          value: "adjust_balance" as const,
+          label: "Adjust balance",
+          description: "Correct an account balance",
+          icon: Banknote,
+          iconClassName: "bg-surface-subtle text-foreground",
+          foregroundClassName: "text-foreground",
+        }
+      : undefined);
   const selectedCategory = categoryOptions.find((option) => option.name === category);
   const categoryIcon = getCategoryIcon(selectedCategory?.icon, selectedCategory?.name);
   const titleFocusMode = guidedNew && Boolean(categoryId) && !title.trim();
@@ -521,9 +524,7 @@ export function TransactionDetail({
                     : "border-border"
               }`}
             >
-              {kind
-                ? transactionTypes.find((type) => type.value === kind)?.label
-                : "Choose type"}
+              {selectedType?.label ?? "Choose type"}
             </button>
             <ChevronDown
               aria-hidden="true"

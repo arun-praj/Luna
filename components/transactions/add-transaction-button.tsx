@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
   ChevronRight,
+  Landmark,
   Minus,
   Plus,
   X,
@@ -25,6 +26,13 @@ const quickActions = [
     description: "Money you received",
     icon: Plus,
     className: "bg-income-soft text-income",
+  },
+  {
+    type: "savings",
+    label: "Savings",
+    description: "Money you set aside",
+    icon: Landmark,
+    className: "bg-primary-soft text-primary",
   },
   {
     type: "transfer",
