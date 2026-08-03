@@ -77,7 +77,11 @@ export function OfflineRuntime() {
 
   useEffect(() => {
     router.prefetch("/offline");
-    const start = window.setTimeout(() => void checkAndRoute(), 0);
+    // Let the protected route complete its initial auth/data request before
+    // starting the best-effort offline reconciliation work. Running both at
+    // the same time can make the first authenticated request contend with a
+    // refresh and leave the home widgets waiting until a manual reload.
+    const start = window.setTimeout(() => void checkAndRoute(), 1200);
     const handleOnline = () => void checkAndRoute();
     const handleOffline = () => void checkAndRoute();
     const handleVisibility = () => {

@@ -3,6 +3,7 @@
 const ACCESS_TOKEN_KEY = "budget_access_token";
 const REFRESH_WINDOW_SECONDS = 60;
 const API_CACHE_TTL_MS = 120_000;
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 const API_CACHE_STORAGE_KEY = "cocomelon.api-cache";
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -113,10 +114,13 @@ async function refreshAccessToken(signal?: AbortSignal) {
   refreshPromise = (async () => {
     const refreshWithTabLock = async () => {
       if ("locks" in navigator && navigator.locks?.request) {
-        return navigator.locks.request("budget-auth-refresh", async () => {
+        const refreshUnderLock = async () => {
           const latestToken = getAccessToken();
           return tokenExpiresSoon(latestToken) ? performRefresh(signal) : latestToken;
-        });
+        };
+        return signal
+          ? navigator.locks.request("budget-auth-refresh", { signal }, refreshUnderLock)
+          : navigator.locks.request("budget-auth-refresh", refreshUnderLock);
       }
       return performRefresh(signal);
     };
@@ -201,21 +205,30 @@ async function fetchAndCache(
 }
 
 async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
+  const requestController = init.signal ? null : new AbortController();
+  const requestSignal = init.signal ?? requestController?.signal;
+  const timeout = requestController
+    ? window.setTimeout(() => requestController.abort(), AUTH_REQUEST_TIMEOUT_MS)
+    : null;
   const headers = new Headers(init.headers);
-  let token = getAccessToken();
-  if (tokenExpiresSoon(token)) token = await refreshAccessToken(init.signal);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers, signal: init.signal });
-  if (response.status !== 401) return response;
-  const refreshedToken = await refreshAccessToken(init.signal);
-  if (!refreshedToken) {
-    notifyAuthExpired();
-    return response;
+  try {
+    let token = getAccessToken();
+    if (tokenExpiresSoon(token)) token = await refreshAccessToken(requestSignal);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(input, { ...init, headers, signal: requestSignal });
+    if (response.status !== 401) return response;
+    const refreshedToken = await refreshAccessToken(requestSignal);
+    if (!refreshedToken) {
+      notifyAuthExpired();
+      return response;
+    }
+    headers.set("Authorization", `Bearer ${refreshedToken}`);
+    const retry = await fetch(input, { ...init, headers, signal: requestSignal });
+    if (retry.status === 401) notifyAuthExpired();
+    return retry;
+  } finally {
+    if (timeout !== null) window.clearTimeout(timeout);
   }
-  headers.set("Authorization", `Bearer ${refreshedToken}`);
-  const retry = await fetch(input, { ...init, headers, signal: init.signal });
-  if (retry.status === 401) notifyAuthExpired();
-  return retry;
 }
 
 export async function signOut() {
