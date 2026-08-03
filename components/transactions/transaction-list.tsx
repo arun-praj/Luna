@@ -93,18 +93,25 @@ const typeMeta = {
   },
 } as const;
 
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dateValue(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
 function formatDateLabel(date: string) {
-  const value = new Date(`${date}T12:00:00`);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
-  const dayKey = value.toISOString().slice(0, 10);
-  if (dayKey === today.toISOString().slice(0, 10)) return "Today";
-  if (dayKey === yesterday.toISOString().slice(0, 10)) return "Yesterday";
+  if (date === localDateKey(today)) return "Today";
+  if (date === localDateKey(yesterday)) return "Yesterday";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
-  }).format(value);
+  }).format(dateValue(date));
 }
 
 function formatAmount(transaction: ApiTransaction, displayCurrency?: string | null) {
@@ -132,6 +139,16 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
   const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => {
+      setLoading(true);
+      setRefreshVersion((version) => version + 1);
+    };
+    window.addEventListener("cocomelon:transactions-changed", refresh);
+    return () => window.removeEventListener("cocomelon:transactions-changed", refresh);
+  }, []);
 
   useEffect(() => {
     if (!searchable) return;
@@ -144,8 +161,8 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
     const params = new URLSearchParams();
     if (searchable && searchQuery) params.set("q", searchQuery);
     if (period?.mode !== "all" && period?.from && period.to) {
-      params.set("from", period.from.toISOString().slice(0, 10));
-      params.set("to", period.to.toISOString().slice(0, 10));
+      params.set("from", localDateKey(period.from));
+      params.set("to", localDateKey(period.to));
     }
     const query = params.toString() ? `?${params.toString()}` : "";
     void Promise.all([
@@ -175,7 +192,7 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
     return () => {
       active = false;
     };
-  }, [period, searchQuery, searchable]);
+  }, [period, refreshVersion, searchQuery, searchable]);
 
   const visibleTransactions = limit
     ? transactions.slice(0, limit)
@@ -266,7 +283,7 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                 {new Intl.DateTimeFormat("en-US", {
                   month: "long",
                   day: "numeric",
-                }).format(new Date(`${date}T12:00:00`))}
+                }).format(dateValue(date))}
               </p>
             </div>
           </div>

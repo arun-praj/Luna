@@ -25,7 +25,7 @@ import {
 
 import type { Transaction } from "@/lib/transactions";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
-import { authenticatedFetch, clearApiCache } from "@/lib/auth-client";
+import { authenticatedFetch, notifyTransactionsChanged } from "@/lib/auth-client";
 import { navigateWithRouteExit } from "@/lib/route-motion";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
@@ -425,7 +425,7 @@ export function TransactionDetail({
       setLoadError(result?.error ?? "We could not save this transaction. Check the details and try again.");
       return;
     }
-    clearApiCache();
+    notifyTransactionsChanged();
     setSaved(true);
     navigateWithRouteExit(() => router.back());
   };
@@ -485,7 +485,7 @@ export function TransactionDetail({
   const deleteCurrentTransaction = async () => {
     const response = await authenticatedFetch(`/api/transactions/${transaction.id}`, { method: "DELETE" });
     if (response.ok) {
-      clearApiCache();
+      notifyTransactionsChanged();
       navigateWithRouteExit(() => router.push("/"));
     }
     else setLoadError("We could not delete this transaction. Please try again.");

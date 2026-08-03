@@ -73,6 +73,13 @@ export function clearApiCache() {
     window.sessionStorage.removeItem(API_CACHE_STORAGE_KEY);
 }
 
+export function notifyTransactionsChanged() {
+  clearApiCache();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("cocomelon:transactions-changed"));
+  }
+}
+
 export function clearAccessToken() {
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
   clearApiCache();

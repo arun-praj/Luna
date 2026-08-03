@@ -16,6 +16,7 @@ export type NotificationSettings = {
   recurringDueEnabled: boolean;
   recurringTransactionEnabled: boolean;
   recurringTransactionTime: string;
+  timezone: string;
   recurringTransactionFrequency: RecurringReminderFrequency;
   lowBalanceEnabled: boolean;
   lowBalanceThreshold: number | null;
@@ -30,6 +31,7 @@ const DEFAULT_SETTINGS = {
   recurringDueEnabled: true,
   recurringTransactionEnabled: false,
   recurringTransactionTime: "09:00",
+  timezone: "UTC",
   recurringTransactionFrequency: "monthly",
   lowBalanceEnabled: false,
   lowBalanceThreshold: null,
@@ -122,6 +124,10 @@ export async function registerNotificationServiceWorker() {
 
 function vapidKey() {
   return process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+}
+
+export function pushNotificationsConfigured() {
+  return Boolean(vapidKey());
 }
 
 function decodeVapidKey(value: string) {

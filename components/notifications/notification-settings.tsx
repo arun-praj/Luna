@@ -5,6 +5,7 @@ import { Bell, Check, ChevronDown, CloudOff, Smartphone } from "lucide-react";
 import {
   loadNotificationSettings,
   notificationPermission,
+  pushNotificationsConfigured,
   requestNotificationPermission,
   saveNotificationSettings,
   showBudgetNotification,
@@ -46,7 +47,15 @@ export function NotificationSettingsCard({ userId }: Props) {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    void loadNotificationSettings(userId).then(setSettings);
+    void loadNotificationSettings(userId).then(async (loaded) => {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      if (loaded.timezone !== timezone) {
+        const result = await saveNotificationSettings(userId, { timezone });
+        setSettings(result.settings);
+        return;
+      }
+      setSettings(loaded);
+    });
   }, [userId]);
 
   useEffect(() => {
@@ -69,6 +78,7 @@ export function NotificationSettingsCard({ userId }: Props) {
         recurringDueEnabled: settings.recurringDueEnabled,
         recurringTransactionEnabled: settings.recurringTransactionEnabled,
         recurringTransactionTime: settings.recurringTransactionTime,
+        timezone: settings.timezone,
         recurringTransactionFrequency: settings.recurringTransactionFrequency,
         lowBalanceEnabled: settings.lowBalanceEnabled,
         lowBalanceThreshold: settings.lowBalanceThreshold,
@@ -100,7 +110,9 @@ export function NotificationSettingsCard({ userId }: Props) {
     if (nextPermission === "granted") {
       const pushSubscription = await subscribeToPush();
       if (pushSubscription) await update({ pushSubscription });
-      else setMessage("Notifications are ready on this device. Push sync will be added when the app is connected.");
+      else setMessage(pushNotificationsConfigured()
+        ? "Background alerts could not be enabled. Check that this site is installed or open in a supported browser, then try again."
+        : "Background alerts are not configured for this deployment yet. Add the VAPID public key, then reload Luna.");
     } else if (nextPermission === "denied") {
       setMessage("Notifications are blocked. Allow them in your device or browser settings.");
     } else if (nextPermission === "unsupported") {
@@ -181,7 +193,7 @@ export function NotificationSettingsCard({ userId }: Props) {
         </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle/50 px-4 py-3">
-      {permission === "granted" ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Native notifications enabled</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">Settings are available offline.</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : "Enable alerts"}</button></>}
+      {permission === "granted" && settings.pushSubscription ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Background alerts enabled</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">{permission === "granted" ? "Allow background alerts for scheduled reminders." : "Settings are available offline."}</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : permission === "granted" ? "Enable background alerts" : "Enable alerts"}</button></>}
         {isDevelopment ? <button type="button" onClick={() => void sendTestNotification()} disabled={permission !== "granted"} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-45"> <Check aria-hidden="true" className="size-3.5" /> Test notification</button> : null}
         </div>
         {message ? <p className="px-4 pb-3 text-[11px] text-muted-foreground">{message}</p> : null}

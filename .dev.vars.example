@@ -1,0 +1,9 @@
+# Local Wrangler runtime values. Never commit real values to this file.
+AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+APP_URL=http://localhost:3000
+
+# Generate with: npx web-push generate-vapid-keys
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+VAPID_PUBLIC_KEY=replace-with-vapid-public-key
+VAPID_PRIVATE_KEY=replace-with-vapid-private-key
+VAPID_SUBJECT=https://luna.arunprajapati.com

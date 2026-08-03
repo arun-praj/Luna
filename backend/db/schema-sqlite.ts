@@ -151,6 +151,9 @@ export const notificationSettings = sqliteTable("notification_settings", {
   recurringTransactionTime: text("recurring_transaction_time")
     .notNull()
     .default("09:00"),
+  timezone: text("timezone")
+    .notNull()
+    .default("UTC"),
   recurringTransactionFrequency: text("recurring_transaction_frequency", {
     enum: ["daily", "weekly", "monthly"],
   })
@@ -162,6 +165,26 @@ export const notificationSettings = sqliteTable("notification_settings", {
   lowBalanceThreshold: integer("low_balance_threshold"),
   pushSubscription: text("push_subscription"),
 });
+
+export const notificationDeliveries = sqliteTable(
+  "notification_deliveries",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["goal_milestone", "recurring_due", "recurring_transaction", "low_balance"],
+    }).notNull(),
+    referenceId: text("reference_id").notNull(),
+    occurrenceKey: text("occurrence_key").notNull(),
+    sentAt: isoTimestamp("sent_at"),
+  },
+  (table) => [
+    uniqueIndex("notification_deliveries_unique").on(table.userId, table.kind, table.referenceId, table.occurrenceKey),
+    index("notification_deliveries_user_idx").on(table.userId, table.sentAt),
+  ],
+);
 
 export const accounts = sqliteTable(
   "accounts",

@@ -73,6 +73,11 @@ The D1 database ID is configuration, not a secret. Runtime application secrets s
 npx wrangler secret put AUTH_JWT_SECRET
 npx wrangler secret put AUTH_ENCRYPTION_KEY
 npx wrangler secret put CRON_SECRET
+npx wrangler secret put VAPID_PUBLIC_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY
+npx wrangler secret put VAPID_SUBJECT
 ```
+
+Generate the VAPID key pair once with `npx web-push generate-vapid-keys`. The public key is also needed as the `NEXT_PUBLIC_VAPID_PUBLIC_KEY` GitHub Actions secret so the browser can create a push subscription. The private key must never be placed in the browser build, GitHub source, or a committed environment file.
 
 `APP_URL` is a non-secret Worker variable configured in `wrangler.jsonc`. The `R2` binding points to the `budgeyy` bucket and is used directly by the upload routes; R2 access keys are not needed by the Worker. Add SMTP secrets only when those features are enabled. The GitHub workflow deploys code and migrations without copying local development secrets into CI.

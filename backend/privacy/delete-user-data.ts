@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { db } from "@/backend/db/client";
-import { accounts, categories, goals, notificationSettings, otpCodes, passwordResetTokens, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, transactionHistory, transactions, userTags, users, webauthnCredentials } from "@/backend/db/schema";
+import { accounts, categories, goals, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, transactionHistory, transactions, userTags, users, webauthnCredentials } from "@/backend/db/schema";
 
 type DatabaseLike = Pick<typeof db, "delete">;
 
@@ -16,6 +16,7 @@ export async function deleteUserData(executor: DatabaseLike, userId: string) {
   await executor.delete(spendingBudgets).where(eq(spendingBudgets.userId, userId));
   await executor.delete(goals).where(eq(goals.userId, userId));
   await executor.delete(userTags).where(eq(userTags.userId, userId));
+  await executor.delete(notificationDeliveries).where(eq(notificationDeliveries.userId, userId));
   await executor.delete(notificationSettings).where(eq(notificationSettings.userId, userId));
   await executor.delete(otpCodes).where(eq(otpCodes.userId, userId));
   await executor.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));

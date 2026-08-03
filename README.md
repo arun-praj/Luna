@@ -162,6 +162,9 @@ npm run db:migrate
 | `SMTP_FROM` | Optional | Sender address. |
 | `CRON_SECRET` | Optional | Protects the account-deletion cleanup endpoint. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Optional | Enables browser push notification subscriptions. |
+| `VAPID_PUBLIC_KEY` | Optional | Server-side copy of the push public key used to send reminders. |
+| `VAPID_PRIVATE_KEY` | Optional | Cloudflare Worker secret used to sign push messages. |
+| `VAPID_SUBJECT` | Optional | VAPID contact or application URL. |
 | `R2` Worker binding | Configured | Stores receipt and image uploads in the Cloudflare R2 `budgeyy` bucket. |
 
 `DATABASE_URL` is only needed for the retained PostgreSQL tooling. See [`.env.example`](.env.example) for the starter configuration.

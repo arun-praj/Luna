@@ -66,7 +66,7 @@ export function HomeContent() {
                 </div>
               </div>
 
-              <TransactionList limit={4} period={period} />
+              <TransactionList period={period} />
             </section>
           </MonthlySummaryProvider>
         </div>

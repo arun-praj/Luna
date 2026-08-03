@@ -36,6 +36,13 @@
       "when": 1785666504490,
       "tag": "0004_strange_betty_brant",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785742554658,
+      "tag": "0005_rapid_komodo",
+      "breakpoints": true
     }
   ]
 }
