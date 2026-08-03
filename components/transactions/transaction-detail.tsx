@@ -1066,7 +1066,7 @@ export function TransactionDetail({
                   )}
                 </div>
               ) : null}
-              <div className="mt-3 grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto overscroll-contain pr-0.5">
+              <div className="mt-3 grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto overscroll-contain pb-[calc(1rem+env(safe-area-inset-bottom))] pr-0.5">
                 {(picker === "category"
                   ? categoryOptions.filter((option) => option.name.toLocaleLowerCase().includes(categorySearch.trim().toLocaleLowerCase()))
                   : [...tagOptions, ...savedTagOptions.filter((tag) => !tagOptions.includes(tag))]
