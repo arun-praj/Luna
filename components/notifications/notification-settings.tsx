@@ -20,6 +20,8 @@ const frequencyOptions = [
   { value: "monthly", label: "Monthly" },
 ] as const;
 
+const isDevelopment = process.env.NODE_ENV === "development";
+
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
   return (
     <button
@@ -108,6 +110,7 @@ export function NotificationSettingsCard({ userId }: Props) {
   }
 
   async function sendTestNotification() {
+    if (!isDevelopment) return;
     const shown = await showBudgetNotification("Luna is ready", "Notifications are working on this device.");
     setMessage(shown ? "Test notification sent" : "Allow notifications first");
     window.setTimeout(() => setMessage(""), 3200);
@@ -179,7 +182,7 @@ export function NotificationSettingsCard({ userId }: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle/50 px-4 py-3">
       {permission === "granted" ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Native notifications enabled</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">Settings are available offline.</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : "Enable alerts"}</button></>}
-        <button type="button" onClick={() => void sendTestNotification()} disabled={permission !== "granted"} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-45"> <Check aria-hidden="true" className="size-3.5" /> Test notification</button>
+        {isDevelopment ? <button type="button" onClick={() => void sendTestNotification()} disabled={permission !== "granted"} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-45"> <Check aria-hidden="true" className="size-3.5" /> Test notification</button> : null}
         </div>
         {message ? <p className="px-4 pb-3 text-[11px] text-muted-foreground">{message}</p> : null}
       </> : null}
