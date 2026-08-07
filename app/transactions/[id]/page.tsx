@@ -33,7 +33,7 @@ export default async function TransactionPage({
       transaction={transaction}
       isNew={id === "new"}
       initialKind={initialKind ?? "expense"}
-      guidedNew={id === "new" && (initialKind === undefined || initialKind === "expense" || initialKind === "income")}
+      guidedNew={id === "new" && (initialKind === undefined || initialKind === "expense" || initialKind === "income" || initialKind === "savings")}
     />
   );
 }

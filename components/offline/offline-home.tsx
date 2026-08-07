@@ -24,6 +24,7 @@ import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { avatarForPreset } from "@/lib/avatar";
 import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
+import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { useOfflineSnapshot } from "@/lib/offline/use-offline-snapshot";
 import {
@@ -74,6 +75,7 @@ function adjustedBalances(accounts: OfflineAccount[], transactions: OfflineTrans
   const balances = new Map(accounts.map((account) => [account.serverId, account.currentBalance]));
   for (const transaction of transactions) {
     if (transaction.syncStatus === "synced") continue;
+    if (transaction.type === "goal_spend") continue;
     const current = balances.get(transaction.accountId) ?? 0;
     if (transaction.type === "income") balances.set(transaction.accountId, current + transaction.amount);
     else if (transaction.type === "adjust_balance") balances.set(transaction.accountId, current + transaction.amount);
@@ -141,6 +143,10 @@ function OfflineTransactionComposer({
   );
   const numericAmount = Number(amount);
   const selectedAccount = accounts.find((account) => account.serverId === effectiveAccountId);
+  const destinationAccount = accounts.find((account) => account.serverId === destinationAccountId);
+  const transferCurrencyError = type === "transfer" && selectedAccount && destinationAccount && selectedAccount.currency !== destinationAccount.currency
+    ? `Cross-currency transfers are not supported yet. Both accounts must use ${selectedAccount.currency}.`
+    : "";
   const projectedBalance = selectedAccount
     ? selectedAccount.currentBalance + (type === "income" ? numericAmount : -numericAmount)
     : 0;
@@ -150,8 +156,10 @@ function OfflineTransactionComposer({
     account: effectiveAccountId ? "" : "Choose an account.",
     category: type === "expense" || type === "income" ? (categoryId ? "" : "Choose a category.") : "",
     destination:
-      type === "transfer" && (!destinationAccountId || destinationAccountId === effectiveAccountId)
-        ? "Choose a different destination account."
+      type === "transfer"
+        ? !destinationAccountId || destinationAccountId === effectiveAccountId
+          ? "Choose a different destination account."
+          : transferCurrencyError
         : "",
     savings:
       type === "savings" && savingsInstruments.length > 0 && !savingsInstrumentId
@@ -282,7 +290,7 @@ function OfflineTransactionComposer({
         {attempted && (errors.amount || errors.balance) ? <p className="mt-1.5 text-xs font-medium text-expense">{errors.amount || errors.balance}</p> : null}
 
         <fieldset className="mt-5 min-w-0">
-          <legend className="text-xs font-semibold text-muted-foreground">{type === "income" ? "Add money to" : type === "transfer" ? "Move money from" : "Pay from"}</legend>
+          <legend className="text-xs font-semibold text-muted-foreground">{type === "income" ? "Add money to" : type === "transfer" ? "Move money from" : "Pay from"} · {selectedAccount?.currency ?? "NPR"}</legend>
           <div className="mt-2 min-w-0 max-w-full overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex w-max min-w-max gap-2">
               {accounts.map((account) => {
@@ -315,9 +323,10 @@ function OfflineTransactionComposer({
               <div className="flex w-max min-w-max gap-2">
                 {accounts.filter((account) => account.serverId !== effectiveAccountId).map((account) => {
                 const selected = destinationAccountId === account.serverId;
+                const incompatibleCurrency = Boolean(selectedAccount && selectedAccount.currency !== account.currency);
                 const accountColor = getAccountBackgroundColor(account.backgroundColor, account.type);
                 return (
-                  <button type="button" key={account.id} onClick={() => setDestinationAccountId(account.serverId)} className={`flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[11px] border px-2 pr-2.5 text-xs font-semibold ${selected ? "border-primary ring-2 ring-primary/15" : "border-border"}`} style={{ backgroundColor: accountColor }}>
+                  <button type="button" key={account.id} disabled={incompatibleCurrency} title={incompatibleCurrency ? `Unavailable: this account uses ${account.currency}` : undefined} onClick={() => setDestinationAccountId(account.serverId)} className={`flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[11px] border px-2 pr-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${selected ? "border-primary ring-2 ring-primary/15" : "border-border"}`} style={{ backgroundColor: accountColor }}>
                     <AccountAvatar icon={account.icon} name={account.name} type={account.type} backgroundColor={accountColor} size={28} />
                     <span className="max-w-24 truncate">{account.name}</span>
                     {selected ? <Check aria-hidden="true" className="size-3.5 stroke-[3]" /> : null}
@@ -327,6 +336,7 @@ function OfflineTransactionComposer({
               </div>
             </div>
             {attempted && errors.destination ? <p className="mt-1 text-xs font-medium text-expense">{errors.destination}</p> : null}
+            {!attempted && selectedAccount && accounts.some((account) => account.serverId !== effectiveAccountId && account.currency !== selectedAccount.currency) ? <p className="mt-1 text-[11px] font-medium text-muted-foreground">Transfers currently require matching currencies.</p> : null}
           </fieldset>
         ) : null}
 
@@ -408,9 +418,20 @@ export function OfflineHome() {
     () => adjustedBalances(snapshot.accounts, snapshot.transactions),
     [snapshot.accounts, snapshot.transactions],
   );
-  const totalBalance = snapshot.accounts
-    .filter((account) => account.includeInTotalBalance)
-    .reduce((total, account) => total + (balances.get(account.serverId) ?? account.currentBalance), 0);
+  const currency = snapshot.profile?.currency ?? snapshot.accounts[0]?.currency ?? "NPR";
+  const balanceByCurrency = useMemo(() => {
+    const totals = {} as Record<string, number>;
+    for (const account of snapshot.accounts) {
+      if (!account.includeInTotalBalance) continue;
+      addCurrencyAmount(totals, account.currency, balances.get(account.serverId) ?? account.currentBalance);
+    }
+    return currencyEntries(totals);
+  }, [balances, snapshot.accounts]);
+  const primaryCurrency = balanceByCurrency.some(([code]) => code === currency)
+    ? currency
+    : balanceByCurrency[0]?.[0] ?? currency;
+  const totalBalance = balanceByCurrency.find(([code]) => code === primaryCurrency)?.[1] ?? 0;
+  const otherBalances = balanceByCurrency.filter(([code]) => code !== primaryCurrency);
   const income = snapshot.transactions.filter((transaction) => transaction.type === "income").reduce((total, transaction) => total + transaction.amount, 0);
   const expenses = snapshot.transactions.filter((transaction) => transaction.type === "expense").reduce((total, transaction) => total + transaction.amount, 0);
   const savings = snapshot.transactions.filter((transaction) => transaction.type === "savings").reduce((total, transaction) => total + transaction.amount, 0);
@@ -418,7 +439,6 @@ export function OfflineHome() {
   const failedCount = snapshot.transactions.filter((transaction) => transaction.syncStatus === "failed").length;
   const queuedCount = pendingCount + failedCount;
   const lastSyncLabel = formatLastSync(snapshot.profile?.cachedAt ?? null);
-  const currency = snapshot.profile?.currency ?? snapshot.accounts[0]?.currency ?? "NPR";
   const firstName = snapshot.profile?.name.trim().split(/\s+/)[0] || "there";
   const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(new Date());
 
@@ -522,9 +542,10 @@ export function OfflineHome() {
                 <p id="offline-balance-heading" className="text-sm font-medium text-muted-foreground">Total balance</p>
                 {isLoading ? <Skeleton className="mt-2 h-11 w-48" /> : (
                   <p className="mt-2 font-sans text-[38px] font-semibold leading-none tracking-[-0.05em] tabular-nums">
-                    <span className="mr-2 text-[16px] tracking-normal text-muted-foreground">{currency}</span>{formatAmount(totalBalance)}
+                    <span className="mr-2 text-[16px] tracking-normal text-muted-foreground">{primaryCurrency}</span>{formatCurrencyAmount(totalBalance)}
                   </p>
                 )}
+                {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([code, amount], index) => <span key={code}>{index ? " · " : ""}{code} {formatCurrencyAmount(amount)}</span>)}</p> : null}
               </div>
               {queuedCount ? (
                 <span className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-info-soft px-2.5 py-1 text-[11px] font-semibold text-info">
@@ -572,14 +593,17 @@ export function OfflineHome() {
             ) : (
               <div className="mt-4 overflow-hidden rounded-[14px] border border-border bg-card">
                 {snapshot.transactions.map((transaction, index) => {
-                  const positive = transaction.type === "income";
+                  const positive = transaction.type === "income" || transaction.type === "savings";
+                  const adjustmentSign = transaction.type === "adjust_balance"
+                    ? transaction.amount >= 0 ? "+" : "−"
+                    : null;
                   return (
                     <article key={transaction.id} className={`flex items-center gap-3 px-4 py-3.5 ${index ? "border-t border-border" : ""}`}>
                       <TransactionIcon transaction={transaction} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-3">
                           <h3 className="truncate text-sm font-semibold">{transaction.title}</h3>
-                          <p className={`shrink-0 text-sm font-semibold tabular-nums ${positive ? "text-income" : transaction.type === "transfer" ? "text-info" : "text-expense"}`}>{positive ? "+" : transaction.type === "transfer" ? "" : "−"}{transaction.accountCurrency} {formatAmount(transaction.amount)}</p>
+                          <p className={`shrink-0 text-sm font-semibold tabular-nums ${positive || adjustmentSign === "+" ? "text-income" : transaction.type === "transfer" ? "text-info" : "text-expense"}`}>{positive ? "+" : adjustmentSign ?? (transaction.type === "transfer" ? "" : "−")}{transaction.accountCurrency} {formatAmount(Math.abs(transaction.amount))}</p>
                         </div>
                         <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
                           <span className="truncate">{transaction.notes || transaction.categoryName || transaction.type}</span>

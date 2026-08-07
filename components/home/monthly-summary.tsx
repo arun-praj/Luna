@@ -6,12 +6,12 @@ import {
   createContext,
   useContext,
   useEffect,
-  useMemo,
   useState,
   type ReactNode,
 } from "react";
 
 import { authenticatedFetch } from "@/lib/auth-client";
+import { currencyEntries, formatCurrencyAmount, type CurrencyTotals } from "@/lib/currency";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { Skeleton } from "@/components/ui/data-skeleton";
 import type { AppliedPeriod } from "@/components/home/date-picker";
@@ -21,9 +21,7 @@ type Account = {
 };
 
 type MonthlySummary = {
-  income: number;
-  expenses: number;
-  savings: number;
+  totalsByCurrency: Record<string, { income: number; expenses: number; savings: number }>;
   currency: string;
   isLoading: boolean;
 };
@@ -49,13 +47,6 @@ function currentMonthRange() {
   };
 }
 
-function formatAmount(amount: number) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
 function useMonthlySummary() {
   const summary = useContext(MonthlySummaryContext);
   if (!summary) {
@@ -68,9 +59,7 @@ function useMonthlySummary() {
 
 export function MonthlySummaryProvider({ children, period }: { children: ReactNode; period?: AppliedPeriod }) {
   const [summary, setSummary] = useState<MonthlySummary>({
-    income: 0,
-    expenses: 0,
-    savings: 0,
+    totalsByCurrency: { NPR: { income: 0, expenses: 0, savings: 0 } },
     currency: "NPR",
     isLoading: true,
   });
@@ -110,35 +99,27 @@ export function MonthlySummaryProvider({ children, period }: { children: ReactNo
         const transactions = transactionsResult.transactions ?? [];
         const accounts = accountsResult.accounts ?? [];
         const userCurrency = profileResult?.user?.currency;
-        const currencies = [
-          ...new Set([
-            ...accounts.map((account) => account.currency),
-            ...transactions.map((transaction) => transaction.accountCurrency),
-          ]),
-        ];
-
-        const nextSummary = transactions.reduce(
+        const totalsByCurrency = transactions.reduce(
           (totals, transaction) => {
-            if (transaction.type === "income")
-              totals.income += transaction.amount;
-            if (transaction.type === "expense")
-              totals.expenses += transaction.amount;
-            if (transaction.type === "savings")
-              totals.savings += transaction.amount;
+            const currency = transaction.accountCurrency || userCurrency || "NPR";
+            const current = totals[currency] ?? { income: 0, expenses: 0, savings: 0 };
+            if (transaction.type === "income") current.income += transaction.amount;
+            if (transaction.type === "expense") current.expenses += transaction.amount;
+            if (transaction.type === "savings") current.savings += transaction.amount;
+            totals[currency] = current;
             return totals;
           },
-          { income: 0, expenses: 0, savings: 0 },
+          {} as Record<string, { income: number; expenses: number; savings: number }>,
         );
+        if (!Object.keys(totalsByCurrency).length) {
+          totalsByCurrency[userCurrency ?? accounts[0]?.currency ?? "NPR"] = { income: 0, expenses: 0, savings: 0 };
+        }
+        const currencies = Object.keys(totalsByCurrency).sort();
 
         if (active) {
           setSummary({
-            ...nextSummary,
-            currency:
-              userCurrency ?? (currencies.length === 1
-                ? currencies[0]
-                : currencies.length > 1
-                  ? "Mixed"
-                  : "NPR"),
+            totalsByCurrency,
+            currency: currencies.length === 1 ? currencies[0] : "Mixed",
             isLoading: false,
           });
         }
@@ -187,61 +168,73 @@ export function MonthlyOverviewCards() {
   const summary = useMonthlySummary();
 
   return (
-    <section
-      aria-label="Monthly overview"
-      data-tour="monthly-overview"
-      className={`mt-8 grid divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card min-[360px]:grid-cols-3 min-[360px]:divide-x min-[360px]:divide-y-0 ${summary.isLoading ? "" : "route-data-reveal"}`}
-    >
-      {overview.map((item) => {
-        const Icon = item.icon;
-        const value = summary[item.key];
+    <div className="mt-8">
+      <section
+        aria-label="Monthly overview"
+        data-tour="monthly-overview"
+        className={`grid divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card min-[360px]:grid-cols-3 min-[360px]:divide-x min-[360px]:divide-y-0 ${summary.isLoading ? "" : "route-data-reveal"}`}
+      >
+        {overview.map((item) => {
+          const Icon = item.icon;
+          const values = currencyEntries(
+            Object.fromEntries(
+              Object.entries(summary.totalsByCurrency).map(([currency, totals]) => [currency, totals[item.key as "income" | "expenses" | "savings"]]),
+            ) as CurrencyTotals,
+          );
+          const visibleValues = values.some(([, value]) => value !== 0) ? values.filter(([, value]) => value !== 0) : values.slice(0, 1);
 
-        return (
-          <Link
-            href={`/analytics/${item.key === "expenses" ? "expenses" : item.key}`}
-            aria-label={`View analytics for ${item.label}`}
-            className="flex min-w-0 items-center gap-3 px-4 py-3.5 min-[360px]:block min-[360px]:px-3 min-[360px]:py-4 sm:px-5"
-            key={item.label}
-          >
-            <span
-              className={`flex size-8 shrink-0 items-center justify-center rounded-[9px] ${item.iconClassName}`}
+          return (
+            <Link
+              href={`/analytics/${item.key === "expenses" ? "expenses" : item.key}`}
+              aria-label={`View analytics for ${item.label}`}
+              className="min-w-0 px-4 py-3.5 min-[360px]:block min-[360px]:px-3 min-[360px]:py-4 sm:px-5"
+              key={item.label}
             >
-              <Icon aria-hidden="true" className="size-4" />
-            </span>
-            <p className="text-[13px] font-medium text-muted-foreground min-[360px]:mt-4">
-              {item.label}
-            </p>
-            <p
-              className={`ml-auto text-[17px] font-semibold tracking-[-0.02em] tabular-nums min-[360px]:ml-0 min-[360px]:mt-1 min-[360px]:text-[16px] sm:text-[18px] ${item.color}`}
-            >
-              {summary.isLoading ? (
-                <Skeleton className="ml-auto h-5 w-16 min-[360px]:ml-0" />
-              ) : (
-                <>{summary.currency !== "Mixed" ? <span className="mr-1 text-[12px] font-semibold tracking-normal">{summary.currency}</span> : null}{formatAmount(value)}</>
-              )}
-            </p>
-          </Link>
-        );
-      })}
-    </section>
+              <span
+                className={`flex size-8 shrink-0 items-center justify-center rounded-[9px] ${item.iconClassName}`}
+              >
+                <Icon aria-hidden="true" className="size-4" />
+              </span>
+              <p className="mt-4 text-[13px] font-medium text-muted-foreground">
+                {item.label}
+              </p>
+              <p
+                className={`mt-1 text-[17px] font-semibold tracking-[-0.02em] tabular-nums min-[360px]:text-[16px] sm:text-[18px] ${item.color}`}
+              >
+                {summary.isLoading ? (
+                  <Skeleton className="h-5 w-16" />
+                ) : (
+                  <span className={visibleValues.length > 1 ? "space-y-0.5" : ""}>
+                    {visibleValues.map(([currency, value]) => <span className="block" key={currency}>{currency} {formatCurrencyAmount(value)}</span>)}
+                  </span>
+                )}
+              </p>
+            </Link>
+          );
+        })}
+      </section>
+    </div>
   );
 }
 
 export function MonthlyCashFlow() {
   const summary = useMonthlySummary();
-  const cashFlow = useMemo(
-    () => summary.income - summary.expenses,
-    [summary.expenses, summary.income],
+  const cashFlows = currencyEntries(
+    Object.fromEntries(
+      Object.entries(summary.totalsByCurrency).map(([currency, totals]) => [currency, totals.income - totals.expenses]),
+    ) as CurrencyTotals,
   );
-  const prefix = cashFlow < 0 ? "−" : "+";
+  const visibleCashFlows = cashFlows.some(([, value]) => value !== 0) ? cashFlows.filter(([, value]) => value !== 0) : cashFlows.slice(0, 1);
 
   return (
-    <p className={`mt-0.5 text-[15px] font-semibold tabular-nums ${cashFlow < 0 ? "text-expense" : "text-income"}`}>
+    <p className={`mt-0.5 text-[15px] font-semibold tabular-nums ${visibleCashFlows.some(([, value]) => value < 0) ? "text-expense" : "text-income"}`}>
       {summary.isLoading ? (
         <Skeleton className="h-5 w-24" />
       ) : (
         <span className="inline-block route-data-reveal">
-          {`${prefix}${summary.currency === "Mixed" ? "" : `${summary.currency} `}${formatAmount(Math.abs(cashFlow))}`}
+          <span className={visibleCashFlows.length > 1 ? "space-y-0.5" : ""}>
+            {visibleCashFlows.map(([currency, value]) => <span className="block" key={currency}>{value < 0 ? "−" : "+"}{currency} {formatCurrencyAmount(Math.abs(value))}</span>)}
+          </span>
         </span>
       )}
     </p>

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { AlertCircle, Eye, EyeOff, Info, LoaderCircle, LockKeyhole, Mail } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authenticatedFetch, clearApiCache, safeReturnPath, setAccessToken } from "@/lib/auth-client";
+import type { PublicUserProfile } from "@/backend/auth/profile";
+import { authenticatedFetch, clearApiCache, primeApiCache, safeReturnPath, setAccessToken } from "@/lib/auth-client";
 
 export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -14,11 +15,14 @@ export function LoginForm() {
   const [challengeToken, setChallengeToken] = useState("");
   const [returnPath] = useState(() => typeof window === "undefined" ? "/" : safeReturnPath(new URLSearchParams(window.location.search).get("next")));
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const sessionCheckAbort = useRef<AbortController | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     let active = true;
-    void authenticatedFetch("/api/auth/me")
+    const controller = new AbortController();
+    sessionCheckAbort.current = controller;
+    void authenticatedFetch("/api/auth/me", { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) return;
         const result = (await response.json()) as { user?: { onboardingCompleted?: boolean; emailVerifiedAt?: string | null } };
@@ -30,6 +34,8 @@ export function LoginForm() {
       });
     return () => {
       active = false;
+      controller.abort();
+      if (sessionCheckAbort.current === controller) sessionCheckAbort.current = null;
     };
   }, [returnPath, router]);
 
@@ -38,6 +44,10 @@ export function LoginForm() {
     setIsSubmitting(true);
     setMessage("");
     setMessageTone("");
+    // Do not let the initial session probe finish after login and clear the
+    // access token that was just issued.
+    sessionCheckAbort.current?.abort();
+    sessionCheckAbort.current = null;
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch(challengeToken ? "/api/auth/login/2fa" : "/api/auth/login", {
@@ -49,12 +59,13 @@ export function LoginForm() {
         }),
       });
       const responseText = await response.text();
-      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string } = {};
+      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string; user?: PublicUserProfile } = {};
       try {
         result = responseText.trim()
-          ? (JSON.parse(responseText) as {
+            ? (JSON.parse(responseText) as {
               accessToken?: string;
               error?: string;
+              user?: PublicUserProfile;
             })
           : {};
       } catch {
@@ -74,12 +85,10 @@ export function LoginForm() {
       if (!result.accessToken)
         throw new Error("Login response was missing an access token.");
       clearApiCache();
+      if (result.user) primeApiCache("/api/auth/me", { user: result.user });
       setAccessToken(result.accessToken);
-      const resultWithUser = result as typeof result & {
-        user?: { onboardingCompleted?: boolean; emailVerifiedAt?: string | null };
-      };
       router.push(
-        resultWithUser.user?.emailVerifiedAt ? (resultWithUser.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`,
+        result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`,
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to log in");
@@ -178,7 +187,7 @@ export function LoginForm() {
 
         <button
           type="submit"
-          disabled={isSubmitting || isCheckingSession}
+          disabled={isSubmitting}
           className="min-h-12 w-full rounded-[13px] bg-primary px-5 text-[15px] font-semibold text-primary-foreground shadow-[0_8px_18px_rgb(53_107_104_/_0.15)] transition-[background-color,transform,box-shadow] hover:bg-primary-hover hover:shadow-[0_10px_24px_rgb(53_107_104_/_0.2)] active:translate-y-px focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/20"
         >
           {isSubmitting ? <LoaderCircle aria-hidden="true" className="mx-auto size-5 animate-spin" /> : challengeToken ? "Verify code" : "Log in"}

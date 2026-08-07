@@ -3,13 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownLeft,
   ArrowLeft,
-  ArrowLeftRight,
-  ArrowUpRight,
   Edit3,
-  SlidersHorizontal,
-  WalletCards,
 } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
@@ -18,6 +13,8 @@ import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
 import { MoneyEditor } from "@/components/money/money-editor";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
+import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
+import { transactionTypeMeta as transactionMeta } from "@/components/transactions/transaction-presentation";
 import {
   ListDataSkeleton,
   PageDataSkeleton,
@@ -44,12 +41,17 @@ type Account = {
 
 type AccountTransaction = {
   id: string;
-  type: "expense" | "income" | "savings" | "transfer" | "adjust_balance";
+  type: "expense" | "income" | "savings" | "transfer" | "adjust_balance" | "goal_spend";
   amount: number;
+  title: string;
   categoryId: string | null;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  categoryColor: string | null;
   notes: string | null;
   date: string;
   transferToAccountId: string | null;
+  goalId: string | null;
 };
 
 type Category = { id: string; name: string; type: "expense" | "income" };
@@ -63,44 +65,6 @@ const typeLabels: Record<Account["type"], string> = {
   loan: "Loan account",
   other: "Other account",
 };
-
-const transactionMeta = {
-  expense: {
-    label: "Expense",
-    icon: ArrowDownLeft,
-    iconClassName: "bg-expense-soft text-expense",
-    amountClassName: "text-expense",
-    prefix: "−",
-  },
-  income: {
-    label: "Income",
-    icon: ArrowUpRight,
-    iconClassName: "bg-income-soft text-income",
-    amountClassName: "text-income",
-    prefix: "+",
-  },
-  savings: {
-    label: "Savings",
-    icon: WalletCards,
-    iconClassName: "bg-info-soft text-info",
-    amountClassName: "text-info",
-    prefix: "−",
-  },
-  transfer: {
-    label: "Transfer",
-    icon: ArrowLeftRight,
-    iconClassName: "bg-info-soft text-info",
-    amountClassName: "text-info",
-    prefix: "",
-  },
-  adjust_balance: {
-    label: "Balance adjustment",
-    icon: SlidersHorizontal,
-    iconClassName: "bg-primary-soft text-primary",
-    amountClassName: "text-primary",
-    prefix: "",
-  },
-} as const;
 
 function formatAmount(amount: number) {
   return new Intl.NumberFormat("en-US", {
@@ -419,31 +383,46 @@ export default function AccountActivityPage({
             <div className="mt-4 overflow-hidden rounded-[14px] border border-border bg-card">
               {transactions.map((transaction, index) => {
                 const meta = transactionMeta[transaction.type];
-                const Icon = meta.icon;
                 const detail = transaction.categoryId
                   ? categoryNames.get(transaction.categoryId)
                   : null;
+                const categoryName = transaction.categoryName ?? detail;
+                const hasCategoryAppearance = Boolean(
+                  transaction.categoryIcon || categoryName,
+                );
+                const categoryColor = transaction.categoryColor ?? "#dcece7";
+                const Icon = hasCategoryAppearance
+                  ? getCategoryIcon(transaction.categoryIcon, categoryName ?? undefined)
+                  : meta.icon;
                 return (
                   <div
                     key={transaction.id}
                     className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-border" : ""}`}
                   >
                     <span
-                      className={`flex size-10 shrink-0 items-center justify-center rounded-[11px] ${meta.iconClassName}`}
+                      className={`flex size-10 shrink-0 items-center justify-center rounded-[11px] ${hasCategoryAppearance ? "" : meta.iconClassName}`}
+                      style={hasCategoryAppearance ? {
+                        backgroundColor: categoryColor,
+                        color: getCategoryForeground(categoryColor),
+                      } : undefined}
                     >
                       <Icon aria-hidden="true" className="size-[18px]" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-3">
                         <p className="truncate text-[14px] font-semibold">
-                          {detail || meta.label}
+                          {transaction.title || categoryName || meta.label}
                         </p>
                         <p
                           className={`shrink-0 text-[14px] font-semibold tabular-nums ${meta.amountClassName}`}
                         >
                           {transaction.type === "adjust_balance"
                             ? transaction.amount >= 0 ? "+" : "−"
-                            : meta.prefix}
+                            : transaction.type === "savings" && transaction.goalId
+                              ? transaction.amount < 0 ? "+" : "−"
+                              : transaction.type === "goal_spend"
+                                ? ""
+                                : meta.prefix}
                           {formatAmount(Math.abs(transaction.amount))} {account.currency}
                         </p>
                       </div>

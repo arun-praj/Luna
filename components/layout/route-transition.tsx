@@ -33,9 +33,16 @@ export function RouteTransition() {
       const destinationHasEntryClass =
         main?.classList.contains("page-route-enter") ||
         main?.classList.contains("profile-route-enter");
-      if (destinationHasEntryClass || attempts >= 180) {
-        main?.classList.remove("page-route-enter");
-        main?.classList.remove("profile-route-enter");
+      const destinationHasExitClass =
+        main?.classList.contains("page-route-exit") ||
+        main?.classList.contains("profile-route-exit");
+      if (destinationHasEntryClass || destinationHasExitClass || attempts >= 180) {
+        main?.classList.remove(
+          "page-route-enter",
+          "profile-route-enter",
+          "page-route-exit",
+          "profile-route-exit",
+        );
         delete document.body.dataset.routeTransition;
         return;
       }

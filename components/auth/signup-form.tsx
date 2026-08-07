@@ -28,9 +28,17 @@ export function SignupForm() {
           password: form.get("password"),
         }),
       });
-      const result = await response.json();
+      const result = (await response.json()) as {
+        error?: string;
+        accessToken?: string;
+        user?: {
+          emailVerifiedAt?: string | null;
+          onboardingCompleted?: boolean;
+        };
+      };
       if (!response.ok)
         throw new Error(result.error ?? "Unable to create account");
+      if (!result.accessToken) throw new Error("Unable to create account session");
       clearApiCache();
       setAccessToken(result.accessToken);
       router.push(result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? "/" : "/onboarding") : "/verify-email?next=/onboarding");

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, CalendarDays, Landmark } from "lucide-react";
+import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, Landmark } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
@@ -17,7 +17,7 @@ const chartColors = ["#9e514b", "#95631e", "#735b8f", "#2f7d5a", "#a9512e", "#53
 
 const pageMeta = {
   income: { label: "Income", description: "How much you earn each month", icon: ArrowDownLeft, iconClassName: "bg-income-soft text-income", chartTitle: "Monthly income", chartDescription: "Your earnings over the last 12 months" },
-  expenses: { label: "Expenses", description: "Where your money goes", icon: ArrowUpRight, iconClassName: "bg-expense-soft text-expense", chartTitle: "Spending by category", chartDescription: "The categories taking the biggest share" },
+  expenses: { label: "Expenses", description: "Where your money goes", icon: ArrowUpRight, iconClassName: "bg-expense-soft text-expense", chartTitle: "Spending by category", chartDescription: "See how your spending was distributed during this period" },
   savings: { label: "Savings", description: "How much you set aside", icon: Landmark, iconClassName: "bg-primary-soft text-primary", chartTitle: "Monthly savings", chartDescription: "Your progress month by month" },
 } as const;
 
@@ -122,14 +122,14 @@ function MobileTrendChart({ points, currency, periodLabel }: { points: MonthPoin
   );
 }
 
-function ExpenseDonut({ slices, currency }: { slices: Array<{ name: string; amount: number; color: string }>; currency: string }) {
+function ExpenseDonut({ slices, currency, expanded = false }: { slices: Array<{ name: string; amount: number; color: string }>; currency: string; expanded?: boolean }) {
   const total = slices.reduce((sum, slice) => sum + slice.amount, 0);
   let cursor = 0;
   const gradient = slices.length ? slices.map((slice) => { const start = cursor; cursor += (slice.amount / total) * 360; return `${slice.color} ${start}deg ${cursor}deg`; }).join(", ") : "#e7ece9 0deg 360deg";
   return (
     <div className="grid items-center gap-5 min-[420px]:grid-cols-[150px_1fr]">
       <div className="mx-auto grid size-44 place-items-center rounded-full min-[420px]:size-36" style={{ background: `conic-gradient(${gradient})` }} role="img" aria-label="Expense category donut chart"><div className="grid size-[110px] place-items-center rounded-full bg-card text-center min-[420px]:size-[92px]"><span><span className="block text-[11px] font-medium text-muted-foreground">Total spent</span><strong className="mt-1 block text-sm">{currencyAmount(total, currency)}</strong></span></div></div>
-      <div className="space-y-2.5">{slices.length ? slices.map((slice) => <div key={slice.name} className="flex items-center gap-2 text-xs"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: slice.color }} /><span className="min-w-0 flex-1 truncate font-medium">{slice.name}</span><span className="shrink-0 tabular-nums text-muted-foreground">{currencyAmount(slice.amount, currency)}</span></div>) : <p className="text-sm text-muted-foreground">Expense categories will appear after you add transactions.</p>}</div>
+      <div className="space-y-2.5">{slices.length ? slices.map((slice) => <div key={slice.name} className="flex items-start gap-2 text-xs"><span className="mt-1 size-2.5 shrink-0 rounded-full" style={{ backgroundColor: slice.color }} /><span className={`min-w-0 flex-1 font-medium ${expanded ? "break-words" : "truncate"}`}>{slice.name}</span><span className="shrink-0 tabular-nums text-muted-foreground">{currencyAmount(slice.amount, currency)}</span></div>) : <p className="text-sm text-muted-foreground">Expense categories will appear after you add transactions.</p>}</div>
     </div>
   );
 }
@@ -153,12 +153,13 @@ function SavingsBars({ points, currency, periodLabel }: { points: MonthPoint[]; 
   );
 }
 
-function RelatedTransactions({ transactions, currency }: { transactions: ApiTransaction[]; currency: string }) {
+function RelatedTransactions({ transactions, currency, expanded = false }: { transactions: ApiTransaction[]; currency: string; expanded?: boolean }) {
   if (!transactions.length) return <div className="rounded-[14px] border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">Related transactions will appear here after you add one.</div>;
-  return <div className="divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card">{transactions.slice(0, 12).map((transaction) => { const Icon = getCategoryIcon(transaction.categoryIcon, transaction.categoryName ?? undefined); return <div key={transaction.id} className="flex items-center gap-3 px-3.5 py-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-[10px]" style={{ backgroundColor: transaction.categoryColor ?? "#e3eee9", color: getCategoryForeground(transaction.categoryColor) }}><Icon aria-hidden="true" className="size-[17px]" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{transaction.title || transaction.categoryName || "Transaction"}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{transaction.categoryName ?? "Uncategorized"} · {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(`${transaction.date}T12:00:00`))}</p></div><p className={`shrink-0 text-sm font-semibold tabular-nums ${transaction.type === "expense" ? "text-expense" : "text-income"}`}>{transaction.type === "expense" ? "−" : "+"}{currencyAmount(transaction.amount, currency)}</p></div>; })}</div>;
+  const visibleTransactions = expanded ? transactions : transactions.slice(0, 12);
+  return <div className="divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card">{visibleTransactions.map((transaction) => { const Icon = getCategoryIcon(transaction.categoryIcon, transaction.categoryName ?? undefined); return <div key={transaction.id} className="flex items-center gap-3 px-3.5 py-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-[10px]" style={{ backgroundColor: transaction.categoryColor ?? "#e3eee9", color: getCategoryForeground(transaction.categoryColor) }}><Icon aria-hidden="true" className="size-[17px]" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{transaction.title || transaction.categoryName || "Transaction"}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{transaction.categoryName ?? "Uncategorized"} · {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(`${transaction.date}T12:00:00`))}</p></div><p className={`shrink-0 text-sm font-semibold tabular-nums ${transaction.type === "expense" ? "text-expense" : "text-income"}`}>{transaction.type === "expense" ? "−" : "+"}{currencyAmount(transaction.amount, currency)}</p></div>; })}</div>;
 }
 
-export function AnalyticsDetail({ type }: { type: AnalyticsType }) {
+export function AnalyticsDetail({ type, expanded = false }: { type: AnalyticsType; expanded?: boolean }) {
   const [transactions, setTransactions] = useState<ApiTransaction[]>([]);
   const [currency, setCurrency] = useState("NPR");
   const [isLoading, setIsLoading] = useState(true);
@@ -215,22 +216,24 @@ export function AnalyticsDetail({ type }: { type: AnalyticsType }) {
       }
     }
     const entries = [...categoryTotals.entries()].sort((left, right) => right[1] - left[1]);
-    const slices = entries.slice(0, 6).map(([name, amount], index) => ({ name, amount, color: chartColors[index % chartColors.length] }));
-    const other = entries.slice(6).reduce((sum, [, amount]) => sum + amount, 0);
-    if (other) slices.push({ name: "Other", amount: other, color: chartColors[7] });
+    const slices = (expanded ? entries : entries.slice(0, 6)).map(([name, amount], index) => ({ name, amount, color: chartColors[index % chartColors.length] }));
+    if (!expanded) {
+      const other = entries.slice(6).reduce((sum, [, amount]) => sum + amount, 0);
+      if (other) slices.push({ name: "Other", amount: other, color: chartColors[7] });
+    }
     const total = related.reduce((sum, transaction) => sum + transaction.amount, 0);
     return { points, related, slices, total };
-  }, [period, transactions, type]);
+  }, [expanded, period, transactions, type]);
 
   return (
     <main className="page-route-enter min-h-screen bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-10 sm:px-5">
-        <header className="sticky top-0 z-30 -mx-4 flex items-center gap-3 border-b border-border bg-background/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-5 sm:px-5 sm:pt-7"><Link href="/" aria-label="Back to overview" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground hover:bg-surface-subtle"><ArrowLeft aria-hidden="true" className="size-5" /></Link><span className={`flex size-11 shrink-0 items-center justify-center rounded-[11px] ${meta.iconClassName}`}><TypeIcon aria-hidden="true" className="size-5" /></span><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">Analytics</p><h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">{meta.label}</h1></div><DatePicker initialMode="last" initialLabel={period.label} triggerLabel="Filter" onApply={(nextPeriod) => setPeriod(normalizePeriod(nextPeriod))} /></header>
-        <section className="mt-7"><div className="min-w-0"><p className="text-sm font-medium text-muted-foreground">{rangeLabel}</p><h2 className="mt-3 text-[30px] font-semibold tracking-[-0.05em]">{meta.description}</h2></div><p className="mt-2 text-sm leading-6 text-muted-foreground">Explore the chart and the transactions behind this number.</p></section>
+        <header className="sticky top-0 z-30 -mx-4 flex items-center gap-3 border-b border-border bg-background/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-5 sm:px-5 sm:pt-7"><Link href={expanded ? "/analytics/expenses" : "/"} aria-label={expanded ? "Back to expenses analytics" : "Back to overview"} className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground hover:bg-surface-subtle"><ArrowLeft aria-hidden="true" className="size-5" /></Link><span className={`flex size-11 shrink-0 items-center justify-center rounded-[11px] ${meta.iconClassName}`}><TypeIcon aria-hidden="true" className="size-5" /></span><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">Analytics</p><h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">{meta.label}</h1></div><DatePicker initialMode="last" initialLabel={period.label} triggerLabel="Filter" onApply={(nextPeriod) => setPeriod(normalizePeriod(nextPeriod))} /></header>
+        <section className="mt-7"><div className="min-w-0"><p className="text-sm font-medium text-muted-foreground">{rangeLabel}</p><h2 className="mt-3 text-[30px] font-semibold tracking-[-0.05em]">{meta.description}</h2></div></section>
         {error ? <p role="alert" className="mt-5 rounded-[12px] border border-expense/25 bg-expense-soft px-4 py-3 text-sm font-medium text-expense">{error}</p> : null}
         {isLoading ? <div className="mt-6 space-y-3"><ListDataSkeleton rows={4} /></div> : <>
-          <section className="mt-7 rounded-[16px] border border-border bg-card p-4 shadow-[0_12px_32px_rgb(23_32_29_/_0.06)] sm:p-5"><div className="flex items-start gap-3"><span className={`flex size-10 shrink-0 items-center justify-center rounded-[10px] ${meta.iconClassName}`}><TypeIcon aria-hidden="true" className="size-5" /></span><div><h2 className="text-base font-semibold">{meta.chartTitle}</h2><p className="mt-1 text-xs text-muted-foreground">{meta.chartDescription}</p></div></div><div className="mt-5">{type === "income" ? <TrendChart points={analytics.points} currency={currency} periodLabel={periodLabel} /> : type === "expenses" ? <ExpenseDonut slices={analytics.slices} currency={currency} /> : <SavingsBars points={analytics.points} currency={currency} periodLabel={periodLabel} />}</div></section>
-          <section className="mt-5"><div className="mb-3 flex items-end justify-between gap-3"><div><p className="text-xs font-medium text-muted-foreground">{rangeLabel}</p><h2 className="mt-1 text-xl font-semibold tracking-[-0.03em]">Related transactions</h2></div><p className={`text-sm font-semibold tabular-nums ${type === "expenses" ? "text-expense" : "text-income"}`}>{type === "expenses" ? "−" : "+"}{currencyAmount(analytics.total, currency)}</p></div><RelatedTransactions transactions={analytics.related} currency={currency} /></section>
+          <section className="mt-7 rounded-[16px] border border-border bg-card p-4 shadow-[0_12px_32px_rgb(23_32_29_/_0.06)] sm:p-5"><div className="flex items-start gap-3"><span className={`flex size-10 shrink-0 items-center justify-center rounded-[10px] ${meta.iconClassName}`}><TypeIcon aria-hidden="true" className="size-5" /></span><div className="min-w-0 flex-1"><h2 className="text-base font-semibold">{meta.chartTitle}</h2><p className="mt-1 text-xs text-muted-foreground">{meta.chartDescription}</p></div>{type === "expenses" && !expanded ? <Link href="/analytics/details/expense/expand" className="inline-flex shrink-0 items-center gap-1 rounded-[8px] px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">See more<ArrowRight aria-hidden="true" className="size-3.5" /></Link> : null}</div><div className="mt-5">{type === "income" ? <TrendChart points={analytics.points} currency={currency} periodLabel={periodLabel} /> : type === "expenses" ? <ExpenseDonut slices={analytics.slices} currency={currency} expanded={expanded} /> : <SavingsBars points={analytics.points} currency={currency} periodLabel={periodLabel} />}</div></section>
+          <section className="mt-5"><div className="mb-3 flex items-end justify-between gap-3"><div><p className="text-xs font-medium text-muted-foreground">{rangeLabel}</p><h2 className="mt-1 text-xl font-semibold tracking-[-0.03em]">Related transactions</h2></div><div className="flex items-center gap-3">{!expanded && type === "expenses" && analytics.related.length > 12 ? <Link href="/analytics/details/expense/expand" className="text-xs font-semibold text-primary transition-colors hover:text-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">See all</Link> : null}<p className={`text-sm font-semibold tabular-nums ${type === "expenses" ? "text-expense" : "text-income"}`}>{type === "expenses" ? "−" : "+"}{currencyAmount(analytics.total, currency)}</p></div></div><RelatedTransactions transactions={analytics.related} currency={currency} expanded={expanded} /></section>
         </>}
         <p className="mt-6 flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground"><CalendarDays aria-hidden="true" className="size-3.5" />Based on your recorded transactions</p>
       </div>

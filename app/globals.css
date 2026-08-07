@@ -107,12 +107,10 @@
 @keyframes profile-route-enter {
   0% {
     opacity: 0;
-    transform: translate3d(0, 8px, 0);
   }
 
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -218,6 +216,13 @@
 body[data-route-transition="return"] .page-route-enter,
 body[data-route-transition="return"] .profile-route-enter {
   animation: none !important;
+}
+
+/* Keep every modal/drawer above and isolated from the page behind it. */
+html:has([aria-modal="true"]),
+body:has([aria-modal="true"]) {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .drawer-scrim-enter {
@@ -367,6 +372,10 @@ body[data-route-transition="return"] .profile-route-enter {
 }
 
 :root {
+  /* Keep typography local so the Worker build never emits machine-specific
+     font URLs or depends on a build-time Google Fonts fetch. */
+  --font-geist-sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --background: #f7f8f6;
   --foreground: #17201d;
   --card: oklch(1 0 0);

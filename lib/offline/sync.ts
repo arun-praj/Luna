@@ -2,6 +2,10 @@
 
 import { authenticatedFetch } from "@/lib/auth-client";
 import {
+  checkInternetConnection,
+  markOfflineSnapshotRefreshed,
+} from "@/lib/offline/connectivity";
+import {
   getActiveOfflineUserId,
   getOfflineDatabase,
   localDocumentId,
@@ -17,9 +21,9 @@ import type {
   OfflineTransactionInput,
 } from "@/lib/offline/types";
 
-const NETWORK_STATUS_EVENT = "cocomelon:network-status";
-const CONNECTION_TIMEOUT_MS = 5_000;
 const SYNC_REQUEST_TIMEOUT_MS = 12_000;
+
+export { checkInternetConnection, dispatchNetworkStatus, subscribeToNetworkStatus } from "@/lib/offline/connectivity";
 
 type PublicProfileResponse = {
   user: {
@@ -122,44 +126,6 @@ function toOfflineTransaction(userId: string, transaction: ServerTransaction): O
   };
 }
 
-export function dispatchNetworkStatus(online: boolean) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(NETWORK_STATUS_EVENT, { detail: { online } }));
-}
-
-export function subscribeToNetworkStatus(listener: (online: boolean) => void) {
-  const handler = (event: Event) => {
-    listener(Boolean((event as CustomEvent<{ online?: boolean }>).detail?.online));
-  };
-  window.addEventListener(NETWORK_STATUS_EVENT, handler);
-  return () => window.removeEventListener(NETWORK_STATUS_EVENT, handler);
-}
-
-export async function checkInternetConnection() {
-  if (typeof window === "undefined") {
-    dispatchNetworkStatus(false);
-    return false;
-  }
-  // navigator.onLine is only a browser hint and can stay false after a captive
-  // portal or network handoff. The same-origin probe is the authoritative check.
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
-  try {
-    const response = await fetch(`/api/pwa/connectivity?t=${Date.now()}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    const online = response.ok;
-    dispatchNetworkStatus(online);
-    return online;
-  } catch {
-    dispatchNetworkStatus(false);
-    return false;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
 async function syncFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), SYNC_REQUEST_TIMEOUT_MS);
@@ -257,12 +223,22 @@ export async function refreshOfflineSnapshot() {
     db.profiles.upsert(profile),
     db.accounts.bulkUpsert(accounts),
     db.categories.bulkUpsert(categories),
-    savingsInstruments.length
-      ? db.savingsInstruments.bulkUpsert(savingsInstruments)
-      : Promise.resolve(),
-    remoteTransactions.length
-      ? db.transactions.bulkUpsert(remoteTransactions)
-      : Promise.resolve(),
+    db.savingsInstruments.bulkUpsert(savingsInstruments),
+    db.transactions.bulkUpsert(remoteTransactions),
+  ]);
+
+  const [cachedAccounts, cachedCategories, cachedSavingsInstruments] = await Promise.all([
+    db.accounts.find({ selector: { userId } }).exec(),
+    db.categories.find({ selector: { userId } }).exec(),
+    db.savingsInstruments.find({ selector: { userId } }).exec(),
+  ]);
+  const remoteAccountIds = new Set(accounts.map((account) => account.serverId));
+  const remoteCategoryIds = new Set(categories.map((category) => category.serverId));
+  const remoteSavingsInstrumentIds = new Set(savingsInstruments.map((instrument) => instrument.serverId));
+  await Promise.all([
+    ...cachedAccounts.filter((document) => !remoteAccountIds.has(document.toJSON().serverId)).map((document) => document.remove()),
+    ...cachedCategories.filter((document) => !remoteCategoryIds.has(document.toJSON().serverId)).map((document) => document.remove()),
+    ...cachedSavingsInstruments.filter((document) => !remoteSavingsInstrumentIds.has(document.toJSON().serverId)).map((document) => document.remove()),
   ]);
 
   const remoteLocalIds = new Set(remoteTransactions.map((transaction) => transaction.id));
@@ -276,6 +252,7 @@ export async function refreshOfflineSnapshot() {
   );
 
   setActiveOfflineUserId(userId);
+  markOfflineSnapshotRefreshed();
   notifyOfflineDataChanged();
   return true;
 }

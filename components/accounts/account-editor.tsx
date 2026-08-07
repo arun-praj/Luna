@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
@@ -23,6 +23,7 @@ import { accountImages } from "@/lib/account-images";
 import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
+import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { navigateWithRouteExit } from "@/lib/route-motion";
 import { getReturnTo } from "@/lib/navigation";
@@ -192,6 +193,9 @@ export function AccountEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState("");
+  const autoSaveReady = useRef(false);
+  const autoSaveTimer = useRef<number | null>(null);
+  const autoSaveInFlight = useRef(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -211,25 +215,6 @@ export function AccountEditor({
       const normalizedColor = getAccountBackgroundColor(loaded.backgroundColor, loaded.type); const colorIndex = normalizedColor ? colorOptions.findIndex((option) => option.cardClassName.includes(normalizedColor)) : -1; if (colorIndex >= 0) setSelectedColor(colorIndex); else if (loaded.backgroundColor) { setCustomColor(loaded.backgroundColor); setSelectedColor("custom"); }
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load account.")).finally(() => setIsLoading(false));
   }, [account, accountId]);
-
-  async function saveAccount() {
-    if (!canSave) return;
-    setIsSaving(true); setError("");
-    if (imageStatus === "uploading") { setError("Wait for the image upload to finish."); setIsSaving(false); return; }
-    let imageValue = selectedImage === "custom" ? customImage ?? "Everyday" : imageOptions[selectedImage].name;
-    if (customImageFile) {
-      const formData = new FormData(); formData.set("file", customImageFile);
-      const uploadResponse = await authenticatedFetch("/api/uploads/account-images", { method: "POST", body: formData }).catch(() => null);
-      if (!uploadResponse?.ok) { const result = await uploadResponse?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not upload account image."); setIsSaving(false); return; }
-      const uploadResult = await uploadResponse.json() as { url: string }; imageValue = uploadResult.url;
-    }
-    const backgroundColor = selectedColor === "custom" ? customColor : presetColorHex(colorOptions[selectedColor].cardClassName);
-    const payload = { name: name.trim(), type, currency: currency.trim().toUpperCase(), openingBalance: Number(balance), includeInTotalBalance: includeInTotal, allowNegativeBalance, backgroundColor, icon: imageValue };
-    const id = loadedAccount?.id ?? accountId;
-    const response = await authenticatedFetch(isNew ? "/api/accounts" : `/api/accounts/${id}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
-    if (response?.ok) navigateWithRouteExit(() => router.push(backHref)); else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not save account."); }
-    setIsSaving(false);
-  }
 
   async function deleteAccount() {
     const id = loadedAccount?.id ?? accountId;
@@ -279,6 +264,77 @@ export function AccountEditor({
     Number.isFinite(Number(balance)) &&
     !negativeBalanceError;
 
+  const persistAccount = useCallback(async (redirect: boolean) => {
+    if (!canSave) return false;
+    if (imageStatus === "uploading") {
+      if (redirect) setError("Wait for the image upload to finish.");
+      return false;
+    }
+    if (redirect) {
+      setIsSaving(true);
+      setError("");
+    }
+
+    let imageValue = selectedImage === "custom" ? customImage ?? "Everyday" : imageOptions[selectedImage].name;
+    if (customImageFile) {
+      const formData = new FormData(); formData.set("file", customImageFile);
+      const uploadResponse = await authenticatedFetch("/api/uploads/account-images", { method: "POST", body: formData }).catch(() => null);
+      if (!uploadResponse?.ok) {
+        const result = await uploadResponse?.json().catch(() => null) as { error?: string } | null;
+        setError(result?.error ?? "Could not upload account image.");
+        if (redirect) setIsSaving(false);
+        return false;
+      }
+      const uploadResult = await uploadResponse.json() as { url: string };
+      imageValue = uploadResult.url;
+    }
+
+    const backgroundColor = selectedColor === "custom" ? customColor : presetColorHex(colorOptions[selectedColor].cardClassName);
+    const payload = { name: name.trim(), type, currency: currency.trim().toUpperCase(), openingBalance: Number(balance), includeInTotalBalance: includeInTotal, allowNegativeBalance, backgroundColor, icon: imageValue };
+    const id = loadedAccount?.id ?? accountId;
+    const response = await authenticatedFetch(isNew ? "/api/accounts" : `/api/accounts/${id}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+    if (response?.ok) {
+      if (redirect) navigateWithRouteExit(() => router.push(backHref));
+      return true;
+    }
+
+    const result = await response?.json().catch(() => null) as { error?: string } | null;
+    setError(result?.error ?? "Could not save account.");
+    if (redirect) setIsSaving(false);
+    return false;
+  }, [accountId, allowNegativeBalance, backHref, balance, canSave, customColor, customImage, customImageFile, currency, imageStatus, includeInTotal, isNew, loadedAccount?.id, name, router, selectedColor, selectedImage, type]);
+
+  useEffect(() => {
+    if (isNew || isLoading || !canSave || imageStatus === "uploading") return;
+    if (!autoSaveReady.current) {
+      autoSaveReady.current = true;
+      return;
+    }
+    if (autoSaveTimer.current !== null) window.clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = window.setTimeout(() => {
+      autoSaveTimer.current = null;
+      if (autoSaveInFlight.current) return;
+      autoSaveInFlight.current = true;
+      void persistAccount(false).finally(() => {
+        autoSaveInFlight.current = false;
+      });
+    }, 500);
+    return () => {
+      if (autoSaveTimer.current !== null) {
+        window.clearTimeout(autoSaveTimer.current);
+        autoSaveTimer.current = null;
+      }
+    };
+  }, [allowNegativeBalance, balance, canSave, currency, customColor, customImage, imageStatus, includeInTotal, isLoading, isNew, name, persistAccount, selectedColor, selectedImage, type]);
+
+  async function saveAccount() {
+    if (autoSaveTimer.current !== null) {
+      window.clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+    await persistAccount(true);
+  }
+
   const displayBalance = formatMoney(balance);
   const selectedCurrency = currency.toUpperCase();
   const filteredCurrencies = currencyCodes.filter((code) =>
@@ -311,7 +367,7 @@ export function AccountEditor({
             disabled={!canSave || isSaving || isLoading || imageStatus === "uploading"}
             className="flex size-11 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"
           >
-            <Check aria-hidden="true" className="size-5" />
+            {isSaving ? <LoaderCircle aria-hidden="true" className="size-5 animate-spin" /> : <Check aria-hidden="true" className="size-5" />}
           </button>
         </StickyPageHeader>
 
@@ -501,11 +557,12 @@ export function AccountEditor({
                     alt=""
                     width={44}
                     height={44}
+                    unoptimized
                     className="size-11 rounded-[9px]"
                   />
                 </button>
               ))}
-              {customImage ? <button type="button" aria-label="Custom uploaded image" aria-pressed={selectedImage === "custom"} onClick={() => setSelectedImage("custom")} className={`rounded-[12px] border p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selectedImage === "custom" ? "border-primary bg-primary-soft" : "border-border bg-background"}`}><Image src={customImage} alt="" width={44} height={44} className="size-11 rounded-[9px] object-cover" /></button> : null}
+              {customImage ? <button type="button" aria-label="Custom uploaded image" aria-pressed={selectedImage === "custom"} onClick={() => setSelectedImage("custom")} className={`rounded-[12px] border p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selectedImage === "custom" ? "border-primary bg-primary-soft" : "border-border bg-background"}`}><AuthenticatedImage src={customImage} alt="" width={44} height={44} className="size-11 rounded-[9px] object-cover" /></button> : null}
               <label
                 className={`flex h-[54px] min-w-[104px] cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-dashed px-3 text-xs font-semibold transition-colors focus-within:ring-2 focus-within:ring-primary/35 ${
                   selectedImage === "custom"

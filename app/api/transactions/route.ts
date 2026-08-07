@@ -33,11 +33,12 @@ async function enrichTransactions(rows: (typeof transactions.$inferSelect)[], us
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401);
-  const url = new URL(request.url); const accountId = url.searchParams.get("accountId"); const categoryId = url.searchParams.get("categoryId"); const savingsInstrumentId = url.searchParams.get("savingsInstrumentId"); const from = url.searchParams.get("from"); const to = url.searchParams.get("to"); const status = url.searchParams.get("syncStatus"); const search = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
+  const url = new URL(request.url); const accountId = url.searchParams.get("accountId"); const categoryId = url.searchParams.get("categoryId"); const savingsInstrumentId = url.searchParams.get("savingsInstrumentId"); const goalId = url.searchParams.get("goalId"); const from = url.searchParams.get("from"); const to = url.searchParams.get("to"); const status = url.searchParams.get("syncStatus"); const search = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
   const filters = [eq(transactions.userId, userId)];
   if (accountId) filters.push(eq(transactions.accountId, accountId));
   if (categoryId) filters.push(eq(transactions.categoryId, categoryId));
   if (savingsInstrumentId) filters.push(eq(transactions.savingsInstrumentId, savingsInstrumentId));
+  if (goalId) filters.push(eq(transactions.goalId, goalId));
   if (from) filters.push(sql`${transactions.date} >= ${from}` as never);
   if (to) filters.push(sql`${transactions.date} <= ${to}` as never);
   if (status === "synced" || status === "pending" || status === "failed") filters.push(eq(transactions.syncStatus, status));

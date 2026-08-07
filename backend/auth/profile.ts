@@ -7,6 +7,7 @@ export type PublicUserProfile = {
   email: string;
   phone: string | null;
   currency: string;
+  monthlyReportEnabled: boolean;
   onboardingCompleted: boolean;
   tutorialStartedAt: string | null;
   tutorialCompletedAt: string | null;
@@ -25,6 +26,7 @@ export function toPublicUserProfile(user: User): PublicUserProfile {
     email: user.email,
     phone: user.phone ?? null,
     currency: user.currency,
+    monthlyReportEnabled: user.monthlyReportEnabled,
     onboardingCompleted: user.onboardingCompleted,
     tutorialStartedAt: user.tutorialStartedAt ?? null,
     tutorialCompletedAt: user.tutorialCompletedAt ?? null,

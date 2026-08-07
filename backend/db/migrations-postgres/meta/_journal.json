@@ -43,6 +43,48 @@
       "when": 1785742554658,
       "tag": "0005_rapid_komodo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785770689356,
+      "tag": "0006_mean_kate_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785778290136,
+      "tag": "0007_tough_nightshade",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785901121399,
+      "tag": "0008_lucky_microbe",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785908698155,
+      "tag": "0009_third_lorna_dane",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785951463826,
+      "tag": "0010_amused_prima",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786033177829,
+      "tag": "0011_tricky_wallow",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
+  Banknote,
   ChevronRight,
   Landmark,
   Minus,
@@ -40,6 +41,13 @@ const quickActions = [
     description: "Move money between accounts",
     icon: ArrowLeftRight,
     className: "bg-info-soft text-info",
+  },
+  {
+    type: "adjust_balance",
+    label: "Adjust balance",
+    description: "Correct an account balance",
+    icon: Banknote,
+    className: "bg-surface-subtle text-foreground",
   },
 ] as const;
 

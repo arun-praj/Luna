@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -33,6 +33,7 @@ import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { ListDataSkeleton, Skeleton } from "@/components/ui/data-skeleton";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
@@ -76,15 +77,22 @@ const typeLabels = {
   other: "Other",
 };
 
-function formatAmount(amount: number) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
+function formatAmount(amount: number) { return formatCurrencyAmount(amount); }
 function currentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+async function fetchAccountPageData(path: string) {
+  try {
+    return await authenticatedFetch(path);
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message.toLowerCase() : "";
+    if ((reason instanceof DOMException && reason.name === "AbortError") || message.includes("abort")) {
+      return authenticatedFetch(path);
+    }
+    throw reason;
+  }
 }
 
 function SortableAccountRow({ account }: { account: Account }) {
@@ -128,10 +136,47 @@ function SortableAccountRow({ account }: { account: Account }) {
   );
 }
 
+function orderedCurrencyEntries(totals: Record<string, number>, preferredCurrency: string) {
+  return currencyEntries(totals).sort(([left], [right]) => {
+    if (left === preferredCurrency) return -1;
+    if (right === preferredCurrency) return 1;
+    return left.localeCompare(right);
+  });
+}
+
+function SummaryAmount({
+  entries,
+  isLoading,
+  preferredCurrency,
+}: {
+  entries: Array<[string, number]>;
+  isLoading: boolean;
+  preferredCurrency: string;
+}) {
+  if (isLoading) return <Skeleton className="inline-block h-7 w-24 align-middle" />;
+  const [primary, ...others] = entries.length ? entries : [[preferredCurrency, 0] as [string, number]];
+  return (
+    <>
+      <span className="block truncate text-[19px] font-semibold tracking-[-0.035em] tabular-nums text-foreground sm:text-[22px]">
+        <span className="mr-1 text-[10px] tracking-normal text-muted-foreground sm:text-xs">{primary[0]}</span>
+        {formatCurrencyAmount(primary[1])}
+      </span>
+      {others.length ? (
+        <span className="mt-1 block truncate text-[10px] font-semibold tabular-nums text-muted-foreground">
+          {others.map(([currency, amount], index) => (
+            <span key={currency}>{index ? " · " : ""}{currency} {formatCurrencyAmount(amount)}</span>
+          ))}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export default function AccountsPage() {
   const [backHref, setBackHref] = useState("/");
   const [currentRoute, setCurrentRoute] = useState("/");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [displayCurrency, setDisplayCurrency] = useState("NPR");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reorderOpen, setReorderOpen] = useState(false);
@@ -149,16 +194,25 @@ export default function AccountsPage() {
 
   useEffect(() => {
     let active = true;
-    void authenticatedFetch(`/api/accounts?month=${currentMonthKey()}`)
-      .then(async (response) => {
-        if (!response.ok)
+    void Promise.allSettled([
+      fetchAccountPageData(`/api/accounts?month=${currentMonthKey()}`),
+      fetchAccountPageData("/api/auth/me"),
+    ])
+      .then(async ([accountResult, profileResult]) => {
+        if (accountResult.status === "rejected" || !accountResult.value.ok)
           throw new Error(
-            response.status === 401
+            accountResult.status === "fulfilled" && accountResult.value.status === 401
               ? "Please sign in to view accounts."
               : "Could not load accounts.",
           );
-        const result = (await response.json()) as { accounts: Account[] };
-        if (active) setAccounts(result.accounts);
+        const accountData = await accountResult.value.json() as { accounts: Account[] };
+        const profileData = profileResult.status === "fulfilled" && profileResult.value.ok
+          ? await profileResult.value.json() as { user?: { currency?: string } }
+          : null;
+        if (active) {
+          setAccounts(accountData.accounts);
+          setDisplayCurrency(profileData?.user?.currency ?? accountData.accounts[0]?.currency ?? "NPR");
+        }
       })
       .catch((reason: unknown) => {
         if (active)
@@ -176,12 +230,18 @@ export default function AccountsPage() {
     };
   }, []);
 
-  const includedBalance = accounts
-    .filter((account) => account.includeInTotalBalance)
-    .reduce((total, account) => total + account.currentBalance, 0);
-  const excludedBalance = accounts
-    .filter((account) => !account.includeInTotalBalance)
-    .reduce((total, account) => total + account.currentBalance, 0);
+  const { excludedEntries, totalEntries } = useMemo(() => {
+    const includedTotals: Record<string, number> = {};
+    const excludedTotals: Record<string, number> = {};
+    for (const account of accounts) {
+      const target = account.includeInTotalBalance ? includedTotals : excludedTotals;
+      addCurrencyAmount(target, account.currency, account.currentBalance);
+    }
+    return {
+      totalEntries: orderedCurrencyEntries(includedTotals, displayCurrency),
+      excludedEntries: orderedCurrencyEntries(excludedTotals, displayCurrency),
+    };
+  }, [accounts, displayCurrency]);
 
   function openReorder() {
     setDraftOrder([...accounts]);
@@ -260,41 +320,19 @@ export default function AccountsPage() {
         </StickyPageHeader>
         <section
           aria-label="Account balance summary"
-          className="mt-8 grid grid-cols-2 divide-x divide-border rounded-[14px] border border-border bg-card"
+          className="mt-8 grid grid-cols-2 divide-x divide-border overflow-hidden rounded-[14px] border border-border bg-card"
         >
           <div className="min-w-0 px-4 py-4">
             <p className="text-xs font-semibold text-muted-foreground">
               Total balance
             </p>
-            <p className="mt-2 truncate text-[22px] font-semibold tracking-[-0.035em] tabular-nums text-foreground">
-              {isLoading ? (
-                <Skeleton className="inline-block h-7 w-28 align-middle" />
-              ) : (
-                <>
-                  <span className="mr-1 text-xs tracking-normal text-muted-foreground">
-                    {accounts[0]?.currency ?? "NPR"}
-                  </span>
-                  {formatAmount(includedBalance)}
-                </>
-              )}
-            </p>
+            <p className="mt-2"><SummaryAmount entries={totalEntries} isLoading={isLoading} preferredCurrency={displayCurrency} /></p>
           </div>
           <div className="min-w-0 px-4 py-4">
             <p className="text-xs font-semibold text-muted-foreground">
               Excluded from total
             </p>
-            <p className="mt-2 truncate text-[22px] font-semibold tracking-[-0.035em] tabular-nums text-foreground">
-              {isLoading ? (
-                <Skeleton className="inline-block h-7 w-28 align-middle" />
-              ) : (
-                <>
-                  <span className="mr-1 text-xs tracking-normal text-muted-foreground">
-                    {accounts[0]?.currency ?? "NPR"}
-                  </span>
-                  {formatAmount(excludedBalance)}
-                </>
-              )}
-            </p>
+            <p className="mt-2"><SummaryAmount entries={excludedEntries} isLoading={isLoading} preferredCurrency={displayCurrency} /></p>
           </div>
         </section>
         <section aria-labelledby="account-list-heading" className="mt-8">

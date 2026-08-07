@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CalendarClock, ChevronDown, Download, ShieldCheck, Trash2, X } from "lucide-react";
 import { authenticatedFetch, clearAccessToken } from "@/lib/auth-client";
 
@@ -9,6 +10,7 @@ function formatDate(value: string | null) {
 }
 
 export function PrivacySettingsCard() {
+  const router = useRouter();
   const [scheduledFor, setScheduledFor] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -59,7 +61,7 @@ export function PrivacySettingsCard() {
     if (!response.ok) { setError(result.error ?? "Could not update account deletion."); setIsDeleting(false); return; }
     if (result.deleted) {
       clearAccessToken();
-      window.location.assign("/signup");
+      router.replace("/signup");
       return;
     }
     setScheduledFor(result.scheduledFor ?? null); setDeleteMode(null); setConfirmation(""); setMessage("Your account is scheduled for deletion in 30 days. You can cancel it while it is pending."); setIsDeleting(false);

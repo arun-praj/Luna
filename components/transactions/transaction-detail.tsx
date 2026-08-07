@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Landmark,
+  LoaderCircle,
   Menu,
   Plus,
   Search,
@@ -30,8 +31,10 @@ import { navigateWithRouteExit } from "@/lib/route-motion";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
+import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { getCategoryIcon } from "@/lib/category-appearance";
 import { getCategoryForeground } from "@/lib/category-appearance";
+import { getSavingsIconSource } from "@/lib/savings-appearance";
 import {
   getAccountBackgroundColor,
   getAccountForeground,
@@ -101,7 +104,22 @@ type CategoryOption = {
   color: string | null;
 };
 
-type SavingsInstrumentOption = { id: string; name: string; typeName?: string; currentBalance: number };
+type SavingsInstrumentOption = { id: string; name: string; typeName?: string; currentBalance: number; icon?: string | null };
+
+function SavingsInstrumentAvatar({ icon }: { icon?: string | null }) {
+  return (
+    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-[9px] border border-primary/10 bg-primary-soft">
+      <AuthenticatedImage
+        src={getSavingsIconSource(icon)}
+        alt=""
+        width={36}
+        height={36}
+        className="size-full object-cover"
+        unoptimized
+      />
+    </span>
+  );
+}
 
 const LAST_ACCOUNT_KEY = "cocomelon.last-transaction-account";
 
@@ -182,6 +200,7 @@ export function TransactionDetail({
   const dateTransition = useAnimatedVisibility(dateOpen);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
   const [saveAttempted, setSaveAttempted] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
   const titleInputRef = React.useRef<HTMLInputElement>(null);
@@ -255,12 +274,19 @@ export function TransactionDetail({
   }, [guidedNew, initialKind, isNew, transaction.id]);
 
   const selectedAccount = accountOptions.find((account) => account.id === accountId);
-  const projectedAccountBalance = selectedAccount && Number.isFinite(Number(amount))
-    ? selectedAccount.currentBalance + (kind === "income" || kind === "adjust_balance" ? Number(amount) : -Number(amount))
-    : null;
-  const balanceError = isNew && selectedAccount && !selectedAccount.allowNegativeBalance && projectedAccountBalance !== null && projectedAccountBalance < -0.000001
-    ? `This transaction would make ${selectedAccount.name} negative. Enable Allow negative balance in account settings or lower the amount.`
+  const destinationAccount = accountOptions.find((account) => account.id === transferToAccountId);
+  const transferCurrencyError = kind === "transfer" && selectedAccount && destinationAccount && selectedAccount.currency !== destinationAccount.currency
+    ? `Cross-currency transfers are not supported yet. Both accounts must use ${selectedAccount.currency}.`
     : "";
+  const getBalanceError = (value: string) => {
+    const numericValue = Number(value);
+    if (!isNew || !selectedAccount || selectedAccount.allowNegativeBalance || !Number.isFinite(numericValue)) return "";
+    const projectedBalance = selectedAccount.currentBalance + (kind === "income" || kind === "adjust_balance" ? numericValue : -numericValue);
+    return projectedBalance < -0.000001
+      ? `This transaction would make ${selectedAccount.name} negative. Enable Allow negative balance in account settings or lower the amount.`
+      : "";
+  };
+  const balanceError = getBalanceError(amount);
 
   const validationErrors = {
     type: !kind ? "Choose whether this is an expense, income, or transfer." : "",
@@ -271,7 +297,9 @@ export function TransactionDetail({
         : "",
     category: !category ? "Choose a category for this transaction." : "",
     account: !accountId ? "Choose the account this transaction belongs to." : "",
-    transfer: kind === "transfer" && !transferToAccountId ? "Choose the account receiving the transfer." : "",
+    transfer: kind === "transfer"
+      ? !transferToAccountId ? "Choose the account receiving the transfer." : transferCurrencyError
+      : "",
     savingsInstrument: kind === "savings" && !savingsInstrumentId ? "Choose the saving instrument receiving this contribution." : "",
     balance: balanceError,
   };
@@ -402,9 +430,12 @@ export function TransactionDetail({
   }
 
   const saveTransaction = async () => {
+    if (saving) return;
     setTypeOpen(false);
     setSaveAttempted(true);
     if (Object.values(validationErrors).some(Boolean)) return;
+    setSaving(true);
+    setLoadError("");
     const payload = {
       accountId,
       type: kind as Exclude<TransactionKind, "">,
@@ -418,19 +449,25 @@ export function TransactionDetail({
       transferToAccountId: kind === "transfer" ? transferToAccountId : null,
       savingsInstrumentId: kind === "savings" ? savingsInstrumentId : null,
     };
-    const response = await authenticatedFetch(isNew ? "/api/transactions" : `/api/transactions/${transaction.id}`, {
-      method: isNew ? "POST" : "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const result = (await response.json().catch(() => null)) as { error?: string } | null;
-      setLoadError(result?.error ?? "We could not save this transaction. Check the details and try again.");
-      return;
+    try {
+      const response = await authenticatedFetch(isNew ? "/api/transactions" : `/api/transactions/${transaction.id}`, {
+        method: isNew ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        setLoadError(result?.error ?? "We could not save this transaction. Check the details and try again.");
+        setSaving(false);
+        return;
+      }
+      notifyTransactionsChanged();
+      setSaved(true);
+      navigateWithRouteExit(() => router.back());
+    } catch {
+      setLoadError("We could not save this transaction. Check your connection and try again.");
+      setSaving(false);
     }
-    notifyTransactionsChanged();
-    setSaved(true);
-    navigateWithRouteExit(() => router.back());
   };
 
   const openAmountEditor = () => {
@@ -447,7 +484,7 @@ export function TransactionDetail({
   const amountAccountPicker = (
     <div className="rounded-[13px] border border-border bg-card px-3 py-3">
       <p className="mb-2 text-xs font-semibold text-muted-foreground">
-        {kind === "income" ? "Add money to" : "Pay money from"}
+        {kind === "income" ? "Add money to" : kind === "savings" ? "Set money aside from" : "Pay money from"}
       </p>
       <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {accountOptions.map((option) => {
@@ -482,6 +519,19 @@ export function TransactionDetail({
           );
         })}
       </div>
+      {kind === "savings" ? (
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="mb-2 text-xs font-semibold text-muted-foreground">Saving instrument</p>
+          {saveAttempted && validationErrors.savingsInstrument ? <p className="mb-2 text-xs font-medium text-expense">{validationErrors.savingsInstrument}</p> : null}
+          <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {savingsOptions.map((option) => {
+              const selected = savingsInstrumentId === option.id;
+              return <button type="button" key={`amount-${option.id}`} aria-pressed={selected} onClick={() => setSavingsInstrumentId(option.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "border-primary bg-primary-soft text-primary shadow-sm" : "border-border bg-background hover:border-primary/50"}`}><SavingsInstrumentAvatar icon={option.icon} /><span className="max-w-[150px] truncate">{option.name}</span>{option.typeName ? <span className="max-w-[120px] truncate text-xs font-medium text-muted-foreground">· {option.typeName}</span> : null}</button>;
+            })}
+            {savingsOptions.length === 0 ? <Link href="/savings-instruments/new" className="flex min-h-11 shrink-0 items-center rounded-[11px] border border-dashed border-primary/35 bg-primary-soft/35 px-3.5 text-sm font-semibold text-primary">Add a saving instrument</Link> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -582,15 +632,16 @@ export function TransactionDetail({
 
           <button
             type="button"
-            aria-label="Save transaction"
+            aria-label={saving ? "Saving transaction" : "Save transaction"}
+            disabled={saving}
             onClick={saveTransaction}
-            className={`flex size-11 justify-self-end items-center justify-center rounded-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+            className={`flex size-11 justify-self-end items-center justify-center rounded-[11px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:cursor-wait disabled:opacity-75 ${
               saved
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-primary/20 bg-primary-soft text-primary hover:border-primary/40"
             }`}
           >
-            <Check aria-hidden="true" className="size-5" />
+            {saving ? <LoaderCircle aria-hidden="true" className="size-5 animate-spin" /> : <Check aria-hidden="true" className="size-5" />}
           </button>
         </StickyPageHeader>
 
@@ -681,6 +732,7 @@ export function TransactionDetail({
                   : kind === "income"
                     ? "Add money to"
                     : "Choose an account"}
+              {selectedAccount ? <span className="ml-2 text-xs font-semibold text-muted-foreground">· {selectedAccount.currency}</span> : null}
             </h2>
             {saveAttempted && validationErrors.account ? (
               <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-expense">
@@ -736,6 +788,7 @@ export function TransactionDetail({
               <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {accountOptions.filter((option) => option.id !== accountId).map((option) => {
                   const selected = transferToAccountId === option.id;
+                  const incompatibleCurrency = Boolean(selectedAccount && selectedAccount.currency !== option.currency);
                   const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
                   const accountForeground = getAccountForeground(accountColor, option.type);
                   return (
@@ -743,13 +796,15 @@ export function TransactionDetail({
                       type="button"
                       key={`destination-${option.id}`}
                       aria-pressed={selected}
+                      disabled={incompatibleCurrency}
+                      title={incompatibleCurrency ? `Unavailable: this account uses ${option.currency}` : undefined}
                       onClick={() => setTransferToAccountId(option.id)}
                       style={{
                         backgroundColor: selected ? accountForeground : accountColor,
                         borderColor: selected ? accountForeground : `${accountForeground}45`,
                         color: selected ? "#ffffff" : accountForeground,
                       }}
-                      className={`flex min-h-14 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "shadow-[0_0_0_3px_rgb(255_255_255_/_0.92),0_0_0_5px_rgb(23_32_29_/_0.22)]" : "hover:brightness-[0.98]"}`}
+                      className={`flex min-h-14 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${selected ? "shadow-[0_0_0_3px_rgb(255_255_255_/_0.92),0_0_0_5px_rgb(23_32_29_/_0.22)]" : "hover:brightness-[0.98]"}`}
                     >
                       <span className="flex size-9 shrink-0 overflow-hidden rounded-[9px]">
                         <AccountAvatar icon={option.icon} name={option.name} type={option.type} backgroundColor={accountColor} size={36} />
@@ -774,7 +829,7 @@ export function TransactionDetail({
               <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {savingsOptions.map((option) => {
                   const selected = savingsInstrumentId === option.id;
-                  return <button type="button" key={option.id} aria-pressed={selected} onClick={() => setSavingsInstrumentId(option.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "border-primary bg-primary-soft text-primary shadow-sm" : "border-border bg-background hover:border-primary/50"}`}><Landmark aria-hidden="true" className="size-4" />{option.name}{option.typeName ? <span className="text-xs font-medium text-muted-foreground">· {option.typeName}</span> : null}</button>;
+                  return <button type="button" key={option.id} aria-pressed={selected} onClick={() => setSavingsInstrumentId(option.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "border-primary bg-primary-soft text-primary shadow-sm" : "border-border bg-background hover:border-primary/50"}`}><SavingsInstrumentAvatar icon={option.icon} /><span className="max-w-[150px] truncate">{option.name}</span>{option.typeName ? <span className="max-w-[120px] truncate text-xs font-medium text-muted-foreground">· {option.typeName}</span> : null}</button>;
                 })}
                 {savingsOptions.length === 0 ? <Link href="/savings-instruments/new" className="flex min-h-11 shrink-0 items-center rounded-[11px] border border-dashed border-primary/35 bg-primary-soft/35 px-3.5 text-sm font-semibold text-primary">Add a saving instrument</Link> : null}
               </div>
@@ -792,8 +847,8 @@ export function TransactionDetail({
           >
             <span className={`text-[38px] font-semibold leading-none tracking-[-0.045em] tabular-nums sm:text-[44px] ${amountTone}`}>
               {formatMoney(amount)}
-              <span className="ml-2 text-[17px] tracking-normal text-muted-foreground">
-                NPR
+                <span className="ml-2 text-[17px] tracking-normal text-muted-foreground">
+                {selectedAccount?.currency ?? "NPR"}
               </span>
             </span>
             <span className="mt-2 text-xs font-medium text-muted-foreground">
@@ -858,13 +913,15 @@ export function TransactionDetail({
         open={amountOpen}
         value={amount}
         title={guidedNew ? "Enter transaction amount" : "Edit transaction amount"}
+        currency={selectedAccount?.currency ?? "NPR"}
         topContent={guidedNew ? amountAccountPicker : undefined}
         confirmPlacement={guidedNew ? "bottom" : "top"}
         confirmLabel={guidedNew ? "Continue" : "Set"}
         confirmDisabled={guidedNew ? (value) => !Number.isFinite(Number(value)) || Number(value) <= 0 : false}
+        confirmValidation={guidedNew ? getBalanceError : undefined}
         cancelVariant={guidedNew ? "text" : "icon"}
         cancelLabel={guidedNew ? "Cancel" : "Cancel money edit"}
-        dismissOnBackdrop={!guidedNew}
+        dismissOnBackdrop
         closeOnEscape={!guidedNew}
         onCancel={() => guidedNew ? navigateWithRouteExit(() => router.back()) : setAmountOpen(false)}
         onSet={(nextAmount) => {

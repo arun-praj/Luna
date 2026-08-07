@@ -20,6 +20,9 @@ export const users = sqliteTable(
     phone: text("phone"),
     passwordHash: text("password_hash").notNull(),
     currency: text("currency").notNull().default("NPR"),
+    monthlyReportEnabled: integer("monthly_report_enabled", { mode: "boolean" })
+      .notNull()
+      .default(false),
     onboardingCompleted: integer("onboarding_completed", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -47,6 +50,17 @@ export const users = sqliteTable(
     uniqueIndex("users_email_unique").on(table.email),
     uniqueIndex("users_phone_unique").on(table.phone),
   ],
+);
+
+export const authRateLimits = sqliteTable(
+  "auth_rate_limits",
+  {
+    key: text("key").primaryKey(),
+    windowStartedAt: isoTimestamp("window_started_at"),
+    attempts: integer("attempts").notNull().default(0),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [index("auth_rate_limits_updated_idx").on(table.updatedAt)],
 );
 
 export const otpCodes = sqliteTable(
@@ -101,6 +115,7 @@ export const refreshTokens = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
     deviceLabel: text("device_label"),
+    sessionFamilyId: text("session_family_id"),
     parentTokenId: text("parent_token_id"),
     issuedAt: isoTimestamp("issued_at"),
     expiresAt: isoTimestamp("expires_at"),
@@ -108,10 +123,12 @@ export const refreshTokens = sqliteTable(
     revokedReason: text("revoked_reason", {
       enum: ["logout", "rotated", "reuse_detected", "admin"],
     }),
+    replacementTokenCiphertext: text("replacement_token_ciphertext"),
   },
   (table) => [
     uniqueIndex("refresh_tokens_hash_unique").on(table.tokenHash),
     index("refresh_tokens_user_idx").on(table.userId),
+    index("refresh_tokens_family_idx").on(table.sessionFamilyId),
     index("refresh_tokens_parent_idx").on(table.parentTokenId),
   ],
 );
@@ -183,6 +200,63 @@ export const notificationDeliveries = sqliteTable(
   (table) => [
     uniqueIndex("notification_deliveries_unique").on(table.userId, table.kind, table.referenceId, table.occurrenceKey),
     index("notification_deliveries_user_idx").on(table.userId, table.sentAt),
+  ],
+);
+
+export const reportDeliveries = sqliteTable(
+  "report_deliveries",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reportType: text("report_type", { enum: ["monthly"] }).notNull(),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    status: text("status", { enum: ["processing", "sent", "failed"] }).notNull(),
+    error: text("error"),
+    sentAt: optionalIsoTimestamp("sent_at"),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [
+    uniqueIndex("report_deliveries_unique").on(table.userId, table.reportType, table.periodStart),
+    index("report_deliveries_user_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const reportCache = sqliteTable(
+  "report_cache",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodType: text("period_type", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    transactionFingerprint: text("transaction_fingerprint").notNull(),
+    reportJson: text("report_json").notNull(),
+    generatedAt: isoTimestamp("generated_at"),
+  },
+  (table) => [
+    uniqueIndex("report_cache_unique").on(table.userId, table.periodType, table.periodStart),
+    index("report_cache_user_idx").on(table.userId, table.generatedAt),
+  ],
+);
+
+export const reportGenerationLimits = sqliteTable(
+  "report_generation_limits",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    day: text("day").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("report_generation_limits_unique").on(table.userId, table.day),
+    index("report_generation_limits_user_idx").on(table.userId, table.day),
   ],
 );
 
@@ -267,6 +341,7 @@ export const goals = sqliteTable(
     allocatedAmount: real("allocated_amount").notNull().default(0),
     status: text("status", { enum: ["active", "completed", "archived"] }).notNull().default("active"),
     targetDate: text("target_date"),
+    accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
   },
   (table) => [index("goals_user_idx").on(table.userId)],
 );
@@ -307,7 +382,7 @@ export const transactions = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     accountId: text("account_id").notNull().references(() => accounts.id),
-    type: text("type", { enum: ["expense", "income", "savings", "transfer", "adjust_balance"] }).notNull(),
+    type: text("type", { enum: ["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"] }).notNull(),
     amount: real("amount").notNull(),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
     title: text("title").notNull().default(""),
@@ -391,6 +466,9 @@ export const schema = {
   passwordResetTokens,
   notificationSettings,
   accounts,
+  reportDeliveries,
+  reportCache,
+  reportGenerationLimits,
   categories,
   userTags,
   savingsInstrumentTypes,

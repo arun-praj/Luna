@@ -4,7 +4,7 @@ export type Transaction = {
   description: string;
   category: string;
   amount: number;
-  kind: "income" | "expense" | "savings" | "transfer" | "adjust_balance";
+  kind: "income" | "expense" | "savings" | "transfer" | "adjust_balance" | "goal_spend";
   date: string;
   dateLabel: string;
   account: string;

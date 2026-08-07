@@ -14,10 +14,17 @@ function calculate(left: number, right: number, operator: Operator) {
 }
 
 export function formatMoney(value: string) {
-  return Number(value || "0").toLocaleString("en-US", {
+  const rawValue = value || "0";
+  const amount = Number(rawValue);
+  if (amount === 0) {
+    const decimalIndex = rawValue.indexOf(".");
+    return decimalIndex >= 0 ? `0${rawValue.slice(decimalIndex)}` : "0";
+  }
+  const formatted = amount.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  return rawValue.endsWith(".") ? `${formatted}.` : formatted;
 }
 
 export function MoneyEditor({
@@ -30,6 +37,7 @@ export function MoneyEditor({
   confirmPlacement = "top",
   confirmLabel = "Set",
   confirmDisabled = false,
+  confirmValidation,
   topContent,
   cancelVariant = "icon",
   cancelLabel = "Cancel money edit",
@@ -45,6 +53,7 @@ export function MoneyEditor({
   confirmPlacement?: "top" | "bottom";
   confirmLabel?: string;
   confirmDisabled?: boolean | ((value: string) => boolean);
+  confirmValidation?: (value: string) => string;
   topContent?: React.ReactNode;
   cancelVariant?: "icon" | "text";
   cancelLabel?: string;
@@ -88,6 +97,7 @@ export function MoneyEditor({
       confirmPlacement={confirmPlacement}
       confirmLabel={confirmLabel}
       confirmDisabled={confirmDisabled}
+      confirmValidation={confirmValidation}
       topContent={topContent}
       cancelVariant={cancelVariant}
       cancelLabel={cancelLabel}
@@ -107,6 +117,7 @@ function MoneyEditorPanel({
   confirmPlacement,
   confirmLabel,
   confirmDisabled,
+  confirmValidation,
   topContent,
   cancelVariant,
   cancelLabel,
@@ -122,6 +133,7 @@ function MoneyEditorPanel({
   confirmPlacement: "top" | "bottom";
   confirmLabel: string;
   confirmDisabled: boolean | ((value: string) => boolean);
+  confirmValidation?: (value: string) => string;
   topContent?: React.ReactNode;
   cancelVariant: "icon" | "text";
   cancelLabel: string;
@@ -133,9 +145,20 @@ function MoneyEditorPanel({
   const [operator, setOperator] = React.useState<Operator | null>(null);
   const [leftValue, setLeftValue] = React.useState<number | null>(null);
   const [freshEntry, setFreshEntry] = React.useState(false);
+  const [validationMessage, setValidationMessage] = React.useState("");
   const isConfirmDisabled = typeof confirmDisabled === "function" ? confirmDisabled(draft) : confirmDisabled;
 
+  const confirm = () => {
+    const message = confirmValidation?.(draft) ?? "";
+    if (message) {
+      setValidationMessage(message);
+      return;
+    }
+    onSet(draft || "0");
+  };
+
   const inputDigit = React.useCallback((digit: string) => {
+    setValidationMessage("");
     setDraft((current) => {
       if (freshEntry) {
         setFreshEntry(false);
@@ -149,6 +172,7 @@ function MoneyEditorPanel({
   }, [freshEntry]);
 
   const chooseOperator = React.useCallback((nextOperator: Operator) => {
+    setValidationMessage("");
     const current = Number(draft || "0");
     if (leftValue !== null && operator && !freshEntry) {
       const result = calculate(leftValue, current, operator);
@@ -163,6 +187,7 @@ function MoneyEditorPanel({
 
   const equals = React.useCallback(() => {
     if (leftValue === null || !operator) return;
+    setValidationMessage("");
     const result = calculate(leftValue, Number(draft || "0"), operator);
     setDraft(String(Math.round(result * 100) / 100));
     setLeftValue(null);
@@ -171,6 +196,7 @@ function MoneyEditorPanel({
   }, [draft, leftValue, operator]);
 
   const deleteLastDigit = React.useCallback(() => {
+    setValidationMessage("");
     setDraft((current) => (current.length > 1 ? current.slice(0, -1) : "0"));
   }, []);
 
@@ -236,7 +262,7 @@ function MoneyEditorPanel({
               type="button"
               aria-label={cancelLabel}
               onClick={onCancel}
-              className={cancelVariant === "text" ? "flex h-11 items-center justify-start rounded-[10px] px-2 text-sm font-semibold text-primary hover:bg-primary-soft" : "flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"}
+              className={cancelVariant === "text" ? "flex h-11 items-center justify-start rounded-[10px] px-2 text-sm font-semibold text-expense hover:bg-expense-soft" : "flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"}
             >
               {cancelVariant === "text" ? cancelLabel : <X aria-hidden="true" className="size-5" />}
             </button>
@@ -265,7 +291,7 @@ function MoneyEditorPanel({
                 type="button"
                 aria-label="Set money amount"
                 disabled={isConfirmDisabled}
-                onClick={() => onSet(draft || "0")}
+                onClick={confirm}
                 className="flex h-10 items-center justify-center gap-1 rounded-[10px] border border-primary/20 bg-primary-soft px-3 text-sm font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Check aria-hidden="true" className="size-4" />
@@ -275,6 +301,12 @@ function MoneyEditorPanel({
           </div>
 
           {topContent ? <div className="mt-3">{topContent}</div> : null}
+
+          {validationMessage ? (
+            <p role="alert" className="mt-3 rounded-[11px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-xs font-semibold leading-5 text-expense">
+              {validationMessage}
+            </p>
+          ) : null}
 
           <div className="mt-3 grid grid-cols-[1fr_64px] gap-2">
             <div className="grid grid-cols-3 gap-2">
@@ -294,7 +326,7 @@ function MoneyEditorPanel({
                 type="button"
                 aria-label="Delete last digit"
                 onClick={deleteLastDigit}
-                className="flex h-12 items-center justify-center rounded-[11px] bg-card text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] active:bg-expense-soft"
+                className="flex h-12 items-center justify-center rounded-[11px] bg-expense-soft text-expense shadow-[inset_0_0_0_1px_var(--border)] hover:bg-expense/10 active:bg-expense-soft"
               >
                 <Delete aria-hidden="true" className="size-5" />
               </button>

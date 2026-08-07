@@ -1,5 +1,5 @@
 /* Luna PWA worker. Keep this file dependency-free so it works offline. */
-const STATIC_CACHE = "budget-static-v12";
+const STATIC_CACHE = "budget-static-v15";
 const OFFLINE_SHELL = "/offline";
 const CORE_ASSETS = [
   "/manifest.webmanifest",
@@ -23,6 +23,35 @@ async function cacheOfflineShell(cache) {
   await Promise.allSettled(
     assets.map((asset) => cache.add(new URL(asset, self.location.origin).toString())),
   );
+
+  // OfflineHome is a dynamic client entry and is referenced by the RSC
+  // payload rather than a normal script tag in the shell HTML. Follow its
+  // Vite manifest imports so offline navigation has every bundle it needs to
+  // hydrate instead of stopping at the server loading screen.
+  try {
+    const manifestResponse = await fetch("/.vite/manifest.json", { cache: "reload" });
+    if (!manifestResponse.ok) return;
+    const manifest = await manifestResponse.json();
+    const routeAssets = new Set(["/.vite/manifest.json"]);
+    const visited = new Set();
+    const visit = (key) => {
+      if (visited.has(key)) return;
+      visited.add(key);
+      const entry = manifest[key];
+      if (!entry) return;
+      if (entry.file) routeAssets.add(`/${entry.file}`);
+      for (const css of entry.css || []) routeAssets.add(`/${css}`);
+      for (const importKey of entry.imports || []) visit(importKey);
+      for (const dynamicImportKey of entry.dynamicImports || []) visit(dynamicImportKey);
+    };
+    visit("components/offline/offline-home.tsx");
+    await Promise.allSettled(
+      [...routeAssets].map((asset) => cache.add(new URL(asset, self.location.origin).toString())),
+    );
+  } catch {
+    // The shell and its directly referenced assets are still useful if the
+    // manifest is unavailable during an update.
+  }
 }
 
 self.addEventListener("install", (event) => {

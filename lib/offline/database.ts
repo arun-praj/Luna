@@ -1,11 +1,14 @@
 "use client";
 
 import {
+  addRxPlugin,
   createRxDatabase,
+  removeRxDatabase,
   type RxCollection,
   type RxDatabase,
   type RxJsonSchema,
 } from "rxdb";
+import { RxDBMigrationPlugin } from "rxdb/plugins/migration-schema";
 import { getRxStorageDexie } from "rxdb/plugins/storage-dexie";
 
 import type {
@@ -18,6 +21,7 @@ import type {
 
 export const ACTIVE_OFFLINE_USER_KEY = "cocomelon.offline-active-user";
 export const OFFLINE_DATA_CHANGED_EVENT = "cocomelon:offline-data-changed";
+const OFFLINE_DATABASE_NAME = "cocomelon_offline_v1";
 
 type OfflineCollections = {
   profiles: RxCollection<OfflineProfile>;
@@ -28,6 +32,8 @@ type OfflineCollections = {
 };
 
 export type CocomelonOfflineDatabase = RxDatabase<OfflineCollections>;
+
+addRxPlugin(RxDBMigrationPlugin);
 
 const nullableString = { type: ["string", "null"] } as const;
 const boundedNullableString = {
@@ -129,7 +135,7 @@ const savingsInstrumentSchema: RxJsonSchema<OfflineSavingsInstrument> = {
 
 const transactionSchema: RxJsonSchema<OfflineTransaction> = {
   title: "offline transaction",
-  version: 0,
+  version: 1,
   primaryKey: "id",
   type: "object",
   additionalProperties: false,
@@ -140,7 +146,7 @@ const transactionSchema: RxJsonSchema<OfflineTransaction> = {
     accountId: { type: "string", maxLength: 100 },
     type: {
       type: "string",
-      enum: ["expense", "income", "savings", "transfer", "adjust_balance"],
+      enum: ["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"],
       maxLength: 20,
     },
     amount: { type: "number" },
@@ -218,7 +224,7 @@ export function getOfflineDatabase() {
   if (!databasePromise) {
     databasePromise = (async () => {
       const db = await createRxDatabase<OfflineCollections>({
-        name: "cocomelon_offline_v1",
+        name: OFFLINE_DATABASE_NAME,
         storage: getRxStorageDexie(),
         multiInstance: true,
         eventReduce: true,
@@ -228,7 +234,12 @@ export function getOfflineDatabase() {
         accounts: { schema: accountSchema },
         categories: { schema: categorySchema },
         savingsInstruments: { schema: savingsInstrumentSchema },
-        transactions: { schema: transactionSchema },
+        transactions: {
+          schema: transactionSchema,
+          migrationStrategies: {
+            1: (document: OfflineTransaction) => document,
+          },
+        },
       });
       return db;
     })().catch((error) => {
@@ -237,4 +248,29 @@ export function getOfflineDatabase() {
     });
   }
   return databasePromise;
+}
+
+/**
+ * Removes every user snapshot and queued offline write from this device.
+ * Keep the application shell/service-worker cache intact: it contains no
+ * account data and is what allows Luna itself to open while offline.
+ */
+export async function clearOfflineDatabase() {
+  if (typeof window === "undefined") return;
+
+  setActiveOfflineUserId(null);
+  const currentDatabase = databasePromise;
+  databasePromise = null;
+
+  try {
+    if (currentDatabase) {
+      const db = await currentDatabase;
+      await db.close();
+    }
+  } catch {
+    // A partially initialized database can still be removed from storage below.
+  }
+
+  await removeRxDatabase(OFFLINE_DATABASE_NAME, getRxStorageDexie(), true);
+  notifyOfflineDataChanged();
 }

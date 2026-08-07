@@ -2,6 +2,21 @@
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
 APP_URL=http://localhost:3000
 
+# SMTP settings for verified report delivery. Keep the From address aligned with the authenticated SMTP account.
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@example.com
+SMTP_PASSWORD=your-smtp-app-password
+SMTP_FROM=your-email@example.com
+SMTP_REPLY_TO=your-email@example.com
+
+# NVIDIA-compatible AI endpoint. Leave blank to use local deterministic insights.
+NVIDIA_AI_API_URL=https://integrate.api.nvidia.com/v1/chat/completions
+NVIDIA_AI_API_KEY=paste-your-nvidia-api-key-here
+NVIDIA_AI_MODEL=meta/llama-3.3-70b-instruct
+REPORT_MONTHLY_HOUR=8
+
 # Generate with: npx web-push generate-vapid-keys
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=replace-with-vapid-public-key
 VAPID_PUBLIC_KEY=replace-with-vapid-public-key

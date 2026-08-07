@@ -182,6 +182,7 @@ Mobile is the primary design target. Larger layouts should enhance the same info
 - Dense icon grids use three columns below 360px and four columns from 360px upward. Labels may truncate, but their accessible names must remain complete.
 - Preview cards must protect long names and large amounts with `min-width: 0`, truncation, and responsive type sizing.
 - Mobile date and time pickers use a bottom drawer rather than a full-screen page. The drawer respects top and bottom safe areas, has rounded top corners, a dimmed backdrop, a visible drag handle, and a sticky header with explicit close and Done actions.
+- Goal target dates use the same bottom-drawer calendar pattern. The current date is highlighted by default, selecting a date updates the form without dismissing the drawer, and the user confirms with Done; native browser date popovers are not used.
 
 ## 7. Shape, Border, and Elevation
 
@@ -292,6 +293,26 @@ Rules:
 - The sheet anchors to the bottom, respects the bottom safe area, and uses a dimmed backdrop that may be tapped to cancel.
 - Amount validation runs against the applied value after Set and remains specific to the field’s rules, such as transactions being greater than zero.
 - Group related date, account, and category choices into clear rows.
+
+### Horizontal account selectors
+
+Account choices in transaction, goal, and transfer flows use the shared mobile
+horizontal selector pattern. Keep the row in normal document flow and let it
+scroll horizontally rather than stacking every account into a tall list.
+
+- Use a labeled `fieldset`/`legend` and include the selected account currency in
+  the label when it clarifies the amount context.
+- Render each account as a compact, shrink-resistant card with the account
+  avatar, short name, and current balance.
+- Keep cards at least 56px tall and 44px wide-touch-safe; use `shrink-0`,
+  `overflow-x-auto`, hidden scrollbars, and `overscroll-x-contain` so swiping
+  does not create page-level horizontal overflow.
+- Use the account's assigned pale background and foreground colors. The
+  selected card uses that background plus the existing check affordance;
+  unselected cards remain neutral but keep their account-colored border.
+- Preserve keyboard and assistive technology state with `aria-pressed` on each
+  option. Do not replace this pattern with a native select or a vertical stack
+  unless there are too few choices for scrolling to be meaningful.
 
 ### Cards
 

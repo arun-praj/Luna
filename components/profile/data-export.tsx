@@ -53,6 +53,12 @@ function displayAmount(transaction: ApiTransaction, currency: string) {
   return `${prefix}${currency} ${Math.abs(transaction.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
+function signedAmount(transaction: ApiTransaction) {
+  if (transaction.type === "expense") return -Math.abs(transaction.amount);
+  if (transaction.type === "income" || transaction.type === "savings") return Math.abs(transaction.amount);
+  return transaction.type === "adjust_balance" ? transaction.amount : Math.abs(transaction.amount);
+}
+
 function csvValue(value: string | number | null | undefined) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -79,19 +85,61 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function csvForTransactions(transactions: ApiTransaction[], currency: string) {
-  const headers = ["Date", "Type", "Title", "Category", "Account", "Amount", "Notes", "Tags"];
-  const rows = transactions.map((transaction) => [
-    transaction.date,
-    transaction.type,
-    transactionTitle(transaction),
-    transaction.categoryName ?? "",
-    transactionAccount(transaction),
-    displayAmount(transaction, currency),
-    transaction.notes ?? "",
-    transaction.tags.join(", "),
+function sortTransactions(transactions: ApiTransaction[]) {
+  return [...transactions].sort((left, right) =>
+    right.date.localeCompare(left.date) ||
+    right.transactionAt.localeCompare(left.transactionAt) ||
+    transactionTitle(left).localeCompare(transactionTitle(right)),
+  );
+}
+
+function csvForTransactions(transactions: ApiTransaction[], period: AppliedPeriod, currency: string) {
+  const headers = ["Date", "Type", "Description", "Category", "Account", "Destination account", "Amount", "Currency", "Notes", "Tags"];
+  const sections: Array<{ type: ApiTransaction["type"]; label: string }> = [
+    { type: "expense", label: "Expenses" },
+    { type: "savings", label: "Savings" },
+    { type: "income", label: "Income" },
+    { type: "transfer", label: "Transfers" },
+    { type: "adjust_balance", label: "Balance adjustments" },
+  ];
+  const summaryRows = sections.map(({ type, label }) => [
+    label,
+    transactions.filter((transaction) => transaction.type === type).length,
+    transactions.filter((transaction) => transaction.type === type).reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0),
   ]);
-  return [headers, ...rows].map((row) => row.map(csvValue).join(",")).join("\r\n");
+  const output: Array<Array<string | number>> = [
+    ["LUNA TRANSACTION EXPORT"],
+    ["Period", period.label],
+    ["Generated", new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date())],
+    ["Currency", currency],
+    [],
+    ["SUMMARY"],
+    ["Type", "Transactions", "Total amount"],
+    ...summaryRows,
+    [],
+  ];
+
+  for (const section of sections) {
+    const sectionTransactions = transactions.filter((transaction) => transaction.type === section.type);
+    if (!sectionTransactions.length) continue;
+    output.push([section.label], headers);
+    output.push(...sectionTransactions.map((transaction) => [
+      transaction.date,
+      section.label,
+      transactionTitle(transaction),
+      transaction.categoryName ?? "",
+      transaction.accountName,
+      transaction.destinationAccountName ?? "",
+      signedAmount(transaction),
+      currency,
+      transaction.notes ?? "",
+      transaction.tags.join(", "),
+    ]));
+    output.push([]);
+  }
+
+  if (!transactions.length) output.push(["No transactions found for this period."]);
+  return `\uFEFF${output.map((row) => row.map(csvValue).join(",")).join("\r\n")}`;
 }
 
 function safePdfText(value: string) {
@@ -181,43 +229,45 @@ async function buildPdf(
     { type: "adjust_balance", label: "Balance adjustments", color: colors.muted },
   ];
   const columns = [
-    { label: "Date", width: 52 },
-    { label: "Description", width: 160 },
-    { label: "Category", width: 100 },
-    { label: "Account", width: 142 },
-    { label: "Amount", width: contentWidth - 52 - 160 - 100 - 142 },
+    { label: "Date", width: 68 },
+    { label: "Description", width: 150 },
+    { label: "Category", width: 95 },
+    { label: "Account", width: 140 },
+    { label: "Amount", width: contentWidth - 68 - 150 - 95 - 140 },
   ];
+  const tableFontSize = 7;
+  const tableHeaderHeight = 20;
+  const rowHeight = 19;
+
+  const drawTableHeader = (sectionLabel: string, headingSize: number) => {
+    page.drawText(safePdfText(sectionLabel), { x: margin, y, size: headingSize, font: bold, color: colors.muted });
+    y -= 14;
+    page.drawRectangle({ x: margin, y: y - tableHeaderHeight + 2, width: contentWidth, height: tableHeaderHeight, color: colors.teal });
+    let headerX = margin;
+    for (const column of columns) {
+      page.drawText(column.label, { x: headerX + 6, y: y - 13, size: tableFontSize, font: bold, color: rgb(1, 1, 1) });
+      headerX += column.width;
+      page.drawLine({ start: { x: headerX, y: y - tableHeaderHeight + 2 }, end: { x: headerX, y: y + 2 }, thickness: 0.35, color: rgb(0.70, 0.84, 0.80) });
+    }
+    // Leave enough room below the header so the first row background and text
+    // cannot cover the header glyphs.
+    y -= tableHeaderHeight + 14;
+  };
 
   for (const section of sections) {
     const items = sectionItems(transactions, section.type);
     if (!items.length) continue;
-    ensureSpace(48);
-    page.drawText(section.label, { x: margin, y, size: 12, font: bold, color: section.color });
-    y -= 17;
-    page.drawRectangle({ x: margin, y: y - 16, width: contentWidth, height: 17, color: colors.teal });
-    let x = margin;
-    for (const column of columns) {
-      page.drawText(column.label, { x: x + 5, y: y - 11, size: 6.5, font: bold, color: rgb(1, 1, 1) });
-      x += column.width;
-    }
-    y -= 19;
+    ensureSpace(55);
+    drawTableHeader(section.label, 12);
 
     for (const transaction of items) {
       const pageBeforeRow = page;
-      ensureSpace(14);
+      ensureSpace(rowHeight + 5);
       if (page !== pageBeforeRow) {
-        page.drawText(safePdfText(`${section.label} (continued)`), { x: margin, y, size: 8, font: bold, color: section.color });
-        y -= 13;
-        page.drawRectangle({ x: margin, y: y - 16, width: contentWidth, height: 17, color: colors.teal });
-        let continuedX = margin;
-        for (const column of columns) {
-          page.drawText(column.label, { x: continuedX + 5, y: y - 11, size: 6.5, font: bold, color: rgb(1, 1, 1) });
-          continuedX += column.width;
-        }
-        y -= 19;
+        drawTableHeader(`${section.label} (continued)`, 8);
       }
-      if (Math.round((pageHeight - y) / 14) % 2 === 0) {
-        page.drawRectangle({ x: margin, y: y - 3, width: contentWidth, height: 14, color: colors.pale });
+      if (Math.round((pageHeight - y) / rowHeight) % 2 === 0) {
+        page.drawRectangle({ x: margin, y: y - 5, width: contentWidth, height: rowHeight, color: colors.pale });
       }
       const values = [
         displayDate(transaction.date),
@@ -226,14 +276,15 @@ async function buildPdf(
         transactionAccount(transaction),
         displayAmount(transaction, currency),
       ];
-      x = margin;
+      let x = margin;
       columns.forEach((column, index) => {
-        const text = fitPdfText(values[index], index === 4 ? bold : regular, 6.5, column.width - 10);
-        page.drawText(text, { x: x + 5, y, size: 6.5, font: index === 4 ? bold : regular, color: index === 4 ? section.color : colors.ink });
+        const text = fitPdfText(values[index], index === 4 ? bold : regular, tableFontSize, column.width - 12);
+        page.drawText(text, { x: x + 6, y, size: tableFontSize, font: index === 4 ? bold : regular, color: index === 4 ? section.color : colors.ink });
         x += column.width;
+        page.drawLine({ start: { x, y: y - 5 }, end: { x, y: y + rowHeight - 5 }, thickness: 0.3, color: colors.border });
       });
-      y -= 14;
-      page.drawLine({ start: { x: margin, y: y + 3 }, end: { x: margin + contentWidth, y: y + 3 }, thickness: 0.35, color: colors.border });
+      y -= rowHeight;
+      page.drawLine({ start: { x: margin, y: y + 1 }, end: { x: margin + contentWidth, y: y + 1 }, thickness: 0.35, color: colors.border });
     }
     y -= 13;
   }
@@ -265,10 +316,10 @@ export function DataExportButton({ currency }: { currency: string }) {
       const response = await authenticatedFetch(`/api/transactions${periodQuery(period)}`);
       if (!response.ok) throw new Error("Unable to load transactions");
       const result = (await response.json()) as { transactions?: ApiTransaction[] };
-      const transactions = result.transactions ?? [];
+      const transactions = sortTransactions(result.transactions ?? []);
       const fileDate = new Date().toISOString().slice(0, 10);
       if (format === "csv") {
-        downloadBlob(new Blob([csvForTransactions(transactions, currency)], { type: "text/csv;charset=utf-8" }), `luna-transactions-${fileDate}.csv`);
+        downloadBlob(new Blob([csvForTransactions(transactions, period, currency)], { type: "text/csv;charset=utf-8" }), `luna-transactions-${fileDate}.csv`);
       } else {
         const bytes = await buildPdf(transactions, period, currency);
         const pdfBuffer = new ArrayBuffer(bytes.byteLength);
@@ -293,9 +344,11 @@ export function DataExportButton({ currency }: { currency: string }) {
       <DatePicker
         initialMode="month"
         initialLabel={initialPeriod.label}
-        triggerLabel="Export"
-        triggerAriaLabel="Choose export date range"
+        triggerLabel="Export data"
+        triggerAriaLabel="Open data export filters"
         triggerIcon={FileDown}
+        iconOnly
+        hideApplyButton
         onApply={handleApply}
         footer={(apply, canApply) => (
           <div className="grid grid-cols-2 gap-2">

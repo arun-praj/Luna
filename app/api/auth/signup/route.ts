@@ -10,19 +10,22 @@ import { toPublicUserProfile } from "@/backend/auth/profile";
 import { signupInput } from "@/backend/auth/validation";
 import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/email";
 import { createEmailVerificationCode, EMAIL_VERIFICATION_MINUTES } from "@/backend/auth/email-verification";
+import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const parsed = signupInput.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return errorResponse("Invalid signup details", 400);
+  const signupLimit = await checkRateLimit(request, "signup-ip", { limit: 10, windowMs: 60 * 60 * 1000 });
+  if (!signupLimit.allowed) return NextResponse.json({ error: "Too many signup attempts. Try again later." }, { status: 429, headers: rateLimitHeaders(signupLimit.retryAfterSeconds) });
   if (parsed.data.otpEnabled) return errorResponse("OTP delivery is not configured yet", 501);
 
   const [existing] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
   if (existing) return errorResponse("Unable to create account with those details", 409);
 
   const timestamp = new Date().toISOString();
-  const user = { id: randomUUID(), name: "", email: parsed.data.email, phone: parsed.data.phone ?? null, passwordHash: await hashPassword(parsed.data.password), currency: parsed.data.currency, onboardingCompleted: false, tutorialStartedAt: null, tutorialCompletedAt: null, otpEnabled: false, twoFactorEnabled: false, twoFactorSecretEncrypted: null, twoFactorSetupSecretEncrypted: null, twoFactorBackupCodes: null, twoFactorVerifiedAt: null, emailVerifiedAt: null, phoneVerifiedAt: null, pwaInstallDismissedAt: null, lastLoginAt: null, avatarPreset: "sunrise", createdAt: timestamp, updatedAt: timestamp };
+  const user = { id: randomUUID(), name: "", email: parsed.data.email, phone: parsed.data.phone ?? null, passwordHash: await hashPassword(parsed.data.password), currency: parsed.data.currency, monthlyReportEnabled: false, onboardingCompleted: false, tutorialStartedAt: null, tutorialCompletedAt: null, otpEnabled: false, twoFactorEnabled: false, twoFactorSecretEncrypted: null, twoFactorSetupSecretEncrypted: null, twoFactorBackupCodes: null, twoFactorVerifiedAt: null, emailVerifiedAt: null, phoneVerifiedAt: null, pwaInstallDismissedAt: null, lastLoginAt: null, avatarPreset: "sunrise", createdAt: timestamp, updatedAt: timestamp };
   await db.insert(users).values(user);
 
   const session = await createSession(user.id);

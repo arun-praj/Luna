@@ -70,6 +70,8 @@ export function DatePicker({
   triggerLabel,
   triggerAriaLabel,
   triggerIcon,
+  iconOnly = false,
+  hideApplyButton = false,
   onApply,
   footer,
 }: {
@@ -78,6 +80,8 @@ export function DatePicker({
   triggerLabel?: string;
   triggerAriaLabel?: string;
   triggerIcon?: LucideIcon;
+  iconOnly?: boolean;
+  hideApplyButton?: boolean;
   onApply?: (period: AppliedPeriod) => void;
   footer?: (apply: () => void, canApply: boolean) => React.ReactNode;
 } = {}) {
@@ -100,6 +104,7 @@ export function DatePicker({
   });
   const [calendarOpen, setCalendarOpen] = React.useState(false);
   const [calendarMonth, setCalendarMonth] = React.useState(CURRENT_DATE);
+  const monthScrollerRef = React.useRef<HTMLDivElement>(null);
   const [amount, setAmount] = React.useState(4);
   const [unit, setUnit] = React.useState<PeriodUnit>("weeks");
   const TriggerIcon = triggerIcon ?? CalendarDays;
@@ -109,6 +114,54 @@ export function DatePicker({
     if (!nextOpen) setCalendarOpen(false);
     setOpen(nextOpen);
   };
+
+  React.useEffect(() => {
+    if (!open) return;
+    let scrollerForCleanup: HTMLDivElement | null = null;
+
+    const alignCurrentMonth = () => {
+      const scroller = monthScrollerRef.current;
+      if (!scroller) return;
+      scrollerForCleanup = scroller;
+      const currentMonthButton = scroller.querySelector<HTMLButtonElement>(
+        "[data-current-month='true']",
+      );
+      if (!currentMonthButton) return;
+      const scrollerLeft = scroller.getBoundingClientRect().left;
+      const buttonLeft = currentMonthButton.getBoundingClientRect().left;
+      const currentOffset =
+        buttonLeft - scrollerLeft + scroller.scrollLeft;
+      const desiredScrollLeft = Math.max(0, currentOffset - 16);
+      const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+      const extraScrollSpace = Math.max(
+        0,
+        desiredScrollLeft - maxScrollLeft,
+      );
+
+      if (extraScrollSpace > 0) {
+        const paddingRight = Number.parseFloat(
+          window.getComputedStyle(scroller).paddingRight,
+        );
+        scroller.style.paddingRight = `${paddingRight + extraScrollSpace}px`;
+      }
+
+      scroller.scrollLeft = desiredScrollLeft;
+    };
+
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      alignCurrentMonth();
+      secondFrame = requestAnimationFrame(alignCurrentMonth);
+    });
+    const delayedAlignment = window.setTimeout(alignCurrentMonth, 150);
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+      window.clearTimeout(delayedAlignment);
+      scrollerForCleanup?.style.removeProperty("padding-right");
+    };
+  }, [open]);
 
   const chooseCustomRange = (range: DateRange | undefined) => {
     if (!range) return;
@@ -158,18 +211,21 @@ export function DatePicker({
         <button
           type="button"
           aria-label={triggerAriaLabel ?? `Choose reporting period, currently ${periodLabel}`}
+          title={iconOnly ? triggerLabel : undefined}
           onClick={() => setOpenState(true)}
-          className="flex min-h-11 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3.5 text-sm font-semibold text-foreground shadow-[0_1px_2px_rgb(23_32_29_/_0.03)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+          className={`flex min-h-11 shrink-0 items-center rounded-[10px] border border-border bg-card text-sm font-semibold text-foreground shadow-[0_1px_2px_rgb(23_32_29_/_0.03)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${iconOnly ? "size-11 justify-center px-0" : "gap-2 px-3.5"}`}
         >
           <TriggerIcon
             aria-hidden="true"
             className="size-[18px] text-primary"
           />
-          <span className="max-w-24 truncate">{triggerLabel ?? periodLabel}</span>
-          <ChevronRight
-            aria-hidden="true"
-            className="size-4 text-muted-foreground"
-          />
+          <span className={iconOnly ? "sr-only" : "max-w-24 truncate"}>{triggerLabel ?? periodLabel}</span>
+          {iconOnly ? null : (
+            <ChevronRight
+              aria-hidden="true"
+              className="size-4 text-muted-foreground"
+            />
+          )}
         </button>
       </Dialog.Trigger>
 
@@ -195,15 +251,17 @@ export function DatePicker({
                 Select a month, custom range, recent period, or all-time data.
               </Dialog.Description>
 
-              <button
-                type="button"
-                aria-label="Apply period filter"
-                disabled={!canApply}
-                onClick={applyFilter}
-                className="flex size-11 items-center justify-center justify-self-end rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"
-              >
-                <Check aria-hidden="true" className="size-5" />
-              </button>
+              {hideApplyButton ? null : (
+                <button
+                  type="button"
+                  aria-label="Apply period filter"
+                  disabled={!canApply}
+                  onClick={applyFilter}
+                  className="flex size-11 items-center justify-center justify-self-end rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"
+                >
+                  <Check aria-hidden="true" className="size-5" />
+                </button>
+              )}
             </header>
 
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">
@@ -216,7 +274,7 @@ export function DatePicker({
                     {CURRENT_DATE.getFullYear()}
                   </span>
                 </div>
-                <div className="-mx-4 mt-2 flex snap-x gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-5 sm:px-5">
+                <div ref={monthScrollerRef} className="-mx-4 mt-2 flex snap-x gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-5 sm:px-5">
                   {MONTHS.map((month, index) => {
                     const selected = selectedMonth === index;
                     const current = index === CURRENT_DATE.getMonth();
@@ -234,6 +292,7 @@ export function DatePicker({
                             : "border-border bg-card text-muted-foreground hover:bg-surface-subtle hover:text-foreground"
                         }`}
                         key={month}
+                        data-current-month={current ? "true" : undefined}
                         onClick={() => {
                           setSelectedMonth(index);
                           setDraftMode("month");

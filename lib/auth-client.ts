@@ -5,6 +5,7 @@ const REFRESH_WINDOW_SECONDS = 60;
 const API_CACHE_TTL_MS = 120_000;
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 const API_CACHE_STORAGE_KEY = "cocomelon.api-cache";
+export const ONLINE_DATA_CHANGED_EVENT = "cocomelon:online-data-changed";
 let refreshPromise: Promise<string | null> | null = null;
 
 type ApiCacheEntry = {
@@ -87,6 +88,13 @@ export function clearApiCache() {
     window.sessionStorage.removeItem(API_CACHE_STORAGE_KEY);
 }
 
+export function primeApiCache(path: string, data: unknown) {
+  if (typeof window === "undefined") return;
+  const cacheKey = new URL(path, window.location.origin).toString();
+  apiCache.set(cacheKey, { data, expiresAt: Date.now() + API_CACHE_TTL_MS });
+  persistCache();
+}
+
 export function notifyTransactionsChanged() {
   clearApiCache();
   if (typeof window !== "undefined") {
@@ -94,10 +102,39 @@ export function notifyTransactionsChanged() {
   }
 }
 
+export function notifyOnlineDataChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(ONLINE_DATA_CHANGED_EVENT));
+  }
+}
+
 export function clearAccessToken() {
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  // Do not leave the previous user's offline snapshot addressable after
+  // logout or token expiry on a shared device.
+  window.localStorage.removeItem("cocomelon.offline-active-user");
   clearApiCache();
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
+}
+
+function clearLunaDeviceCache() {
+  if (typeof window === "undefined") return;
+
+  // Remove Luna-owned browser state only. Do not clear the origin wholesale:
+  // browser extensions and other applications may share it on localhost.
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (!key) continue;
+      if (
+        key.startsWith("cocomelon.") ||
+        key.startsWith("budget_notification_settings:") ||
+        key === ACCESS_TOKEN_KEY
+      ) {
+        storage.removeItem(key);
+      }
+    }
+  }
 }
 
 function tokenExpiresSoon(token: string | null) {
@@ -226,18 +263,40 @@ async function fetchAndCache(
 }
 
 async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
-  const requestController = init.signal ? null : new AbortController();
-  const requestSignal = init.signal ?? requestController?.signal;
-  const timeout = requestController
-    ? window.setTimeout(() => requestController.abort(), AUTH_REQUEST_TIMEOUT_MS)
-    : null;
+  const method = (
+    init.method ??
+    (typeof input === "string"
+      ? "GET"
+      : input instanceof Request
+        ? input.method
+        : "GET")
+  ).toUpperCase();
+  const isMutation = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const markMutationSuccess = (response: Response) => {
+    if (response.ok && isMutation) notifyOnlineDataChanged();
+    return response;
+  };
+  // Always put a bounded controller around authenticated requests. Several
+  // callers pass their own signal (route loaders, login probes, sync), and
+  // the old implementation skipped the timeout entirely in that case. A
+  // stalled request could therefore leave a route on an endless loading
+  // screen. Forward caller cancellation into the bounded controller so both
+  // behaviors work together.
+  const requestController = new AbortController();
+  const requestSignal = requestController.signal;
+  const forwardAbort = () => requestController.abort(init.signal?.reason);
+  if (init.signal) {
+    if (init.signal.aborted) forwardAbort();
+    else init.signal.addEventListener("abort", forwardAbort, { once: true });
+  }
+  const timeout = window.setTimeout(() => requestController.abort(), AUTH_REQUEST_TIMEOUT_MS);
   const headers = new Headers(init.headers);
   try {
     let token = getAccessToken();
     if (tokenExpiresSoon(token)) token = await refreshAccessToken(requestSignal);
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(input, { ...init, headers, signal: requestSignal });
-    if (response.status !== 401) return response;
+    if (response.status !== 401) return markMutationSuccess(response);
     const refreshedToken = await refreshAccessToken(requestSignal);
     if (!refreshedToken) {
       notifyAuthExpired();
@@ -246,13 +305,28 @@ async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
     headers.set("Authorization", `Bearer ${refreshedToken}`);
     const retry = await fetch(input, { ...init, headers, signal: requestSignal });
     if (retry.status === 401) notifyAuthExpired();
-    return retry;
+    return markMutationSuccess(retry);
   } finally {
-    if (timeout !== null) window.clearTimeout(timeout);
+    window.clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", forwardAbort);
   }
 }
 
 export async function signOut() {
-  await fetch("/api/auth/logout", { method: "POST" });
-  clearAccessToken();
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } finally {
+    // Clearing the device must not depend on a successful network logout.
+    // This prevents the next person using a shared phone from accessing a
+    // previous user's cached accounts or queued transactions offline.
+    clearAccessToken();
+    clearLunaDeviceCache();
+    try {
+      const { clearOfflineDatabase } = await import("@/lib/offline/database");
+      await clearOfflineDatabase();
+    } catch {
+      // The auth state has already been cleared. A later launch cannot select
+      // this snapshot because its active-user marker was removed above.
+    }
+  }
 }

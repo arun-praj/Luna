@@ -73,7 +73,7 @@ The sync contract is documented in [`backend/BACKEND.md`](backend/BACKEND.md). T
 - Node.js 20 or newer
 - npm 10 or newer
 - A modern browser with IndexedDB and service-worker support
-- SMTP credentials are optional for password reset and email verification flows
+- SMTP credentials are optional for password reset, email verification, and monthly report delivery
 
 ## Getting started
 
@@ -90,6 +90,8 @@ Open `.env.local` and set at least:
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
 APP_URL=http://localhost:3000
 ```
+
+For Wrangler/D1 development, copy `.dev.vars.example` to `.dev.vars` and add the same SMTP and NVIDIA values there. Never commit either local file.
 
 Generate a strong local secret with:
 
@@ -154,12 +156,17 @@ npm run db:migrate
 | --- | :---: | --- |
 | `AUTH_JWT_SECRET` | Yes | Signs short-lived access tokens and protects encrypted auth data. |
 | `APP_URL` | Recommended | Base URL used in password-reset links. |
-| `SMTP_HOST` | Optional | SMTP server for password reset and verification email. |
+| `SMTP_HOST` | Optional | SMTP server for password reset, verification, and report email. |
 | `SMTP_PORT` | Optional | SMTP port, usually `587`. |
 | `SMTP_SECURE` | Optional | Set to `true` when the SMTP server requires TLS immediately. |
 | `SMTP_USER` | Optional | SMTP username. |
 | `SMTP_PASSWORD` | Optional | SMTP password or app password. |
 | `SMTP_FROM` | Optional | Sender address. |
+| `SMTP_REPLY_TO` | Optional | Reply address; keep it aligned with your verified sender. |
+| `NVIDIA_AI_API_URL` | Optional | OpenAI-compatible NVIDIA chat-completions URL for report insights. |
+| `NVIDIA_AI_API_KEY` | Optional | Secret NVIDIA API key; local insights are used when absent. |
+| `NVIDIA_AI_MODEL` | Optional | NVIDIA model identifier. |
+| `REPORT_MONTHLY_HOUR` | Optional | UTC hour on day 1 when enabled monthly reports are sent; defaults to `8`. |
 | `CRON_SECRET` | Optional | Protects the account-deletion cleanup endpoint. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Optional | Enables browser push notification subscriptions. |
 | `VAPID_PUBLIC_KEY` | Optional | Server-side copy of the push public key used to send reminders. |
@@ -168,6 +175,14 @@ npm run db:migrate
 | `R2` Worker binding | Configured | Stores receipt and image uploads in the Cloudflare R2 `budgeyy` bucket. |
 
 `DATABASE_URL` is only needed for the retained PostgreSQL tooling. See [`.env.example`](.env.example) for the starter configuration.
+
+## Money reports and email delivery
+
+The `/reports` page generates weekly, monthly, and yearly reports from the authenticated user's transactions. It includes totals for spending, earning, and savings, a ranked category list without charts, the largest expense, a lightweight trend forecast, AI insights, and suggestions. PDF generation works without NVIDIA; when `NVIDIA_AI_API_URL` and `NVIDIA_AI_API_KEY` are configured, only report aggregates and top-expense metadata are sent to that endpoint.
+
+The Profile page contains a `Monthly report by email` toggle. When enabled, the Worker sends the previous month's PDF on the first day of the next month and records an idempotent delivery. The manual `Email this report` action uses the same SMTP path.
+
+To reduce spam and spoofing risk, use a verified sender from your SMTP provider, authenticate with an app password or provider token, and publish SPF, DKIM, and DMARC records for the sender domain. Code-level headers and a matching `SMTP_FROM` cannot replace provider authentication or DNS alignment, and no implementation can guarantee a message will never be classified as spam.
 
 ## Local-first behavior
 

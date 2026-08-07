@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const accountType = z.enum(["checking", "cash", "credit_card", "general", "savings", "investment", "loan", "other"]);
-export const transactionType = z.enum(["expense", "income", "savings", "transfer", "adjust_balance"]);
+export const transactionType = z.enum(["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"]);
 export const recurringType = z.enum(["expense", "income", "savings", "transfer"]);
 
 export const accountInput = z.object({
@@ -46,7 +46,10 @@ export const goalInput = z.object({
   targetAmount: z.number().finite().positive(),
   status: z.enum(["active", "completed", "archived"]).optional(),
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  accountId: z.string().uuid().nullable().optional(),
 });
+
+export const goalCreateInput = goalInput.extend({ accountId: z.string().uuid() });
 
 export const budgetInput = z.object({
   categoryId: z.string().uuid().nullable().optional(),

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bell, Check, ChevronDown, CloudOff, Smartphone } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, Check, ChevronDown, CloudOff, LoaderCircle, Mail, Smartphone } from "lucide-react";
 import {
   loadNotificationSettings,
   notificationPermission,
@@ -12,8 +12,13 @@ import {
   subscribeToPush,
   type NotificationSettings,
 } from "@/lib/notifications";
+import { authenticatedFetch } from "@/lib/auth-client";
 
-type Props = { userId: string };
+type Props = {
+  userId: string;
+  monthlyReportEnabled: boolean;
+  onMonthlyReportChange: (enabled: boolean) => void;
+};
 
 const frequencyOptions = [
   { value: "daily", label: "Daily" },
@@ -38,13 +43,16 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (val
   );
 }
 
-export function NotificationSettingsCard({ userId }: Props) {
+export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonthlyReportChange }: Props) {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(() => notificationPermission());
   const [isEnabling, setIsEnabling] = useState(false);
   const [isFrequencyOpen, setIsFrequencyOpen] = useState(false);
+  const [isSavingThreshold, setIsSavingThreshold] = useState(false);
+  const [isSavingMonthlyReport, setIsSavingMonthlyReport] = useState(false);
   const [message, setMessage] = useState("");
+  const thresholdSaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     void loadNotificationSettings(userId).then(async (loaded) => {
@@ -67,6 +75,14 @@ export function NotificationSettingsCard({ userId }: Props) {
     return () => {
       window.removeEventListener("focus", refreshPermission);
       document.removeEventListener("visibilitychange", refreshPermission);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (thresholdSaveTimer.current !== null) {
+        window.clearTimeout(thresholdSaveTimer.current);
+      }
     };
   }, []);
 
@@ -95,6 +111,46 @@ export function NotificationSettingsCard({ userId }: Props) {
     setSettings(result.settings);
     setMessage(result.synced ? "Saved" : "Saved on this device; will sync when you’re online");
     window.setTimeout(() => setMessage(""), 3200);
+  }
+
+  async function updateMonthlyReport(value: boolean) {
+    setIsSavingMonthlyReport(true);
+    setMessage("");
+    const response = await authenticatedFetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ monthlyReportEnabled: value }),
+    });
+    if (response.ok) {
+      onMonthlyReportChange(value);
+      setMessage(value ? "Monthly email reports enabled" : "Monthly email reports disabled");
+    } else {
+      setMessage("Could not update report preference");
+    }
+    setIsSavingMonthlyReport(false);
+  }
+
+  function scheduleThresholdSave(value: number | null) {
+    if (thresholdSaveTimer.current !== null) {
+      window.clearTimeout(thresholdSaveTimer.current);
+    }
+    thresholdSaveTimer.current = window.setTimeout(() => {
+      thresholdSaveTimer.current = null;
+      void confirmThreshold(value);
+    }, 500);
+  }
+
+  async function confirmThreshold(value: number | null) {
+    if (thresholdSaveTimer.current !== null) {
+      window.clearTimeout(thresholdSaveTimer.current);
+      thresholdSaveTimer.current = null;
+    }
+    setIsSavingThreshold(true);
+    try {
+      await update({ lowBalanceThreshold: value });
+    } finally {
+      setIsSavingThreshold(false);
+    }
   }
 
   async function enableNotifications() {
@@ -139,6 +195,13 @@ export function NotificationSettingsCard({ userId }: Props) {
       </button>
       {isOpen ? <>
         <div className="divide-y divide-border border-t border-border">
+        <div className="flex items-center gap-3 px-4 py-4">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary"><Mail aria-hidden="true" className="size-4" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Monthly report by email</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">Receive the previous month&apos;s PDF on the first day of each month.</p></div>
+          <button type="button" role="switch" aria-checked={monthlyReportEnabled} aria-label="Monthly report by email" disabled={isSavingMonthlyReport} onClick={() => void updateMonthlyReport(!monthlyReportEnabled)} className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 ${monthlyReportEnabled ? "bg-primary" : "bg-border-strong"}`}>
+            <span className={`absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${monthlyReportEnabled ? "left-6" : "left-1"}`} />
+          </button>
+        </div>
         <div className="flex items-center gap-3 px-4 py-4">
           <div className="min-w-0 flex-1"><p className="text-sm font-medium">Goal milestones</p><p className="mt-0.5 text-xs text-muted-foreground">Celebrate progress toward your goals.</p></div>
           <Toggle label="Goal milestone notifications" checked={settings.goalMilestonesEnabled} onChange={(value) => void update({ goalMilestonesEnabled: value })} />
@@ -186,7 +249,10 @@ export function NotificationSettingsCard({ userId }: Props) {
           {settings.lowBalanceEnabled ? (
             <label className="mt-3 block text-xs font-medium text-muted-foreground">Alert below
               <div className="mt-1 flex items-center gap-2">
-                <input type="number" min="0" step="1" value={settings.lowBalanceThreshold ?? ""} onChange={(event) => setSettings({ ...settings, lowBalanceThreshold: event.target.value === "" ? null : Math.max(0, Number(event.target.value)) })} onBlur={() => void update({ lowBalanceThreshold: settings.lowBalanceThreshold })} className="min-h-10 w-full rounded-[10px] border border-border bg-background px-3 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-4 focus:ring-primary/10" placeholder="e.g. 500" />
+                <input type="number" min="0" step="1" value={settings.lowBalanceThreshold ?? ""} onChange={(event) => { const value = event.target.value === "" ? null : Math.max(0, Number(event.target.value)); setSettings({ ...settings, lowBalanceThreshold: value }); scheduleThresholdSave(value); }} onBlur={() => void confirmThreshold(settings.lowBalanceThreshold)} className="min-h-10 w-full rounded-[10px] border border-border bg-background px-3 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-4 focus:ring-primary/10" placeholder="e.g. 500" />
+                <button type="button" aria-label="Confirm low balance threshold" onClick={() => void confirmThreshold(settings.lowBalanceThreshold)} disabled={isSavingThreshold} className="flex size-10 shrink-0 items-center justify-center rounded-[10px] border border-border bg-background text-primary transition-colors hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:cursor-wait disabled:opacity-60">
+                  {isSavingThreshold ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Check aria-hidden="true" className="size-4" />}
+                </button>
               </div>
             </label>
           ) : null}

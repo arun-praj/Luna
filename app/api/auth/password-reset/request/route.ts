@@ -6,6 +6,7 @@ import { passwordResetTokens, users } from "@/backend/db/schema";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { isSmtpConfigured, sendPasswordResetEmail } from "@/backend/auth/email";
 import { z } from "zod";
+import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,8 @@ const input = z.object({ email: z.string().trim().toLowerCase().pipe(z.email()).
 export async function POST(request: Request) {
   const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return errorResponse("Enter a valid email address", 400);
+  const ipLimit = await checkRateLimit(request, "password-reset-ip", { limit: 10, windowMs: 60 * 60 * 1000 });
+  if (!ipLimit.allowed) return NextResponse.json({ error: "Too many password reset requests. Try again later." }, { status: 429, headers: rateLimitHeaders(ipLimit.retryAfterSeconds) });
   const authenticatedUserId = await requireAccessToken(request);
   let targetEmail = parsed.data.email;
   if (authenticatedUserId) {
@@ -23,6 +26,8 @@ export async function POST(request: Request) {
     targetEmail = authenticatedUser.email;
   }
   if (!targetEmail) return errorResponse("Enter a valid email address", 400);
+  const emailLimit = await checkRateLimit(request, "password-reset-email", { limit: 5, windowMs: 60 * 60 * 1000 }, targetEmail);
+  if (!emailLimit.allowed) return NextResponse.json({ error: "Too many password reset requests. Try again later." }, { status: 429, headers: rateLimitHeaders(emailLimit.retryAfterSeconds) });
   if (!isSmtpConfigured()) return errorResponse("Password reset email is not configured yet", 503);
 
   const [user] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.email, targetEmail)).limit(1);

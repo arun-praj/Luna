@@ -7,6 +7,29 @@
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	"secrets": {
+		"required": [
+			"AUTH_JWT_SECRET",
+			"CRON_SECRET",
+			"NVIDIA_AI_API_KEY",
+			"NVIDIA_AI_API_URL",
+			"NVIDIA_AI_MODEL",
+			"REPORT_MONTHLY_HOUR",
+			"SMTP_HOST",
+			"SMTP_PORT",
+			"SMTP_SECURE",
+			"SMTP_USER",
+			"SMTP_PASSWORD",
+			"SMTP_FROM",
+			"VAPID_PUBLIC_KEY",
+			"VAPID_PRIVATE_KEY",
+			"VAPID_SUBJECT"
+		]
+	},
 	"triggers": {
 		"crons": ["* * * * *"]
 	},

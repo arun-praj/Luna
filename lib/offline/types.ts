@@ -3,7 +3,8 @@ export type OfflineTransactionType =
   | "income"
   | "savings"
   | "transfer"
-  | "adjust_balance";
+  | "adjust_balance"
+  | "goal_spend";
 
 export type OfflineSyncStatus = "synced" | "pending" | "failed";
 
@@ -94,7 +95,7 @@ export type OfflineTransaction = {
 
 export type OfflineTransactionInput = {
   accountId: string;
-  type: Exclude<OfflineTransactionType, "adjust_balance">;
+  type: Exclude<OfflineTransactionType, "adjust_balance" | "goal_spend">;
   amount: number;
   categoryId?: string | null;
   title: string;

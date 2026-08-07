@@ -1,6 +1,6 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import { sites } from "./build/sites-vite-plugin";
+import { sites } from "./build/sites-vite-plugin.ts";
 
 export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");

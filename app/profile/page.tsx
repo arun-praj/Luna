@@ -8,16 +8,19 @@ import {
   ArrowLeft,
   ChevronRight,
   Check,
+  FileText,
   Landmark,
   LockKeyhole,
   LogOut,
   Pencil,
+  Sparkles,
   X,
   Tags,
+  Target,
   WalletCards,
 } from "lucide-react";
 
-import { AVATAR_PRESETS, avatarForPreset } from "@/lib/avatar";
+import { AVATAR_PRESETS, avatarForPreset, randomAvatarPreset } from "@/lib/avatar";
 import { authenticatedFetch, loginPathFor, signOut } from "@/lib/auth-client";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { NotificationSettingsCard } from "@/components/notifications/notification-settings";
@@ -27,12 +30,14 @@ import { PageDataSkeleton } from "@/components/ui/data-skeleton";
 import { withReturnTo } from "@/lib/navigation";
 import { AppTutorial } from "@/components/tutorial/app-tutorial";
 import { DataExportButton } from "@/components/profile/data-export";
+import { ReportSettingsCard } from "@/components/profile/report-settings";
 
 type ProfileUser = {
   id: string;
   name: string;
   email: string;
   currency: string;
+  monthlyReportEnabled: boolean;
   lastLoginAt: string | null;
   avatarPreset: string;
   emailVerifiedAt: string | null;
@@ -84,6 +89,7 @@ export default function ProfilePage() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
   const [isAvatarPickerClosing, setIsAvatarPickerClosing] = useState(false);
+  const [randomAvatarPreview, setRandomAvatarPreview] = useState<string | null>(null);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
@@ -162,6 +168,7 @@ export default function ProfilePage() {
       avatarCloseTimer.current = null;
     }
     setIsAvatarPickerClosing(false);
+    setRandomAvatarPreview(null);
     setIsAvatarPickerOpen(true);
   }
 
@@ -174,6 +181,7 @@ export default function ProfilePage() {
     avatarCloseTimer.current = window.setTimeout(() => {
       setIsAvatarPickerOpen(false);
       setIsAvatarPickerClosing(false);
+      setRandomAvatarPreview(null);
       avatarCloseTimer.current = null;
     }, 320);
   }
@@ -325,6 +333,8 @@ export default function ProfilePage() {
             { href: withReturnTo("/accounts", "/profile"), label: "Accounts", icon: WalletCards },
             { href: withReturnTo("/categories", "/profile"), label: "Categories", icon: Tags },
             { href: withReturnTo("/savings-instruments", "/profile"), label: "Saving Instruments", icon: Landmark },
+            { href: withReturnTo("/goals", "/profile"), label: "Goals", icon: Target },
+            { href: withReturnTo("/reports", "/profile"), label: "Reports", icon: FileText },
           ].map(({ href, label, icon: Icon }, index) => (
             <Link key={href} href={href} className={`flex min-h-[64px] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${index > 0 ? "border-t border-border" : ""}`}>
               <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary"><Icon aria-hidden="true" className="size-[18px]" /></span>
@@ -336,38 +346,86 @@ export default function ProfilePage() {
 
         {isAvatarPickerOpen ? (
           <div
-            className={`fixed inset-0 z-50 grid place-items-center bg-foreground/30 px-4 ${isAvatarPickerClosing ? "profile-scrim-exit" : "profile-scrim-enter"}`}
+            className={`fixed inset-0 z-50 flex items-end bg-foreground/30 ${isAvatarPickerClosing ? "profile-scrim-exit" : "profile-scrim-enter"}`}
             role="presentation"
-            onMouseDown={closeAvatarPicker}
+            onPointerDown={closeAvatarPicker}
           >
             <section
               role="dialog"
               aria-modal="true"
               aria-labelledby="avatar-picker-title"
-              className={`w-full max-w-[430px] rounded-[18px] border border-border bg-background p-5 shadow-xl ${isAvatarPickerClosing ? "profile-picker-exit" : "profile-picker-enter"}`}
-              onMouseDown={(event) => event.stopPropagation()}
+              className={`flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)] ${isAvatarPickerClosing ? "drawer-exit" : "drawer-enter"}`}
+              onPointerDown={(event) => event.stopPropagation()}
             >
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              <div
+                className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-foreground/20"
+                aria-hidden="true"
+              />
+              <header className="flex shrink-0 items-center justify-between border-b border-border px-4 pb-3 pt-3">
+                <button
+                  type="button"
+                  aria-label="Close icon picker"
+                  onClick={closeAvatarPicker}
+                  className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
+                <div className="min-w-0 text-center">
                   <h2
                     id="avatar-picker-title"
-                    className="text-lg font-semibold"
+                    className="text-base font-semibold"
                   >
                     Choose your icon
                   </h2>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
                     Pick an icon that feels like you.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={closeAvatarPicker}
-                  className="text-sm font-semibold text-muted-foreground"
+                  className="rounded-[10px] bg-primary-soft px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                 >
-                  Close
+                  Done
                 </button>
-              </div>
-              <div className="mt-5 grid grid-cols-5 gap-3">
+              </header>
+              <div className="min-h-0 overflow-y-auto px-4 pb-3 pt-4">
+                <div className="grid grid-cols-4 gap-3 min-[390px]:grid-cols-5">
+                <button
+                  type="button"
+                  disabled={isSavingAvatar}
+                  onClick={() => setRandomAvatarPreview(randomAvatarPreset())}
+                  aria-label="Generate a surprise profile icon"
+                  className="flex min-w-0 flex-col items-center rounded-[12px] p-1 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+                >
+                  <span className="flex aspect-square w-full items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+                    <Sparkles aria-hidden="true" className="size-6" />
+                  </span>
+                  <span className="mt-1 block max-w-full truncate text-[10px] text-muted-foreground">
+                    Surprise me
+                  </span>
+                </button>
+                {randomAvatarPreview ? (
+                  <button
+                    type="button"
+                    disabled={isSavingAvatar}
+                    onClick={() => void handleAvatarSelect(randomAvatarPreview)}
+                    aria-label="Use generated profile icon"
+                    className="flex min-w-0 flex-col items-center rounded-[12px] bg-primary/15 p-1 ring-2 ring-primary transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+                  >
+                    <Image
+                      src={avatarForPreset(randomAvatarPreview)}
+                      alt=""
+                      width={58}
+                      height={58}
+                      unoptimized
+                      className="aspect-square w-full rounded-[10px]"
+                    />
+                    <span className="mt-1 block max-w-full truncate text-[10px] font-semibold text-primary">
+                      Use this icon
+                    </span>
+                  </button>
+                ) : null}
                 {AVATAR_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
@@ -390,6 +448,7 @@ export default function ProfilePage() {
                     </span>
                   </button>
                 ))}
+                </div>
               </div>
             </section>
           </div>
@@ -399,14 +458,14 @@ export default function ProfilePage() {
           <div
             className={`fixed inset-0 z-50 flex items-end bg-foreground/30 ${isCurrencyPickerClosing ? "profile-scrim-exit" : "profile-scrim-enter"}`}
             role="presentation"
-            onMouseDown={closeCurrencyPicker}
+            onPointerDown={closeCurrencyPicker}
           >
             <section
               role="dialog"
               aria-modal="true"
               aria-labelledby="currency-picker-title"
               className={`flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)] ${isCurrencyPickerClosing ? "drawer-exit" : "drawer-enter"}`}
-              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
             >
               <div
                 className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-foreground/20"
@@ -606,7 +665,12 @@ export default function ProfilePage() {
           </button>
         </section>
 
-        <NotificationSettingsCard userId={user.id} />
+        <ReportSettingsCard />
+        <NotificationSettingsCard
+          userId={user.id}
+          monthlyReportEnabled={user.monthlyReportEnabled}
+          onMonthlyReportChange={(monthlyReportEnabled) => setUser((current) => current ? { ...current, monthlyReportEnabled } : current)}
+        />
         <SecuritySettingsCard userId={user.id} />
 
         <PrivacySettingsCard />

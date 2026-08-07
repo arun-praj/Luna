@@ -51,6 +51,9 @@ The offline write path currently covers transactions. Accounts, categories, savi
 - `backend/db/migrations-d1` contains D1 migrations generated with `drizzle.sqlite.config.ts`.
 - `backend/db/migrations-postgres` contains PostgreSQL migrations generated with `drizzle.config.ts`.
 - The deployed Worker receives D1 as the `DB` binding declared in `wrangler.jsonc`.
+- `users.monthly_report_enabled` stores the opt-in for automated monthly PDF reports.
+- `report_deliveries` prevents duplicate monthly emails for the same user and period.
+- `goals.account_id` designates the account that holds a goal's funds. Goal-linked `savings` transactions record the spendable source in `account_id`, the goal account in `transfer_to_account_id`, and a signed amount; `goal_spend` references the goal account but does not change account balances. The transaction service applies and reverses both account sides and the goal allocation together.
 
 Generate and apply D1 migrations with:
 
@@ -81,3 +84,5 @@ npx wrangler secret put VAPID_SUBJECT
 Generate the VAPID key pair once with `npx web-push generate-vapid-keys`. The public key is also needed as the `NEXT_PUBLIC_VAPID_PUBLIC_KEY` GitHub Actions secret so the browser can create a push subscription. The private key must never be placed in the browser build, GitHub source, or a committed environment file.
 
 `APP_URL` is a non-secret Worker variable configured in `wrangler.jsonc`. The `R2` binding points to the `budgeyy` bucket and is used directly by the upload routes; R2 access keys are not needed by the Worker. Add SMTP secrets only when those features are enabled. The GitHub workflow deploys code and migrations without copying local development secrets into CI.
+
+Report delivery uses the existing Node-compatible SMTP mailer and `pdf-lib`. Keep `SMTP_FROM` on the authenticated sender domain, configure SPF/DKIM/DMARC with the mail provider, and store `SMTP_PASSWORD`, `NVIDIA_AI_API_KEY`, and other runtime secrets as Worker secrets rather than in source control. The NVIDIA adapter expects an OpenAI-compatible `/chat/completions` endpoint and falls back to local deterministic insights when unavailable.

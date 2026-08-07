@@ -1,5 +1,6 @@
 import "server-only";
 
+import { Buffer } from "node:buffer";
 import nodemailer from "nodemailer";
 
 function smtpConfig() {
@@ -51,12 +52,31 @@ function lunaEmail({
   return `<!doctype html><html><body style="margin:0;background:#f4f7f5;color:#182321;font-family:Arial,Helvetica,sans-serif"><span style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preheader)}</span><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7f5;padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #dce7e4;border-radius:22px;overflow:hidden"><tr><td style="padding:28px 32px;background:#17302e;color:#ffffff"><div style="display:inline-flex;align-items:center;gap:10px;font-size:19px;font-weight:800"><span style="display:inline-block;width:34px;height:34px;line-height:34px;border-radius:50%;background:#9ed4c0;color:#17302e;text-align:center;font-size:18px">L</span>Luna</div></td></tr><tr><td style="padding:36px 32px 32px"><div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#367674;font-weight:800">${escapeHtml(eyebrow)}</div><h1 style="margin:12px 0 0;font-size:30px;line-height:1.15;letter-spacing:-.03em;color:#182321">${escapeHtml(title)}</h1><p style="margin:16px 0 0;font-size:16px;line-height:1.65;color:#65736f">${escapeHtml(body)}</p>${codeBlock}${button ? `<div style="margin-top:26px">${button}</div>` : ""}<p style="margin:28px 0 0;font-size:12px;line-height:1.6;color:#87918e">If you did not request this, you can safely ignore this email. For your security, never share a verification code.</p></td></tr><tr><td style="padding:18px 32px;border-top:1px solid #e5ecea;color:#87918e;font-size:12px">Luna · calm, clear money management</td></tr></table></td></tr></table></body></html>`;
 }
 
-async function sendMail({ to, subject, text, html }: { to: string; subject: string; text: string; html: string }) {
+type EmailAttachment = { filename: string; content: Uint8Array; contentType: string };
+
+async function sendMail({ to, subject, text, html, attachments, headers }: { to: string; subject: string; text: string; html: string; attachments?: EmailAttachment[]; headers?: Record<string, string> }) {
   const config = smtpConfig();
   if (!config) throw new Error("SMTP_NOT_CONFIGURED");
   const transporter = nodemailer.createTransport(config);
   const from = process.env.SMTP_FROM || config.auth.user;
-  await transporter.sendMail({ from, to, subject, text, html });
+  await transporter.sendMail({
+    from,
+    to,
+    replyTo: process.env.SMTP_REPLY_TO || from,
+    subject,
+    text,
+    html,
+    headers: {
+      "Auto-Submitted": "auto-generated",
+      "X-Auto-Response-Suppress": "All",
+      ...headers,
+    },
+    attachments: attachments?.map((attachment) => ({
+      filename: attachment.filename,
+      content: Buffer.from(attachment.content),
+      contentType: attachment.contentType,
+    })),
+  });
 }
 
 export function isSmtpConfigured() {
@@ -91,5 +111,35 @@ export async function sendEmailVerificationEmail({ to, code, expiresMinutes }: {
       body: `Enter this code in Luna to verify your email address. It expires in ${expiresMinutes} minutes.`,
       code,
     }),
+  });
+}
+
+export async function sendReportEmail({
+  to,
+  periodLabel,
+  summary,
+  reportPdf,
+}: {
+  to: string;
+  periodLabel: string;
+  summary: string;
+  reportPdf: Uint8Array;
+}) {
+  const subject = `Your Luna report: ${periodLabel}`;
+  const safeSummary = summary.replaceAll("\n", " ").trim();
+  await sendMail({
+    to,
+    subject,
+    text: `${subject}\n\n${summary}\n\nYour complete report is attached as a PDF. Open Luna to review the details and insights.`,
+    html: lunaEmail({
+      preheader: `Your Luna money report for ${periodLabel}.`,
+      eyebrow: "Money report",
+      title: "Your report is ready",
+      body: `${safeSummary} The complete report, including categories, forecast, insights, and suggestions, is attached as a PDF.`,
+      actionLabel: "Open Luna reports",
+      actionUrl: `${process.env.APP_URL || "http://localhost:3000"}/reports`,
+    }),
+    headers: { "X-Luna-Message-Type": "personal-report" },
+    attachments: [{ filename: `luna-${periodLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pdf`, content: reportPdf, contentType: "application/pdf" }],
   });
 }

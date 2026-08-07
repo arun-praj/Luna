@@ -33,9 +33,11 @@ export function useOfflineSnapshot() {
 
   useEffect(() => {
     let active = true;
+    let generation = 0;
     let unsubscribe: () => void = () => undefined;
 
     const subscribe = async () => {
+      const subscriptionGeneration = ++generation;
       const userId = getActiveOfflineUserId();
       if (!userId) {
         if (active) {
@@ -56,37 +58,52 @@ export function useOfflineSnapshot() {
             selector: { userId, date: { $gte: from, $lte: to } },
             sort: [{ transactionAt: "desc" }],
           }).$,
-        ]).subscribe(([profile, accounts, categories, savingsInstruments, transactions]) => {
-          if (!active) return;
-          setSnapshot({
-            profile: profile?.toJSON() ?? null,
-            accounts: accounts.map((document) => document.toJSON()),
-            categories: categories.map((document) => document.toJSON()),
-            savingsInstruments: savingsInstruments.map((document) => document.toJSON()),
-            transactions: transactions.map((document) => {
-              const transaction = document.toJSON();
-              return { ...transaction, tags: [...transaction.tags] };
-            }),
-          });
-          setIsLoading(false);
-          setError("");
+        ]).subscribe({
+          next: ([profile, accounts, categories, savingsInstruments, transactions]) => {
+            if (!active || subscriptionGeneration !== generation) return;
+            setSnapshot({
+              profile: profile?.toJSON() ?? null,
+              accounts: accounts.map((document) => document.toJSON()),
+              categories: categories.map((document) => document.toJSON()),
+              savingsInstruments: savingsInstruments.map((document) => document.toJSON()),
+              transactions: transactions.map((document) => {
+                const transaction = document.toJSON();
+                return { ...transaction, tags: [...transaction.tags] };
+              }),
+            });
+            setIsLoading(false);
+            setError("");
+          },
+          error: (reason) => {
+            if (!active || subscriptionGeneration !== generation) return;
+            console.error("Offline snapshot subscription failed", reason);
+            setError("Offline data could not be opened. Reconnect and try again.");
+            setIsLoading(false);
+          },
         });
+        if (!active || subscriptionGeneration !== generation) {
+          stream.unsubscribe();
+          return;
+        }
         unsubscribe = () => stream.unsubscribe();
       } catch (reason) {
-        if (!active) return;
-        setError(reason instanceof Error ? reason.message : "Offline data is unavailable.");
+        if (!active || subscriptionGeneration !== generation) return;
+        console.error("Offline database initialization failed", reason);
+        setError("Offline data could not be opened. Reconnect and try again.");
         setIsLoading(false);
       }
     };
 
     void subscribe();
     const resubscribe = () => {
+      generation += 1;
       unsubscribe();
       void subscribe();
     };
     window.addEventListener(OFFLINE_DATA_CHANGED_EVENT, resubscribe);
     return () => {
       active = false;
+      generation += 1;
       unsubscribe();
       window.removeEventListener(OFFLINE_DATA_CHANGED_EVENT, resubscribe);
     };

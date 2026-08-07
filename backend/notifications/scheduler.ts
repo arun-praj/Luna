@@ -13,7 +13,7 @@ import {
 
 type NotificationKind = "goal_milestone" | "recurring_due" | "recurring_transaction" | "low_balance";
 type NotificationSettingsRow = typeof notificationSettings.$inferSelect;
-type PushSubscription = { endpoint: string; expirationTime?: number | null; keys?: Record<string, string> };
+type PushSubscription = Parameters<typeof webpush.sendNotification>[0];
 type LocalDateTime = { date: string; time: string; weekday: number; dayOfMonth: number };
 
 const MILESTONES = [25, 50, 75, 100];
@@ -68,7 +68,14 @@ function parseSubscription(value: string | null): PushSubscription | null {
   try {
     const subscription = JSON.parse(value) as Partial<PushSubscription>;
     if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys.auth) return null;
-    return subscription as PushSubscription;
+    return {
+      endpoint: subscription.endpoint,
+      expirationTime: subscription.expirationTime ?? null,
+      keys: {
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth,
+      },
+    };
   } catch {
     return null;
   }
@@ -156,7 +163,7 @@ async function notifyUser(settings: NotificationSettingsRow, now: Date) {
   if (local.time !== reminderTime(settings)) return;
 
   if (settings.recurringDueEnabled) {
-    const dueTemplates = await db.select({ id: recurringTemplates.id, type: recurringTemplates.type, amount: recurringTemplates.amount })
+    const dueTemplates = await db.select({ id: recurringTemplates.id, type: recurringTemplates.type, amount: recurringTemplates.amount, nextDueDate: recurringTemplates.nextDueDate })
       .from(recurringTemplates)
       .where(and(eq(recurringTemplates.userId, settings.userId), eq(recurringTemplates.isActive, true)));
     for (const template of dueTemplates) {

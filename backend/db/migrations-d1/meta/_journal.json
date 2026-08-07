@@ -15,6 +15,48 @@
       "when": 1785742562394,
       "tag": "0001_wise_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785770685799,
+      "tag": "0002_stiff_serpent_society",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785778286693,
+      "tag": "0003_round_wither",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785901117973,
+      "tag": "0004_optimal_deathbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785908697451,
+      "tag": "0005_cloudy_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785951460111,
+      "tag": "0006_fresh_lord_hawal",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786033176553,
+      "tag": "0007_steep_bastion",
+      "breakpoints": true
     }
   ]
 }

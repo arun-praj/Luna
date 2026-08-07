@@ -3,12 +3,7 @@
 import { useRouter } from "next/navigation";
 import { createElement, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownLeft,
-  ArrowLeftRight,
-  ArrowUpRight,
-  Banknote,
   ChevronRight,
-  Landmark,
   LoaderCircle,
   ReceiptText,
   Search,
@@ -25,10 +20,11 @@ import {
 } from "@/lib/category-appearance";
 import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-appearance";
 import { ListDataSkeleton } from "@/components/ui/data-skeleton";
+import { transactionTypeMeta as typeMeta } from "@/components/transactions/transaction-presentation";
 
 export type ApiTransaction = {
   id: string;
-  type: "expense" | "income" | "savings" | "transfer" | "adjust_balance";
+  type: "expense" | "income" | "savings" | "transfer" | "adjust_balance" | "goal_spend";
   amount: number;
   title: string;
   accountId: string;
@@ -38,6 +34,7 @@ export type ApiTransaction = {
   accountColor: string | null;
   accountType?: string | null;
   savingsInstrumentId: string | null;
+  goalId: string | null;
   transferToAccountId: string | null;
   destinationAccountName: string | null;
   destinationAccountIcon: string | null;
@@ -60,39 +57,6 @@ type TransactionListProps = {
   period?: AppliedPeriod;
 };
 
-const typeMeta = {
-  expense: {
-    label: "Expense",
-    amountClassName: "text-expense",
-    icon: ArrowUpRight,
-    iconClassName: "bg-expense-soft text-expense",
-  },
-  income: {
-    label: "Income",
-    amountClassName: "text-income",
-    icon: ArrowDownLeft,
-    iconClassName: "bg-income-soft text-income",
-  },
-  savings: {
-    label: "Savings",
-    amountClassName: "text-income",
-    icon: Landmark,
-    iconClassName: "bg-income-soft text-income",
-  },
-  transfer: {
-    label: "Transfer",
-    amountClassName: "text-info",
-    icon: ArrowLeftRight,
-    iconClassName: "bg-info-soft text-info",
-  },
-  adjust_balance: {
-    label: "Adjust balance",
-    amountClassName: "text-foreground",
-    icon: Banknote,
-    iconClassName: "bg-surface-subtle text-foreground",
-  },
-} as const;
-
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -114,7 +78,10 @@ function formatDateLabel(date: string) {
   }).format(dateValue(date));
 }
 
-function formatAmount(transaction: ApiTransaction, displayCurrency?: string | null) {
+function formatAmount(transaction: ApiTransaction) {
+  if (transaction.type === "savings" && transaction.goalId) {
+    return `${transaction.accountCurrency} ${Math.abs(transaction.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  }
   const prefix =
     transaction.type === "income" || transaction.type === "savings"
       ? "+"
@@ -122,8 +89,10 @@ function formatAmount(transaction: ApiTransaction, displayCurrency?: string | nu
         ? "−"
         : transaction.type === "adjust_balance"
           ? transaction.amount >= 0 ? "+" : "−"
-        : "";
-  return `${prefix}${displayCurrency ?? transaction.accountCurrency} ${Math.abs(transaction.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+        : transaction.type === "goal_spend"
+          ? "−"
+          : "";
+  return `${prefix}${transaction.accountCurrency} ${Math.abs(transaction.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
 function compactAccountName(account: string) {
@@ -133,7 +102,6 @@ function compactAccountName(account: string) {
 export function TransactionList({ limit, searchable = false, period }: TransactionListProps) {
   const router = useRouter();
   const [transactions, setTransactions] = useState<ApiTransaction[]>([]);
-  const [displayCurrency, setDisplayCurrency] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -165,21 +133,14 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
       params.set("to", localDateKey(period.to));
     }
     const query = params.toString() ? `?${params.toString()}` : "";
-    void Promise.all([
-      authenticatedFetch(`/api/transactions${query}`),
-      authenticatedFetch("/api/auth/me"),
-    ])
-      .then(async ([transactionsResponse, profileResponse]) => {
+    void authenticatedFetch(`/api/transactions${query}`)
+      .then(async (transactionsResponse) => {
         if (!transactionsResponse.ok) return;
         const result = (await transactionsResponse.json()) as {
           transactions?: ApiTransaction[];
         };
-        const profile = profileResponse.ok
-          ? (await profileResponse.json()) as { user?: { currency?: string } }
-          : null;
         if (active) {
           setTransactions(result.transactions ?? []);
-          setDisplayCurrency(profile?.user?.currency ?? null);
         }
       })
       .catch(() => undefined)
@@ -296,8 +257,11 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                 transaction.categoryName ?? undefined,
               );
               const categoryColor = transaction.categoryColor ?? "#dcece7";
+              const isGoalWithdrawal = transaction.type === "savings" && Boolean(transaction.goalId) && transaction.amount < 0;
               const secondary = transaction.destinationAccountName
-                ? `${compactAccountName(transaction.accountName)} → ${compactAccountName(transaction.destinationAccountName)}`
+                ? isGoalWithdrawal
+                  ? `${compactAccountName(transaction.destinationAccountName)} → ${compactAccountName(transaction.accountName)}`
+                  : `${compactAccountName(transaction.accountName)} → ${compactAccountName(transaction.destinationAccountName)}`
                 : compactAccountName(transaction.accountName);
               return (
                 <div
@@ -340,7 +304,7 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                       <p
                         className={`shrink-0 text-[14px] font-semibold tabular-nums ${meta.amountClassName}`}
                       >
-                        {formatAmount(transaction, displayCurrency)}
+                        {formatAmount(transaction)}
                       </p>
                     </div>
                     <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

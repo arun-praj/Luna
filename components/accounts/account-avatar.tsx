@@ -1,7 +1,6 @@
-import Image from "next/image";
-
 import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-appearance";
 import { getAccountImageSource } from "@/lib/account-images";
+import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 
 function initialsFor(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -23,17 +22,13 @@ export function AccountAvatar({
 }) {
   const background = getAccountBackgroundColor(backgroundColor, type);
   const source = getAccountImageSource(icon);
-  if (source) {
-    return <Image src={source} alt="" aria-hidden="true" width={size} height={size} className="size-full rounded-[inherit] object-cover" unoptimized />;
-  }
-
   return (
     <span
       aria-hidden="true"
-      className="flex size-full items-center justify-center rounded-[inherit] font-bold tracking-[0.04em]"
-      style={{ backgroundColor: background, color: getAccountForeground(background, type), fontSize: Math.max(10, Math.round(size * 0.28)) }}
+      className="flex shrink-0 items-center justify-center overflow-hidden rounded-[inherit] font-bold tracking-[0.04em]"
+      style={{ width: size, height: size, backgroundColor: background, color: getAccountForeground(background, type), fontSize: Math.max(10, Math.round(size * 0.28)) }}
     >
-      {initialsFor(name)}
+      {source ? <AuthenticatedImage src={source} alt="" aria-hidden="true" width={size} height={size} className="block size-full object-cover" unoptimized /> : initialsFor(name)}
     </span>
   );
 }
