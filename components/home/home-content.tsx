@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { motion } from "framer-motion";
 import { useState } from "react";
 
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
 import { AccountBalanceSummary } from "@/components/home/account-balance-summary";
-import { MonthlyCashFlow, MonthlyOverviewCards, MonthlySummaryProvider } from "@/components/home/monthly-summary";
+import { MonthlyCashFlow, MonthlySummaryProvider } from "@/components/home/monthly-summary";
 import { UserGreeting } from "@/components/home/user-greeting";
 import { UserAvatar } from "@/components/home/user-avatar";
 import { AddTransactionButton } from "@/components/transactions/add-transaction-button";
@@ -26,6 +27,7 @@ function currentMonthPeriod(): AppliedPeriod {
 
 export function HomeContent() {
   const [period, setPeriod] = useState<AppliedPeriod>(currentMonthPeriod);
+  const [hasHomeAlerts, setHasHomeAlerts] = useState(false);
 
   return (
     <>
@@ -44,16 +46,18 @@ export function HomeContent() {
               <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
             </Link>
 
-            <DatePicker onApply={setPeriod} />
+            <div className="flex shrink-0 items-center">
+              <DatePicker onApply={setPeriod} />
+            </div>
           </header>
 
-          <AccountBalanceSummary />
           <InstallAppCard />
 
           <MonthlySummaryProvider period={period}>
-            <MonthlyOverviewCards />
-
-            <section aria-labelledby="activity-heading" data-tour="activity" className="mt-10">
+            <motion.div layout transition={{ layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }}>
+              <AccountBalanceSummary onAlertsChange={setHasHomeAlerts} />
+            </motion.div>
+            <section aria-labelledby="activity-heading" data-tour="activity" className={`${hasHomeAlerts ? "mt-8" : "mt-10"} transition-[margin] duration-300`}>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[13px] font-medium text-muted-foreground">{period.mode === "month" ? "This month" : period.label}</p>
@@ -66,7 +70,7 @@ export function HomeContent() {
                 </div>
               </div>
 
-              <TransactionList period={period} />
+              <TransactionList period={period} includeAlerts />
             </section>
           </MonthlySummaryProvider>
         </div>

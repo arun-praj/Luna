@@ -15,7 +15,10 @@ const EMPTY_SNAPSHOT: OfflineSnapshot = {
   accounts: [],
   categories: [],
   savingsInstruments: [],
+  loans: [],
   transactions: [],
+  budgets: [],
+  budgetMutations: [],
 };
 
 function currentMonthBounds() {
@@ -54,22 +57,28 @@ export function useOfflineSnapshot() {
           db.accounts.find({ selector: { userId }, sort: [{ displayOrder: "asc" }] }).$,
           db.categories.find({ selector: { userId }, sort: [{ name: "asc" }] }).$,
           db.savingsInstruments.find({ selector: { userId }, sort: [{ name: "asc" }] }).$,
+          db.loans.find({ selector: { userId }, sort: [{ name: "asc" }] }).$,
           db.transactions.find({
             selector: { userId, date: { $gte: from, $lte: to } },
             sort: [{ transactionAt: "desc" }],
           }).$,
+          db.budgets.find({ selector: { userId, deleted: false }, sort: [{ period: "asc" }] }).$,
+          db.budgetMutations.find({ selector: { userId }, sort: [{ createdAt: "asc" }] }).$,
         ]).subscribe({
-          next: ([profile, accounts, categories, savingsInstruments, transactions]) => {
+          next: ([profile, accounts, categories, savingsInstruments, loans, transactions, budgets, budgetMutations]) => {
             if (!active || subscriptionGeneration !== generation) return;
             setSnapshot({
               profile: profile?.toJSON() ?? null,
               accounts: accounts.map((document) => document.toJSON()),
               categories: categories.map((document) => document.toJSON()),
               savingsInstruments: savingsInstruments.map((document) => document.toJSON()),
+              loans: loans.map((document) => document.toJSON()),
               transactions: transactions.map((document) => {
                 const transaction = document.toJSON();
                 return { ...transaction, tags: [...transaction.tags] };
               }),
+              budgets: budgets.map((document) => document.toJSON()),
+              budgetMutations: budgetMutations.map((document) => document.toJSON()),
             });
             setIsLoading(false);
             setError("");

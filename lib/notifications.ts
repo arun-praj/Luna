@@ -14,6 +14,7 @@ export type NotificationSettings = {
   userId: string;
   goalMilestonesEnabled: boolean;
   recurringDueEnabled: boolean;
+  loanPaymentDueEnabled: boolean;
   recurringTransactionEnabled: boolean;
   recurringTransactionTime: string;
   timezone: string;
@@ -29,6 +30,7 @@ const SETTINGS_CACHE_PREFIX = "budget_notification_settings:";
 const DEFAULT_SETTINGS = {
   goalMilestonesEnabled: true,
   recurringDueEnabled: true,
+  loanPaymentDueEnabled: true,
   recurringTransactionEnabled: false,
   recurringTransactionTime: "09:00",
   timezone: "UTC",
@@ -116,7 +118,10 @@ export async function requestNotificationPermission() {
 export async function registerNotificationServiceWorker() {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
-    return await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    return await navigator.serviceWorker.register("/sw.js", {
+      scope: "/",
+      updateViaCache: "none",
+    });
   } catch {
     return null;
   }
@@ -137,12 +142,34 @@ function decodeVapidKey(value: string) {
   return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
 }
 
+function subscriptionUsesVapidKey(subscription: PushSubscription, key: string) {
+  const applicationServerKey = subscription.options.applicationServerKey;
+  if (!applicationServerKey) return false;
+  const current = new Uint8Array(applicationServerKey);
+  const expected = decodeVapidKey(key);
+  return current.length === expected.length && current.every((value, index) => value === expected[index]);
+}
+
+export async function getCurrentPushSubscription() {
+  const registration = await registerNotificationServiceWorker();
+  if (!registration?.pushManager) return null;
+  try {
+    return await registration.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
 export async function subscribeToPush() {
   const key = vapidKey();
   const registration = await registerNotificationServiceWorker();
   if (!key || !registration?.pushManager) return null;
   try {
-    const existing = await registration.pushManager.getSubscription();
+    let existing = await registration.pushManager.getSubscription();
+    if (existing && !subscriptionUsesVapidKey(existing, key)) {
+      await existing.unsubscribe();
+      existing = null;
+    }
     const subscription = existing ?? await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: decodeVapidKey(key),
@@ -166,7 +193,7 @@ export async function showBudgetNotification(title: string, body: string) {
 }
 
 export async function notifyBudgetEvent(
-  kind: "goal_milestone" | "recurring_due" | "recurring_transaction" | "low_balance",
+  kind: "goal_milestone" | "recurring_due" | "recurring_transaction" | "loan_payment_due" | "low_balance",
   title: string,
   body: string,
   settings: NotificationSettings,
@@ -176,7 +203,8 @@ export async function notifyBudgetEvent(
     : kind === "recurring_due"
       ? settings.recurringDueEnabled
       : kind === "recurring_transaction"
-        ? settings.recurringTransactionEnabled
+      ? settings.recurringTransactionEnabled
+      : kind === "loan_payment_due" ? settings.loanPaymentDueEnabled
         : settings.lowBalanceEnabled;
   return enabled ? showBudgetNotification(title, body) : false;
 }

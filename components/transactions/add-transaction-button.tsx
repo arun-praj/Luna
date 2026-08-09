@@ -12,6 +12,10 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { VerifyBalanceEditor, type VerifiableAccountChoice } from "@/components/accounts/verify-balance-editor";
+import { authenticatedFetch, notifyTransactionsChanged } from "@/lib/auth-client";
+
+type BalanceAccount = VerifiableAccountChoice & { isDefault: boolean };
 
 const quickActions = [
   {
@@ -56,6 +60,13 @@ export function AddTransactionButton() {
   const [open, setOpen] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
   const [isMounted, setIsMounted] = React.useState(false);
+  const [balanceAccounts, setBalanceAccounts] = React.useState<BalanceAccount[]>([]);
+  const [selectedBalanceAccount, setSelectedBalanceAccount] = React.useState<BalanceAccount | null>(null);
+  const [balanceEditorOpen, setBalanceEditorOpen] = React.useState(false);
+  const [balanceFlowError, setBalanceFlowError] = React.useState("");
+  const [dragOffset, setDragOffset] = React.useState(0);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const dragStart = React.useRef({ y: 0, at: 0 });
   const closeTimer = React.useRef<number | null>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -119,6 +130,38 @@ export function AddTransactionButton() {
 
   const menuVisible = open || closing;
 
+  function beginDrawerDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (closing) return;
+    dragStart.current = { y: event.clientY, at: performance.now() };
+    setIsDragging(true); setDragOffset(0);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveDrawerDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!isDragging) return;
+    setDragOffset(Math.max(0, event.clientY - dragStart.current.y));
+  }
+
+  function finishDrawerDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!isDragging) return;
+    const distance = Math.max(0, event.clientY - dragStart.current.y);
+    const velocity = distance / Math.max(1, performance.now() - dragStart.current.at);
+    setIsDragging(false); setDragOffset(0);
+    if (distance >= 72 || (distance >= 24 && velocity >= 0.55)) closeMenu();
+  }
+
+  async function startBalanceFlow() {
+    setBalanceFlowError("");
+    const response = await authenticatedFetch("/api/accounts").catch(() => null);
+    if (!response?.ok) { setBalanceFlowError("Could not load your accounts."); return; }
+    const result = await response.json() as { accounts: BalanceAccount[] };
+    const accounts = result.accounts ?? [];
+    setBalanceAccounts(accounts);
+    const initialAccount = accounts.find((account) => account.isDefault) ?? accounts[0];
+    if (!initialAccount) { setBalanceFlowError("Add an account before adjusting a balance."); return; }
+    setSelectedBalanceAccount(initialAccount); setBalanceEditorOpen(true);
+  }
+
   if (!isMounted) return null;
 
   return createPortal((
@@ -138,9 +181,10 @@ export function AddTransactionButton() {
           aria-modal="true"
           aria-labelledby="add-transaction-title"
           onKeyDown={handleDialogKeyDown}
+          style={isDragging ? { transform: `translate(-50%, ${dragOffset}px)`, transition: "none" } : undefined}
           className={`fixed bottom-0 left-1/2 z-50 w-full max-w-[720px] -translate-x-1/2 rounded-t-[22px] border border-b-0 border-border bg-card px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_32px_rgb(23_32_29_/_0.12)] sm:px-5 ${closing ? "drawer-exit" : "drawer-enter"}`}
         >
-          <div aria-hidden="true" className="mx-auto h-1 w-10 rounded-full bg-border-strong/70" />
+          <button type="button" aria-label="Drag down to close" onPointerDown={beginDrawerDrag} onPointerMove={moveDrawerDrag} onPointerUp={finishDrawerDrag} onPointerCancel={finishDrawerDrag} className="mx-auto flex h-5 w-24 touch-none items-start justify-center pt-1"><span aria-hidden="true" className="h-1 w-10 rounded-full bg-border-strong/70" /></button>
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
               <h2 id="add-transaction-title" className="text-lg font-semibold tracking-[-0.03em]">Add transaction</h2>
@@ -166,7 +210,7 @@ export function AddTransactionButton() {
                   key={action.type}
                   type="button"
                   aria-label={`Add ${action.label.toLowerCase()}`}
-                  onClick={() => closeMenu(() => router.push(`/transactions/new?type=${action.type}`))}
+                  onClick={() => closeMenu(() => { if (action.type === "adjust_balance") void startBalanceFlow(); else router.push(`/transactions/new?type=${action.type}`); })}
                   className="flex min-h-14 w-full items-center gap-3 rounded-[14px] border border-border bg-background px-3 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                 >
                   <span className={`flex size-10 shrink-0 items-center justify-center rounded-[11px] ${action.className}`}>
@@ -184,14 +228,17 @@ export function AddTransactionButton() {
         </div>
       ) : null}
 
+      {balanceFlowError ? <button type="button" onClick={() => setBalanceFlowError("")} className="fixed bottom-24 left-1/2 z-[80] -translate-x-1/2 rounded-[11px] bg-expense px-4 py-3 text-xs font-semibold text-white shadow-lg" role="alert">{balanceFlowError}</button> : null}
+      <VerifyBalanceEditor account={selectedBalanceAccount} accounts={balanceAccounts} open={balanceEditorOpen} onAccountChange={(account) => setSelectedBalanceAccount(balanceAccounts.find((item) => item.id === account.id) ?? null)} onClose={() => setBalanceEditorOpen(false)} onSaved={(account) => { setSelectedBalanceAccount((current) => current ? { ...current, ...account } : current); setBalanceEditorOpen(false); notifyTransactionsChanged(); }} />
+
       <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-50 size-14 sm:right-[max(1.25rem,calc((100vw-720px)/2+1.25rem))]">
         <button
           ref={triggerRef}
           type="button"
           aria-label="Add transaction"
           aria-expanded={open}
-          aria-hidden={open}
-          tabIndex={open ? -1 : 0}
+          aria-hidden={open || balanceEditorOpen}
+          tabIndex={open || balanceEditorOpen ? -1 : 0}
           onClick={() => {
             if (open) {
               closeMenu();
@@ -203,7 +250,7 @@ export function AddTransactionButton() {
             setClosing(false);
             setOpen(true);
           }}
-          className={`relative z-10 flex size-14 items-center justify-center rounded-[16px] border border-primary-hover/20 bg-primary text-primary-foreground shadow-[0_10px_28px_rgb(53_107_104_/_0.28)] transition-[background-color,transform,box-shadow,opacity] hover:bg-primary-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background ${open ? "pointer-events-none opacity-0" : ""}`}
+          className={`relative z-10 flex size-14 items-center justify-center rounded-[16px] border border-primary-hover/20 bg-primary text-primary-foreground shadow-[0_10px_28px_rgb(53_107_104_/_0.28)] transition-[background-color,transform,box-shadow,opacity] hover:bg-primary-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background ${open || balanceEditorOpen ? "pointer-events-none opacity-0" : ""}`}
           data-open={open}
           data-tour="add-transaction"
         >

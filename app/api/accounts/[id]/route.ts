@@ -5,6 +5,7 @@ import { db } from "@/backend/db/client";
 import { accounts } from "@/backend/db/schema";
 import { accountInput } from "@/backend/domain/validation";
 import { createBalanceAdjustment } from "@/backend/domain/transaction-service";
+import { normalizeMoney } from "@/lib/money";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
@@ -13,7 +14,7 @@ export async function GET(request: Request, { params }: Context) {
   const userId = await requireAccessToken(request); const { id } = await params;
   if (!userId) return errorResponse("Authentication required", 401);
   const [account] = await db.select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))).limit(1);
-  return account ? NextResponse.json({ account }) : errorResponse("Account not found", 404);
+  return account ? NextResponse.json({ account: { ...account, currentBalance: normalizeMoney(account.currentBalance) } }) : errorResponse("Account not found", 404);
 }
 
 export async function PATCH(request: Request, { params }: Context) {
@@ -32,7 +33,7 @@ export async function PATCH(request: Request, { params }: Context) {
   if (Object.keys(updates).length > 0) await db.update(accounts).set(updates).where(eq(accounts.id, id));
   if (openingBalance !== undefined) await createBalanceAdjustment(db, userId, id, openingBalance);
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
-  return NextResponse.json({ account });
+  return NextResponse.json({ account: account ? { ...account, currentBalance: normalizeMoney(account.currentBalance) } : account });
 }
 
 export async function DELETE(request: Request, { params }: Context) {

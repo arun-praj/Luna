@@ -27,7 +27,7 @@ export default function TransactionsPage() {
               </Link>
               <div className="min-w-0">
                 <h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">Transactions</h1>
-                <p className="mt-0.5 text-xs font-medium text-muted-foreground">Your complete activity</p>
+                <p className="mt-0.5 text-xs font-medium text-muted-foreground">Track money in and out</p>
               </div>
             </div>
             <DatePicker initialMode="all" initialLabel="All time" onApply={setPeriod} />

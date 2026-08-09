@@ -8,7 +8,6 @@ import {
   pushNotificationsConfigured,
   requestNotificationPermission,
   saveNotificationSettings,
-  showBudgetNotification,
   subscribeToPush,
   type NotificationSettings,
 } from "@/lib/notifications";
@@ -25,8 +24,6 @@ const frequencyOptions = [
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
 ] as const;
-
-const isDevelopment = process.env.NODE_ENV === "development";
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
   return (
@@ -51,6 +48,8 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   const [isFrequencyOpen, setIsFrequencyOpen] = useState(false);
   const [isSavingThreshold, setIsSavingThreshold] = useState(false);
   const [isSavingMonthlyReport, setIsSavingMonthlyReport] = useState(false);
+  const [isCurrentDeviceSubscribed, setIsCurrentDeviceSubscribed] = useState(false);
+  const [isTestingNotification, setIsTestingNotification] = useState(false);
   const [message, setMessage] = useState("");
   const thresholdSaveTimer = useRef<number | null>(null);
 
@@ -65,6 +64,26 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
       setSettings(loaded);
     });
   }, [userId]);
+
+  useEffect(() => {
+    if (!settings || permission !== "granted" || isCurrentDeviceSubscribed) return;
+    let cancelled = false;
+
+    void subscribeToPush().then(async (pushSubscription) => {
+      if (cancelled || !pushSubscription) return;
+      const result = await saveNotificationSettings(userId, { pushSubscription });
+      if (cancelled) return;
+      setSettings(result.settings);
+      setIsCurrentDeviceSubscribed(true);
+      if (!result.synced) {
+        setMessage("Background alerts are enabled on this device and will sync when you’re online.");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCurrentDeviceSubscribed, permission, settings, userId]);
 
   useEffect(() => {
     function refreshPermission() {
@@ -92,6 +111,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
       void saveNotificationSettings(userId, {
         goalMilestonesEnabled: settings.goalMilestonesEnabled,
         recurringDueEnabled: settings.recurringDueEnabled,
+        loanPaymentDueEnabled: settings.loanPaymentDueEnabled,
         recurringTransactionEnabled: settings.recurringTransactionEnabled,
         recurringTransactionTime: settings.recurringTransactionTime,
         timezone: settings.timezone,
@@ -165,7 +185,10 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
     setPermission(nextPermission);
     if (nextPermission === "granted") {
       const pushSubscription = await subscribeToPush();
-      if (pushSubscription) await update({ pushSubscription });
+      if (pushSubscription) {
+        setIsCurrentDeviceSubscribed(true);
+        await update({ pushSubscription });
+      }
       else setMessage(pushNotificationsConfigured()
         ? "Background alerts could not be enabled. Check that this site is installed or open in a supported browser, then try again."
         : "Background alerts are not configured for this deployment yet. Add the VAPID public key, then reload Luna.");
@@ -178,23 +201,34 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   }
 
   async function sendTestNotification() {
-    if (!isDevelopment) return;
-    const shown = await showBudgetNotification("Luna is ready", "Notifications are working on this device.");
-    setMessage(shown ? "Test notification sent" : "Allow notifications first");
+    setIsTestingNotification(true);
+    setMessage("");
+    try {
+      const response = await authenticatedFetch("/api/notifications/test", { method: "POST" });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      setMessage(response.ok
+        ? "Test notification sent through Luna’s background delivery service."
+        : result?.error ?? "Could not send the test notification.");
+      if (response.status === 410) setIsCurrentDeviceSubscribed(false);
+    } catch {
+      setMessage("Could not reach Luna’s notification service.");
+    } finally {
+      setIsTestingNotification(false);
+    }
     window.setTimeout(() => setMessage(""), 3200);
   }
 
   if (!settings) return null;
 
   return (
-    <section aria-labelledby="notifications-heading" className="mt-6 overflow-hidden rounded-[14px] border border-border bg-card">
-      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((value) => !value)} className="flex min-h-[72px] w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35">
+    <section aria-labelledby="notifications-heading" className={`mt-3 overflow-hidden rounded-[14px] border bg-card transition-colors ${isOpen ? "border-primary/30" : "border-border"}`}>
+      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((value) => !value)} className={`flex min-h-[76px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${isOpen ? "bg-primary-soft/70" : "hover:bg-surface-subtle"}`}>
           <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary"><Bell aria-hidden="true" className="size-[18px]" /></span>
-          <span className="min-w-0 flex-1"><span id="notifications-heading" className="block text-[15px] font-semibold">Notifications</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">Works offline and on installed mobile apps.</span></span>
-          <ChevronDown aria-hidden="true" className={`size-5 shrink-0 text-foreground-subtle transition-transform ${isOpen ? "rotate-180" : ""}`} />
+          <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">Alerts & reports</span><span id="notifications-heading" className="mt-0.5 block text-[15px] font-semibold">Notifications</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">Choose what Luna tells you about.</span></span>
+          <ChevronDown aria-hidden="true" className={`size-5 shrink-0 text-foreground-subtle transition-transform ${isOpen ? "rotate-180 text-primary" : ""}`} />
       </button>
       {isOpen ? <>
-        <div className="divide-y divide-border border-t border-border">
+        <div className="divide-y divide-border border-t-2 border-primary/15 bg-surface-subtle/55">
         <div className="flex items-center gap-3 px-4 py-4">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary"><Mail aria-hidden="true" className="size-4" /></span>
           <div className="min-w-0 flex-1"><p className="text-sm font-medium">Monthly report by email</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">Receive the previous month&apos;s PDF on the first day of each month.</p></div>
@@ -209,6 +243,10 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
         <div className="flex items-center gap-3 px-4 py-4">
           <div className="min-w-0 flex-1"><p className="text-sm font-medium">Recurring reminders</p><p className="mt-0.5 text-xs text-muted-foreground">Know when a recurring payment is due.</p></div>
           <Toggle label="Recurring payment notifications" checked={settings.recurringDueEnabled} onChange={(value) => void update({ recurringDueEnabled: value })} />
+        </div>
+        <div className="flex items-center gap-3 px-4 py-4">
+          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Loan payment reminders</p><p className="mt-0.5 text-xs text-muted-foreground">Know when a loan payment is due.</p></div>
+          <Toggle label="Loan payment reminders" checked={settings.loanPaymentDueEnabled} onChange={(value) => void update({ loanPaymentDueEnabled: value })} />
         </div>
         <div className="px-4 py-4">
           <div className="flex items-center gap-3">
@@ -259,8 +297,8 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
         </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle/50 px-4 py-3">
-      {permission === "granted" && settings.pushSubscription ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Background alerts enabled</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">{permission === "granted" ? "Allow background alerts for scheduled reminders." : "Settings are available offline."}</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : permission === "granted" ? "Enable background alerts" : "Enable alerts"}</button></>}
-        {isDevelopment ? <button type="button" onClick={() => void sendTestNotification()} disabled={permission !== "granted"} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-45"> <Check aria-hidden="true" className="size-3.5" /> Test notification</button> : null}
+      {permission === "granted" && isCurrentDeviceSubscribed ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Background alerts enabled on this device</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">{permission === "denied" ? "Notifications are blocked in this browser." : permission === "unsupported" ? "This browser does not support notifications." : permission === "granted" ? "Connect this device for scheduled alerts." : "Enable alerts for reminders and low balances."}</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : permission === "granted" ? "Connect device" : "Enable alerts"}</button></>}
+        {permission === "granted" && isCurrentDeviceSubscribed ? <button type="button" onClick={() => void sendTestNotification()} disabled={isTestingNotification} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-wait disabled:opacity-45">{isTestingNotification ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Check aria-hidden="true" className="size-3.5" />} Test alert</button> : null}
         </div>
         {message ? <p className="px-4 pb-3 text-[11px] text-muted-foreground">{message}</p> : null}
       </> : null}

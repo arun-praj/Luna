@@ -7,6 +7,7 @@ import type { PDFFont, PDFPage } from "pdf-lib";
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { sumMoney } from "@/lib/money";
 
 type ExportFormat = "csv" | "pdf";
 
@@ -105,7 +106,7 @@ function csvForTransactions(transactions: ApiTransaction[], period: AppliedPerio
   const summaryRows = sections.map(({ type, label }) => [
     label,
     transactions.filter((transaction) => transaction.type === type).length,
-    transactions.filter((transaction) => transaction.type === type).reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0),
+    sumMoney(transactions.filter((transaction) => transaction.type === type).map((transaction) => Math.abs(transaction.amount))),
   ]);
   const output: Array<Array<string | number>> = [
     ["LUNA TRANSACTION EXPORT"],
@@ -202,9 +203,9 @@ async function buildPdf(
   y = pageHeight - 132;
 
   const totals = {
-    income: sectionItems(transactions, "income").reduce((sum, item) => sum + item.amount, 0),
-    expense: sectionItems(transactions, "expense").reduce((sum, item) => sum + item.amount, 0),
-    savings: sectionItems(transactions, "savings").reduce((sum, item) => sum + item.amount, 0),
+    income: sumMoney(sectionItems(transactions, "income").map((item) => item.amount)),
+    expense: sumMoney(sectionItems(transactions, "expense").map((item) => item.amount)),
+    savings: sumMoney(sectionItems(transactions, "savings").map((item) => item.amount)),
   };
   const summary = [
     ["Income", totals.income, colors.green],

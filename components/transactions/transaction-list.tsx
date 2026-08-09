@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { createElement, useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
+  Layers3,
   LoaderCircle,
   ReceiptText,
   Search,
@@ -21,12 +22,14 @@ import {
 import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-appearance";
 import { ListDataSkeleton } from "@/components/ui/data-skeleton";
 import { transactionTypeMeta as typeMeta } from "@/components/transactions/transaction-presentation";
+import { ActivityAlertRow, useActivityAlerts, type ActivityAlert } from "@/components/home/activity-alerts";
 
 export type ApiTransaction = {
   id: string;
   type: "expense" | "income" | "savings" | "transfer" | "adjust_balance" | "goal_spend";
   amount: number;
   title: string;
+  merchantName: string | null;
   accountId: string;
   accountName: string;
   accountCurrency: string;
@@ -45,7 +48,16 @@ export type ApiTransaction = {
   categoryType: "expense" | "income" | null;
   categoryIcon: string | null;
   categoryColor: string | null;
+  splits: Array<{
+    categoryId: string;
+    amount: number;
+    note?: string | null;
+    categoryName: string;
+    categoryIcon: string | null;
+    categoryColor: string | null;
+  }>;
   notes: string | null;
+  receiptImageUrl: string | null;
   tags: string[];
   date: string;
   transactionAt: string;
@@ -55,7 +67,12 @@ type TransactionListProps = {
   limit?: number;
   searchable?: boolean;
   period?: AppliedPeriod;
+  includeAlerts?: boolean;
 };
+
+type TimelineItem =
+  | { kind: "transaction"; id: string; date: string; timestamp: string; transaction: ApiTransaction }
+  | { kind: "alert"; id: string; date: string; timestamp: string; alert: ActivityAlert };
 
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -70,8 +87,11 @@ function formatDateLabel(date: string) {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
   if (date === localDateKey(today)) return "Today";
   if (date === localDateKey(yesterday)) return "Yesterday";
+  if (date === localDateKey(tomorrow)) return "Tomorrow";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -99,8 +119,9 @@ function compactAccountName(account: string) {
   return account.replace(" Wallet", "").replace(" account", "");
 }
 
-export function TransactionList({ limit, searchable = false, period }: TransactionListProps) {
+export function TransactionList({ limit, searchable = false, period, includeAlerts = false }: TransactionListProps) {
   const router = useRouter();
+  const activityAlerts = useActivityAlerts(includeAlerts);
   const [transactions, setTransactions] = useState<ApiTransaction[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -159,14 +180,28 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
     ? transactions.slice(0, limit)
     : transactions;
   const groups = useMemo(() => {
-    const grouped = new Map<string, ApiTransaction[]>();
-    for (const transaction of visibleTransactions) {
-      const current = grouped.get(transaction.date) ?? [];
-      current.push(transaction);
-      grouped.set(transaction.date, current);
+    const timeline: TimelineItem[] = visibleTransactions.map((transaction) => ({
+      kind: "transaction",
+      id: transaction.id,
+      date: transaction.date,
+      timestamp: transaction.transactionAt,
+      transaction,
+    }));
+    for (const alert of activityAlerts) {
+      const alertDate = new Date(alert.createdAt || alert.showAt);
+      const date = Number.isNaN(alertDate.getTime()) ? alert.showAt.slice(0, 10) : localDateKey(alertDate);
+      if (period?.mode !== "all" && period?.from && period.to) {
+        const from = localDateKey(period.from);
+        const to = localDateKey(period.to);
+        if (date < from || date > to) continue;
+      }
+      timeline.push({ kind: "alert", id: alert.id, date, timestamp: alert.createdAt || alert.showAt, alert });
     }
+    timeline.sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+    const grouped = new Map<string, TimelineItem[]>();
+    for (const item of timeline) grouped.set(item.date, [...(grouped.get(item.date) ?? []), item]);
     return [...grouped.entries()];
-  }, [visibleTransactions]);
+  }, [activityAlerts, period, visibleTransactions]);
 
   const searchControls = searchable ? (
     <div className="mt-5">
@@ -208,7 +243,7 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
     return <>{searchControls}<ListDataSkeleton rows={3} /></>;
   }
 
-  if (!transactions.length) {
+  if (!transactions.length && !activityAlerts.length) {
     return (
       <>
         {searchControls}
@@ -233,30 +268,29 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
       {groups.map(([date, items]) => (
         <section aria-labelledby={`transaction-group-${date}`} key={date}>
           <div className="flex items-end justify-between gap-4 px-1">
-            <div className="flex items-baseline gap-2">
-              <h3
-                id={`transaction-group-${date}`}
-                className="text-[15px] font-semibold"
-              >
-                {formatDateLabel(date)}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                {new Intl.DateTimeFormat("en-US", {
-                  month: "long",
-                  day: "numeric",
-                }).format(dateValue(date))}
-              </p>
-            </div>
+            <h3
+              id={`transaction-group-${date}`}
+              className="text-[15px] font-semibold"
+            >
+              {formatDateLabel(date)}
+            </h3>
           </div>
           <div className="mt-3 overflow-hidden rounded-[14px] border border-border bg-card">
-            {items.map((transaction, index) => {
+            {items.map((timelineItem, index) => {
+              if (timelineItem.kind === "alert") {
+                return <ActivityAlertRow key={`alert:${timelineItem.id}`} alert={timelineItem.alert} />;
+              }
+              const transaction = timelineItem.transaction;
+              const previousItem = items[index - 1];
+              const showTransactionDivider = previousItem?.kind === "transaction";
               const meta = typeMeta[transaction.type];
               const Icon = meta.icon;
+              const primarySplit = transaction.splits[0];
               const CategoryIcon = getCategoryIcon(
-                transaction.categoryIcon,
-                transaction.categoryName ?? undefined,
+                transaction.categoryIcon ?? primarySplit?.categoryIcon,
+                transaction.categoryName ?? primarySplit?.categoryName,
               );
-              const categoryColor = transaction.categoryColor ?? "#dcece7";
+              const categoryColor = transaction.categoryColor ?? primarySplit?.categoryColor ?? "#dcece7";
               const isGoalWithdrawal = transaction.type === "savings" && Boolean(transaction.goalId) && transaction.amount < 0;
               const secondary = transaction.destinationAccountName
                 ? isGoalWithdrawal
@@ -275,8 +309,8 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                       router.push(`/transactions/${transaction.id}`);
                     }
                   }}
-                  key={transaction.id}
-                  className={`group flex min-h-[76px] cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${index > 0 ? "border-t border-border" : ""}`}
+                  key={`transaction:${transaction.id}`}
+                  className={`group flex min-h-[76px] cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
                 >
                   <span
                     className="flex size-10 shrink-0 items-center justify-center rounded-[10px]"
@@ -285,7 +319,7 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                       color: getCategoryForeground(categoryColor),
                     }}
                   >
-                    {transaction.categoryName ? (
+                    {transaction.categoryName || transaction.splits.length ? (
                       createElement(CategoryIcon, {
                         "aria-hidden": true,
                         className: "size-[18px]",
@@ -308,14 +342,19 @@ export function TransactionList({ limit, searchable = false, period }: Transacti
                       </p>
                     </div>
                     <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      {transaction.notes ? (
+                      {transaction.merchantName || transaction.notes ? (
                         <span className="min-w-0 flex-1 truncate">
-                          {transaction.notes}
+                          {transaction.merchantName ? `${transaction.merchantName}${transaction.notes ? ` · ${transaction.notes}` : ""}` : transaction.notes}
                         </span>
                       ) : (
                         <span className="min-w-0 flex-1" />
                       )}
-                      {transaction.categoryName ? (
+                      {transaction.splits.length ? (
+                        <span className="flex max-w-32 shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
+                          <Layers3 aria-hidden="true" className="size-3 shrink-0" />
+                          {transaction.splits.length} categories
+                        </span>
+                      ) : transaction.categoryName ? (
                         <span
                           role="link"
                           tabIndex={0}

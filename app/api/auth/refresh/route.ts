@@ -17,8 +17,12 @@ export async function POST() {
     setRefreshTokenCookie(response, session.refreshToken);
     return response;
   } catch (error) {
-    const response = error instanceof RefreshTokenReuseError ? errorResponse("Session revoked", 401) : errorResponse("Unable to refresh session", 500);
-    clearRefreshTokenCookie(response);
+    const response = error instanceof RefreshTokenReuseError
+      ? errorResponse("Session revoked", 401)
+      : errorResponse("Unable to refresh session", 500);
+    // Preserve the refresh cookie on transient Worker, database, or crypto
+    // failures. Only a definitive revoked/replayed session should be cleared.
+    if (error instanceof RefreshTokenReuseError) clearRefreshTokenCookie(response);
     return response;
   }
 }

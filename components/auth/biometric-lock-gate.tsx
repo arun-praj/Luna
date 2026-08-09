@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Fingerprint, LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
 import { getAccessTokenSubject, signOut } from "@/lib/auth-client";
 import { canUseBiometricLock, clearBiometricLockForDifferentUser, disableBiometricLock, isBiometricLockEnabled, unlockWithBiometric } from "@/lib/biometric-lock";
+import { LunaLoader } from "@/components/ui/luna-loader";
 
 const publicPaths = new Set(["/login", "/signup", "/forgot-password", "/reset-password", "/onboarding"]);
 
@@ -110,7 +111,7 @@ export function BiometricLockGate({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }
 
-  if (!isReady) return <main className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">Loading Luna…</main>;
+  if (!isReady) return <LunaLoader />;
   if (!isLocked) return <>{children}</>;
 
   return (

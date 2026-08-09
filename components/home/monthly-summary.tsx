@@ -12,6 +12,7 @@ import {
 
 import { authenticatedFetch } from "@/lib/auth-client";
 import { currencyEntries, formatCurrencyAmount, type CurrencyTotals } from "@/lib/currency";
+import { addMoney } from "@/lib/money";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { Skeleton } from "@/components/ui/data-skeleton";
 import type { AppliedPeriod } from "@/components/home/date-picker";
@@ -47,7 +48,7 @@ function currentMonthRange() {
   };
 }
 
-function useMonthlySummary() {
+export function useMonthlySummary() {
   const summary = useContext(MonthlySummaryContext);
   if (!summary) {
     throw new Error(
@@ -103,9 +104,9 @@ export function MonthlySummaryProvider({ children, period }: { children: ReactNo
           (totals, transaction) => {
             const currency = transaction.accountCurrency || userCurrency || "NPR";
             const current = totals[currency] ?? { income: 0, expenses: 0, savings: 0 };
-            if (transaction.type === "income") current.income += transaction.amount;
-            if (transaction.type === "expense") current.expenses += transaction.amount;
-            if (transaction.type === "savings") current.savings += transaction.amount;
+            if (transaction.type === "income") current.income = addMoney(current.income, transaction.amount);
+            if (transaction.type === "expense") current.expenses = addMoney(current.expenses, transaction.amount);
+            if (transaction.type === "savings") current.savings = addMoney(current.savings, transaction.amount);
             totals[currency] = current;
             return totals;
           },
@@ -158,14 +159,56 @@ const overview = [
   {
     label: "Savings",
     key: "savings",
-    color: "text-foreground",
+    color: "text-info",
     icon: Landmark,
-    iconClassName: "bg-primary-soft text-primary",
+    iconClassName: "bg-info-soft text-info",
   },
 ] as const;
 
-export function MonthlyOverviewCards() {
+export function MonthlyOverviewCards({ compact = false }: { compact?: boolean }) {
   const summary = useMonthlySummary();
+
+  if (compact) {
+    return (
+      <div className="mt-3 grid min-w-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-[12px] border border-border bg-card" aria-label="Monthly overview" data-tour="monthly-overview">
+        {overview.map((item) => {
+          const Icon = item.icon;
+          const values = currencyEntries(
+            Object.fromEntries(
+              Object.entries(summary.totalsByCurrency).map(([currency, totals]) => [currency, totals[item.key]]),
+            ) as CurrencyTotals,
+          );
+          const visibleValues = values.some(([, value]) => value !== 0) ? values.filter(([, value]) => value !== 0) : values.slice(0, 1);
+
+          return (
+            <Link
+              href={`/analytics/${item.key === "expenses" ? "expenses" : item.key}`}
+              aria-label={`View analytics for ${item.label}`}
+              className="flex min-h-[62px] min-w-0 flex-col justify-center px-2 py-2 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 min-[390px]:px-2.5"
+              key={item.label}
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className={`flex size-5 shrink-0 items-center justify-center rounded-[6px] ${item.iconClassName}`}>
+                  <Icon aria-hidden="true" className="size-3" />
+                </span>
+                <span className="truncate text-[11px] font-medium text-muted-foreground">{item.label}</span>
+              </span>
+              <span className={`mt-1 block min-w-0 font-semibold tabular-nums ${item.color}`}>
+                {summary.isLoading
+                  ? <Skeleton className="h-4 w-full max-w-20" />
+                  : visibleValues.map(([currency, value]) => (
+                    <span className="flex min-w-0 items-baseline justify-between gap-1 whitespace-nowrap" key={currency}>
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">{currency}</span>
+                      <span className="text-[clamp(12px,3.5vw,15px)] leading-4">{formatCurrencyAmount(value)}</span>
+                    </span>
+                  ))}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-8">

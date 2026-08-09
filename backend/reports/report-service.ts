@@ -1,16 +1,17 @@
 import "server-only";
 
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { categories, transactions, users } from "@/backend/db/schema";
 import { db } from "@/backend/db/client";
+import { addMoney, normalizeMoney, sumMoney } from "@/lib/money";
 
 export const REPORT_PERIODS = ["weekly", "monthly", "yearly"] as const;
 export type ReportPeriod = (typeof REPORT_PERIODS)[number];
 export type ReportIcon = "sparkles" | "trend" | "wallet" | "shield" | "target" | "lightbulb";
 
-type PeriodBounds = {
+export type PeriodBounds = {
   start: string;
   end: string;
   label: string;
@@ -25,6 +26,7 @@ type ReportRow = {
   categoryIcon: string | null;
   categoryColor: string | null;
   date: string;
+  splits: Array<{ categoryId: string; amount: number; categoryName: string; categoryIcon: string | null; categoryColor: string | null }>;
 };
 
 type Totals = {
@@ -159,11 +161,11 @@ function historyStart(period: ReportPeriod, bounds: PeriodBounds) {
 }
 
 function roundAmount(value: number) {
-  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+  return normalizeMoney(Number.isFinite(value) ? value : 0);
 }
 
 function sum(rows: ReportRow[], type: ReportRow["type"]) {
-  return rows.filter((row) => row.type === type).reduce((total, row) => total + Math.abs(row.amount), 0);
+  return sumMoney(rows.filter((row) => row.type === type).map((row) => Math.abs(row.amount)));
 }
 
 function totalsFor(rows: ReportRow[]): Totals {
@@ -194,11 +196,11 @@ function forecastFor(rows: ReportRow[], period: ReportPeriod): Forecast {
   for (const row of rows) {
     const key = bucketKey(row.date, period);
     const current = buckets.get(key) ?? { spending: 0, earning: 0, savings: 0, net: 0 };
-    const amount = Math.abs(row.amount);
-    if (row.type === "expense") current.spending += amount;
-    if (row.type === "income") current.earning += amount;
-    if (row.type === "savings") current.savings += amount;
-    current.net = current.earning - current.spending - current.savings;
+    const amount = normalizeMoney(Math.abs(row.amount));
+    if (row.type === "expense") current.spending = addMoney(current.spending, amount);
+    if (row.type === "income") current.earning = addMoney(current.earning, amount);
+    if (row.type === "savings") current.savings = addMoney(current.savings, amount);
+    current.net = normalizeMoney(current.earning - current.spending - current.savings);
     buckets.set(key, current);
   }
   const values = [...buckets.entries()].sort(([left], [right]) => left.localeCompare(right)).slice(-6).map(([, value]) => value);
@@ -269,6 +271,9 @@ async function loadReportSource(userId: string, period: ReportPeriod, bounds: Pe
   const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
   if (!user) throw new Error("User not found");
 
+  const categoryRows = await db.select({ id: categories.id, name: categories.name, icon: categories.icon, color: categories.color }).from(categories).where(or(eq(categories.userId, userId), isNull(categories.userId)));
+  const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
+
   const rows = await db.select({
     id: transactions.id,
     type: transactions.type,
@@ -278,9 +283,20 @@ async function loadReportSource(userId: string, period: ReportPeriod, bounds: Pe
     categoryName: categories.name,
     categoryIcon: categories.icon,
     categoryColor: categories.color,
+    splits: transactions.splits,
   }).from(transactions).leftJoin(categories, eq(transactions.categoryId, categories.id)).where(and(eq(transactions.userId, userId), gte(transactions.date, historyStart(period, bounds)), lte(transactions.date, bounds.end))).orderBy(desc(transactions.date), desc(transactions.createdAt));
 
-  return { currency: user.currency, rows: rows as ReportRow[] };
+  const enrichedRows: ReportRow[] = rows.map((row) => ({
+    ...row,
+    splits: (JSON.parse(row.splits) as Array<{ categoryId: string; amount: number }>).map((split) => ({
+      ...split,
+      amount: normalizeMoney(split.amount),
+      categoryName: categoryById.get(split.categoryId)?.name ?? "Uncategorized",
+      categoryIcon: categoryById.get(split.categoryId)?.icon ?? null,
+      categoryColor: categoryById.get(split.categoryId)?.color ?? null,
+    })),
+  }));
+  return { currency: user.currency, rows: enrichedRows };
 }
 
 export async function getReportFingerprint(userId: string, period: ReportPeriod, now = new Date(), overrideBounds?: PeriodBounds) {
@@ -349,9 +365,17 @@ export async function buildReport(userId: string, period: ReportPeriod, now = ne
   const categoryMap = new Map<string, { amount: number; icon: string | null; color: string | null }>();
   for (const row of currentRows) {
     if (row.type !== "expense") continue;
+    if (row.splits.length) {
+      for (const split of row.splits) {
+        const current = categoryMap.get(split.categoryName) ?? { amount: 0, icon: split.categoryIcon, color: split.categoryColor };
+        current.amount = addMoney(current.amount, Math.abs(split.amount));
+        categoryMap.set(split.categoryName, current);
+      }
+      continue;
+    }
     const key = row.categoryName || "Uncategorized";
     const current = categoryMap.get(key) ?? { amount: 0, icon: row.categoryIcon, color: row.categoryColor };
-    current.amount += Math.abs(row.amount);
+    current.amount = addMoney(current.amount, Math.abs(row.amount));
     categoryMap.set(key, current);
   }
   const categorySpending = [...categoryMap.entries()].map(([name, value]) => ({ name, icon: value.icon, color: value.color, amount: roundAmount(value.amount), share: expenseTotal ? Math.round((value.amount / expenseTotal) * 1000) / 10 : 0 })).sort((left, right) => right.amount - left.amount);
@@ -363,7 +387,7 @@ export async function buildReport(userId: string, period: ReportPeriod, now = ne
     transactionCount: currentRows.length,
     totals,
     categorySpending,
-    topExpense: largest ? { title: largest.title || largest.categoryName || "Expense", category: largest.categoryName || "Uncategorized", amount: roundAmount(Math.abs(largest.amount)), date: largest.date } : null,
+    topExpense: largest ? { title: largest.title || largest.categoryName || "Expense", category: largest.splits.length ? `${largest.splits.length} categories` : largest.categoryName || "Uncategorized", amount: roundAmount(Math.abs(largest.amount)), date: largest.date } : null,
     forecast: forecastFor(normalizedRows, period),
   };
   const ai = await aiInsights(base);

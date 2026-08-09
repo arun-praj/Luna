@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -26,17 +26,20 @@ import {
   ChevronRight,
   GripVertical,
   ListFilter,
+  Pencil,
   Plus,
   X,
 } from "lucide-react";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
-import { getAccountBackgroundColor } from "@/lib/account-appearance";
+import { AnimatedBalanceAmount } from "@/components/home/animated-balance-amount";
+import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-appearance";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { ListDataSkeleton, Skeleton } from "@/components/ui/data-skeleton";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
+import { GuideIcon } from "@/components/guides/feature-guide";
 
 type Account = {
   id: string;
@@ -148,27 +151,168 @@ function SummaryAmount({
   entries,
   isLoading,
   preferredCurrency,
+  hideTotalBalance = false,
+  balanceRevealed = false,
+  onReveal,
 }: {
   entries: Array<[string, number]>;
   isLoading: boolean;
   preferredCurrency: string;
+  hideTotalBalance?: boolean;
+  balanceRevealed?: boolean;
+  onReveal?: () => void;
 }) {
   if (isLoading) return <Skeleton className="inline-block h-7 w-24 align-middle" />;
   const [primary, ...others] = entries.length ? entries : [[preferredCurrency, 0] as [string, number]];
+  const amountColor = primary[1] < 0 ? "text-expense" : primary[1] > 0 ? "text-income" : "text-foreground";
   return (
     <>
-      <span className="block truncate text-[19px] font-semibold tracking-[-0.035em] tabular-nums text-foreground sm:text-[22px]">
-        <span className="mr-1 text-[10px] tracking-normal text-muted-foreground sm:text-xs">{primary[0]}</span>
-        {formatCurrencyAmount(primary[1])}
+      <span className={`block truncate text-[19px] font-semibold tracking-[-0.035em] tabular-nums ${amountColor} sm:text-[22px]`}>
+        <span className="inline-flex items-baseline">
+          <span className="mr-1 text-[10px] tracking-normal text-muted-foreground sm:text-xs">{primary[0]}</span>
+          <AnimatedBalanceAmount
+            amount={formatCurrencyAmount(primary[1])}
+            hideTotalBalance={hideTotalBalance}
+            balanceRevealed={balanceRevealed}
+            onReveal={onReveal ?? (() => undefined)}
+            className={amountColor}
+          />
+        </span>
       </span>
       {others.length ? (
-        <span className="mt-1 block truncate text-[10px] font-semibold tabular-nums text-muted-foreground">
+        <span className="mt-1 block truncate text-[10px] font-semibold tabular-nums">
           {others.map(([currency, amount], index) => (
-            <span key={currency}>{index ? " · " : ""}{currency} {formatCurrencyAmount(amount)}</span>
+            <span key={currency} className={amount < 0 ? "text-expense" : amount > 0 ? "text-income" : "text-muted-foreground"}>{index ? " · " : ""}{currency} {hideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>
           ))}
         </span>
       ) : null}
     </>
+  );
+}
+
+const ACCOUNT_SWIPE_ACTION_WIDTH = 88;
+
+function SwipeableAccountCard({
+  account,
+  index,
+  currentRoute,
+  open,
+  onOpenChange,
+}: {
+  account: Account;
+  index: number;
+  currentRoute: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const pointerStart = useRef<{ x: number; y: number; offset: number } | null>(null);
+  const offsetRef = useRef(0);
+  const draggedRef = useRef(false);
+  const [dragOffset, setDragOffset] = useState<number | null>(null);
+  const offset = dragOffset ?? (open ? ACCOUNT_SWIPE_ACTION_WIDTH : 0);
+  const backgroundColor = getAccountBackgroundColor(account.backgroundColor, account.type);
+  const swipeActionColor = getAccountForeground(account.backgroundColor, account.type);
+
+  const setSwipeOffset = (nextOffset: number) => {
+    const clamped = Math.max(0, Math.min(ACCOUNT_SWIPE_ACTION_WIDTH, nextOffset));
+    offsetRef.current = clamped;
+    setDragOffset(clamped);
+  };
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLAnchorElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const currentOffset = dragOffset ?? (open ? ACCOUNT_SWIPE_ACTION_WIDTH : 0);
+    offsetRef.current = currentOffset;
+    pointerStart.current = { x: event.clientX, y: event.clientY, offset: currentOffset };
+    draggedRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLAnchorElement>) {
+    const start = pointerStart.current;
+    if (!start) return;
+    const horizontalDistance = event.clientX - start.x;
+    const verticalDistance = event.clientY - start.y;
+    if (!draggedRef.current && Math.abs(horizontalDistance) < 8) return;
+    if (!draggedRef.current && Math.abs(verticalDistance) > Math.abs(horizontalDistance)) {
+      pointerStart.current = null;
+      return;
+    }
+    draggedRef.current = true;
+    setSwipeOffset(start.offset + horizontalDistance);
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLAnchorElement>) {
+    const start = pointerStart.current;
+    pointerStart.current = null;
+    if (!start) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const shouldOpen = offsetRef.current >= ACCOUNT_SWIPE_ACTION_WIDTH / 2;
+    setDragOffset(null);
+    onOpenChange(shouldOpen);
+    if (draggedRef.current) {
+      window.setTimeout(() => {
+        draggedRef.current = false;
+      }, 0);
+    }
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-[14px]" style={{ backgroundColor: swipeActionColor }}>
+      <Link
+        href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)}
+        aria-label={`Edit ${account.name}`}
+        style={{ backgroundColor: swipeActionColor }}
+        className="absolute inset-y-0 left-0 flex w-[88px] flex-col items-center justify-center gap-1 text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2"
+      >
+        <Pencil aria-hidden="true" className="size-[18px]" />
+        <span className="text-xs font-semibold">Edit</span>
+      </Link>
+      <Link
+        href={withReturnTo(`/accounts/${account.id}`, currentRoute)}
+        style={{ backgroundColor, transform: `translate3d(${offset}px, 0, 0)` }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onClick={(event) => {
+          if (draggedRef.current || open || dragOffset !== null) {
+            event.preventDefault();
+            onOpenChange(false);
+          }
+        }}
+        className={`group relative block w-full touch-pan-y overflow-hidden rounded-[14px] border text-left will-change-transform transition-[filter,transform] duration-200 hover:brightness-[0.985] active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${cardClasses[index % cardClasses.length]}`}
+      >
+        <span className="flex min-h-[72px] items-center gap-3 px-4 py-3">
+          <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-white/80 bg-white/45 shadow-[0_1px_2px_rgba(23,32,29,0.06)]">
+            <AccountAvatar icon={account.icon} name={account.name} type={account.type} backgroundColor={backgroundColor} size={44} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-semibold">{account.name}</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {typeLabels[account.type]}{account.isDefault ? " · Default" : ""}
+            </span>
+          </span>
+          <span className="shrink-0 text-right">
+            <span className="block text-[17px] font-semibold tracking-[-0.025em] tabular-nums">{formatAmount(account.currentBalance)}</span>
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{account.currency}</span>
+          </span>
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+        </span>
+        <span className="grid grid-cols-2 divide-x divide-current/10 border-t border-current/10 bg-white/45">
+          <span className="px-4 py-2.5">
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Income this month</span>
+            <span className="mt-0.5 block text-[13px] font-semibold tabular-nums text-income">+{formatAmount(account.monthlyIncome)} {account.currency}</span>
+          </span>
+          <span className="px-4 py-2.5">
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Expense this month</span>
+            <span className="mt-0.5 block text-[13px] font-semibold tabular-nums text-expense">−{formatAmount(account.monthlyExpense)} {account.currency}</span>
+          </span>
+        </span>
+      </Link>
+    </div>
   );
 }
 
@@ -177,12 +321,16 @@ export default function AccountsPage() {
   const [currentRoute, setCurrentRoute] = useState("/");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [displayCurrency, setDisplayCurrency] = useState("NPR");
+  const [hideTotalBalance, setHideTotalBalance] = useState(false);
+  const [balanceRevealed, setBalanceRevealed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reorderOpen, setReorderOpen] = useState(false);
   const reorderTransition = useAnimatedVisibility(reorderOpen);
   const [draftOrder, setDraftOrder] = useState<Account[]>([]);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [openSwipeAccountId, setOpenSwipeAccountId] = useState<string | null>(null);
+  const balanceRevealTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -207,11 +355,13 @@ export default function AccountsPage() {
           );
         const accountData = await accountResult.value.json() as { accounts: Account[] };
         const profileData = profileResult.status === "fulfilled" && profileResult.value.ok
-          ? await profileResult.value.json() as { user?: { currency?: string } }
+          ? await profileResult.value.json() as { user?: { currency?: string; hideTotalBalance?: boolean } }
           : null;
         if (active) {
           setAccounts(accountData.accounts);
           setDisplayCurrency(profileData?.user?.currency ?? accountData.accounts[0]?.currency ?? "NPR");
+          setHideTotalBalance(profileData?.user?.hideTotalBalance === true);
+          setBalanceRevealed(false);
         }
       })
       .catch((reason: unknown) => {
@@ -227,8 +377,19 @@ export default function AccountsPage() {
       });
     return () => {
       active = false;
+      if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
     };
   }, []);
+
+  function revealTotalBalance() {
+    if (!hideTotalBalance) return;
+    if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
+    setBalanceRevealed(true);
+    balanceRevealTimer.current = window.setTimeout(() => {
+      setBalanceRevealed(false);
+      balanceRevealTimer.current = null;
+    }, 5000);
+  }
 
   const { excludedEntries, totalEntries } = useMemo(() => {
     const includedTotals: Record<string, number> = {};
@@ -296,9 +457,12 @@ export default function AccountsPage() {
             >
               <ArrowLeft aria-hidden="true" className="size-5" />
             </Link>
-            <h1 className="text-[28px] font-semibold tracking-[-0.04em]">
-              Accounts
-            </h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="text-[28px] font-semibold tracking-[-0.04em]">
+                Accounts
+              </h1>
+              <GuideIcon href={withReturnTo("/accounts/guide", currentRoute)} label="Accounts" />
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -326,7 +490,17 @@ export default function AccountsPage() {
             <p className="text-xs font-semibold text-muted-foreground">
               Total balance
             </p>
-            <p className="mt-2"><SummaryAmount entries={totalEntries} isLoading={isLoading} preferredCurrency={displayCurrency} /></p>
+            <p className="mt-2">
+              <SummaryAmount
+                entries={totalEntries}
+                isLoading={isLoading}
+                preferredCurrency={displayCurrency}
+                hideTotalBalance={hideTotalBalance}
+                balanceRevealed={balanceRevealed}
+                onReveal={revealTotalBalance}
+              />
+              {hideTotalBalance ? <span aria-hidden={balanceRevealed} className={`mt-1 block text-[10px] font-medium text-muted-foreground ${balanceRevealed ? "invisible" : ""}`}>Tap to view for 5 seconds</span> : null}
+            </p>
           </div>
           <div className="min-w-0 px-4 py-4">
             <p className="text-xs font-semibold text-muted-foreground">
@@ -374,64 +548,16 @@ export default function AccountsPage() {
             </div>
           ) : (
             <div className="route-data-reveal mt-3 space-y-3">
-              {accounts.map((account, index) => {
-                const backgroundColor = getAccountBackgroundColor(account.backgroundColor, account.type);
-                return (
-                  <Link
-                    href={withReturnTo(`/accounts/${account.id}`, currentRoute)}
-                    key={account.id}
-                    style={{ backgroundColor }}
-                    className={`group block w-full overflow-hidden rounded-[14px] border text-left transition-[filter,transform] hover:brightness-[0.985] active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${cardClasses[index % cardClasses.length]}`}
-                  >
-                    <span className="flex min-h-[72px] items-center gap-3 px-4 py-3">
-                      <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-white/80 bg-white/45 shadow-[0_1px_2px_rgba(23,32,29,0.06)]">
-                        <AccountAvatar icon={account.icon} name={account.name} type={account.type} backgroundColor={backgroundColor} size={44} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold">
-                          {account.name}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {typeLabels[account.type]}
-                          {account.isDefault ? " · Default" : ""}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span className="block text-[17px] font-semibold tracking-[-0.025em] tabular-nums">
-                          {formatAmount(account.currentBalance)}
-                        </span>
-                        <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                          {account.currency}
-                        </span>
-                      </span>
-                      <ChevronRight
-                        aria-hidden="true"
-                        className="size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
-                      />
-                    </span>
-                    <span className="grid grid-cols-2 divide-x divide-current/10 border-t border-current/10 bg-white/45">
-                      <span className="px-4 py-2.5">
-                        <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                          Income this month
-                        </span>
-                        <span className="mt-0.5 block text-[13px] font-semibold tabular-nums text-income">
-                          +{formatAmount(account.monthlyIncome)}{" "}
-                          {account.currency}
-                        </span>
-                      </span>
-                      <span className="px-4 py-2.5">
-                        <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                          Expense this month
-                        </span>
-                        <span className="mt-0.5 block text-[13px] font-semibold tabular-nums text-expense">
-                          −{formatAmount(account.monthlyExpense)}{" "}
-                          {account.currency}
-                        </span>
-                      </span>
-                    </span>
-                  </Link>
-                );
-              })}
+              {accounts.map((account, index) => (
+                <SwipeableAccountCard
+                  key={account.id}
+                  account={account}
+                  index={index}
+                  currentRoute={currentRoute}
+                  open={openSwipeAccountId === account.id}
+                  onOpenChange={(open) => setOpenSwipeAccountId(open ? account.id : null)}
+                />
+              ))}
             </div>
           )}
         </section>

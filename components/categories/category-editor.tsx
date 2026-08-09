@@ -42,6 +42,8 @@ import { authenticatedFetch } from "@/lib/auth-client";
 import { navigateWithRouteExit } from "@/lib/route-motion";
 import { getReturnTo } from "@/lib/navigation";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
+import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const iconOptions = [
   { label: "Home", icon: House },
@@ -210,7 +212,9 @@ export function CategoryEditor({
   const [isLoading, setIsLoading] = useState(Boolean(categoryId && !category));
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState("");
+  const [initialDraft, setInitialDraft] = useState<string | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -220,6 +224,15 @@ export function CategoryEditor({
   }, []);
   const PreviewIcon = iconOptions[selectedIcon].icon;
   const selectedColorOption = selectedColor === "custom" ? null : colorOptions[selectedColor];
+
+  const draftSnapshot = JSON.stringify({ name, type, selectedIcon, selectedColor, customColor });
+  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(initialDraft !== null && draftSnapshot !== initialDraft);
+
+  useEffect(() => {
+    if (isLoading || initialDraft !== null) return;
+    const frame = window.requestAnimationFrame(() => setInitialDraft(draftSnapshot));
+    return () => window.cancelAnimationFrame(frame);
+  }, [draftSnapshot, isLoading, initialDraft]);
 
   useEffect(() => {
     if (!categoryId || category) return;
@@ -250,10 +263,13 @@ export function CategoryEditor({
 
   async function deleteCategory() {
     const id = loadedCategory?.id ?? categoryId;
-    if (!id || !window.confirm("Delete this category? Existing transactions will keep their history.")) return;
+    if (!id) return;
     setIsDeleting(true); setError("");
     const response = await authenticatedFetch(`/api/categories/${id}`, { method: "DELETE" }).catch(() => null);
-    if (response?.ok) navigateWithRouteExit(() => router.push(backHref));
+    if (response?.ok) {
+      setDeleteOpen(false);
+      navigateWithRouteExit(() => router.push(backHref));
+    }
     else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not delete category."); }
     setIsDeleting(false);
   }
@@ -265,6 +281,10 @@ export function CategoryEditor({
           <Link
             href={backHref}
             aria-label={isNew ? "Cancel new category" : "Cancel editing category"}
+            onClick={(event) => {
+              event.preventDefault();
+              requestDiscard(() => navigateWithRouteExit(() => router.push(backHref)));
+            }}
             className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
             <X aria-hidden="true" className="size-5" />
@@ -418,7 +438,7 @@ export function CategoryEditor({
           <section className="mt-8 border-t border-border pt-6">
             <button
               type="button"
-              onClick={() => void deleteCategory()}
+              onClick={() => setDeleteOpen(true)}
               disabled={isDeleting || isLoading}
               className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[11px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense transition-colors hover:border-expense/45 focus-visible:outline-none focus-visible:ring-2 focus-visible/30 disabled:opacity-60"
             >
@@ -430,6 +450,16 @@ export function CategoryEditor({
             </p>
           </section>
         ) : null}
+        <ConfirmDialog
+          open={deleteOpen}
+          title="Delete category?"
+          description="Existing transactions will keep their history, but this category will no longer be available for new entries."
+          confirmLabel="Delete category"
+          destructive
+          busy={isDeleting}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={deleteCategory}
+        />
       </div>
 
       {iconPickerTransition.mounted ? (
@@ -440,7 +470,7 @@ export function CategoryEditor({
           className={`fixed inset-0 z-50 h-dvh overflow-y-auto bg-background ${iconPickerTransition.closing ? "drawer-exit" : "drawer-enter"}`}
         >
           <div className="mx-auto min-h-full w-full max-w-[560px] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5">
-            <header className="sticky top-0 z-10 -mx-4 flex items-center justify-between border-b border-border bg-background/95 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-5 sm:px-5 sm:pt-8">
+            <StickyPageHeader className="-mx-4 !z-10 flex items-center justify-between px-4 pb-3 sm:-mx-5 sm:px-5">
               <div>
                 <p className="text-xs font-medium text-muted-foreground">
                   Category appearance
@@ -460,7 +490,7 @@ export function CategoryEditor({
               >
                 <X aria-hidden="true" className="size-5" />
               </button>
-            </header>
+            </StickyPageHeader>
 
             <p className="mt-6 text-sm leading-6 text-muted-foreground">
               Pick the symbol that will make this category easiest to recognize.
@@ -503,6 +533,7 @@ export function CategoryEditor({
           </div>
         </div>
       ) : null}
+      {discardDialog}
     </main>
   );
 }

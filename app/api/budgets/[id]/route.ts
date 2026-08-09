@@ -1,10 +1,38 @@
-import { and, eq, isNull, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { errorResponse, requireAccessToken } from "@/backend/auth/http";
-import { db } from "@/backend/db/client";
-import { categories, spendingBudgets } from "@/backend/db/schema";
-import { budgetInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs"; type Context = { params: Promise<{ id: string }> };
-export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const parsed = budgetInput.partial().safeParse(await request.json().catch(() => null)); if (!parsed.success || Object.keys(parsed.data).length === 0) return errorResponse("Invalid budget update", 400); if (parsed.data.categoryId) { const [category] = await db.select().from(categories).where(and(eq(categories.id, parsed.data.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1); if (!category) return errorResponse("Category not found", 400); } const updated = await db.update(spendingBudgets).set(parsed.data).where(and(eq(spendingBudgets.id, id), eq(spendingBudgets.userId, userId))).returning(); if (!updated.length) return errorResponse("Budget not found", 404); return NextResponse.json({ budget: updated[0] }); }
-export async function DELETE(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const deleted = await db.delete(spendingBudgets).where(and(eq(spendingBudgets.id, id), eq(spendingBudgets.userId, userId))).returning({ id: spendingBudgets.id }); return deleted.length ? NextResponse.json({ success: true }) : errorResponse("Budget not found", 404); }
+import { errorResponse, requireAccessToken } from "@/backend/auth/http";
+import { BudgetConflictError, deleteBudget, listBudgets, updateBudget } from "@/backend/domain/budget-service";
+import { budgetInput } from "@/backend/domain/validation";
+import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
+
+export const runtime = "nodejs";
+type Context = { params: Promise<{ id: string }> };
+
+export async function PATCH(request: Request, { params }: Context) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  const { id } = await params;
+  const parsed = budgetInput.partial().safeParse(await request.json().catch(() => null));
+  if (!parsed.success || Object.keys(parsed.data).length === 0) return errorResponse("Invalid budget update", 400);
+  try {
+    const updated = await updateBudget(userId, id, parsed.data);
+    if (!updated) return errorResponse("Budget not found", 404);
+    scheduleHomeAlertRepair(userId);
+    const budgets = await listBudgets(userId, updated.period);
+    return NextResponse.json({ budget: budgets.find((budget) => budget.id === updated.id) });
+  } catch (error) {
+    if (error instanceof BudgetConflictError) {
+      return NextResponse.json({ error: error.message, existingBudgetId: error.budgetId }, { status: 409 });
+    }
+    return errorResponse(error instanceof Error ? error.message : "Unable to update budget", 400);
+  }
+}
+
+export async function DELETE(request: Request, { params }: Context) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  const { id } = await params;
+  await deleteBudget(userId, id);
+  scheduleHomeAlertRepair(userId);
+  return NextResponse.json({ success: true });
+}

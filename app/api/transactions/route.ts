@@ -4,6 +4,7 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { accounts, categories, transactions } from "@/backend/db/schema";
 import { createTransaction, serializeTransaction } from "@/backend/domain/transaction-service";
+import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { transactionInput } from "@/backend/domain/validation";
 
 export const runtime = "nodejs";
@@ -13,8 +14,10 @@ async function enrichTransactions(rows: (typeof transactions.$inferSelect)[], us
   const categoryRows = await db.select({ id: categories.id, name: categories.name, type: categories.type, icon: categories.icon, color: categories.color }).from(categories).where(or(eq(categories.userId, userId), sql`${categories.userId} is null`));
   const accountById = new Map(accountRows.map((account) => [account.id, account]));
   const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
-  return rows.map((row) => ({
-    ...serializeTransaction(row),
+  return rows.map((row) => {
+    const serialized = serializeTransaction(row);
+    return ({
+    ...serialized,
     accountName: accountById.get(row.accountId)?.name ?? "Unknown account",
     accountType: accountById.get(row.accountId)?.type ?? null,
     accountCurrency: accountById.get(row.accountId)?.currency ?? "NPR",
@@ -28,24 +31,33 @@ async function enrichTransactions(rows: (typeof transactions.$inferSelect)[], us
     categoryType: row.categoryId ? categoryById.get(row.categoryId)?.type ?? null : null,
     categoryIcon: row.categoryId ? categoryById.get(row.categoryId)?.icon ?? null : null,
     categoryColor: row.categoryId ? categoryById.get(row.categoryId)?.color ?? null : null,
-  }));
+    splits: serialized.splits.map((split) => ({
+      ...split,
+      categoryName: categoryById.get(split.categoryId)?.name ?? "Uncategorized",
+      categoryIcon: categoryById.get(split.categoryId)?.icon ?? null,
+      categoryColor: categoryById.get(split.categoryId)?.color ?? null,
+    })),
+  });
+  });
 }
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401);
-  const url = new URL(request.url); const accountId = url.searchParams.get("accountId"); const categoryId = url.searchParams.get("categoryId"); const savingsInstrumentId = url.searchParams.get("savingsInstrumentId"); const goalId = url.searchParams.get("goalId"); const from = url.searchParams.get("from"); const to = url.searchParams.get("to"); const status = url.searchParams.get("syncStatus"); const search = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
+  const url = new URL(request.url); const accountId = url.searchParams.get("accountId"); const categoryId = url.searchParams.get("categoryId"); const savingsInstrumentId = url.searchParams.get("savingsInstrumentId"); const goalId = url.searchParams.get("goalId"); const from = url.searchParams.get("from"); const to = url.searchParams.get("to"); const status = url.searchParams.get("syncStatus"); const type = url.searchParams.get("type"); const tag = url.searchParams.get("tag")?.trim().slice(0, 50) ?? ""; const merchant = url.searchParams.get("merchant")?.trim().slice(0, 120) ?? ""; const search = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
   const filters = [eq(transactions.userId, userId)];
+  if (type === "expense" || type === "income" || type === "savings") filters.push(eq(transactions.type, type));
   if (accountId) filters.push(eq(transactions.accountId, accountId));
-  if (categoryId) filters.push(eq(transactions.categoryId, categoryId));
   if (savingsInstrumentId) filters.push(eq(transactions.savingsInstrumentId, savingsInstrumentId));
   if (goalId) filters.push(eq(transactions.goalId, goalId));
   if (from) filters.push(sql`${transactions.date} >= ${from}` as never);
   if (to) filters.push(sql`${transactions.date} <= ${to}` as never);
   if (status === "synced" || status === "pending" || status === "failed") filters.push(eq(transactions.syncStatus, status));
+  if (merchant) filters.push(sql`lower(coalesce(${transactions.merchantName}, '')) = ${merchant.toLowerCase()}` as never);
   if (search) {
     const pattern = `%${search.toLowerCase()}%`;
     filters.push(sql`(
       lower(${transactions.title}) LIKE ${pattern}
+      OR lower(coalesce(${transactions.merchantName}, '')) LIKE ${pattern}
       OR lower(coalesce(${transactions.notes}, '')) LIKE ${pattern}
       OR lower(${transactions.tags}) LIKE ${pattern}
       OR lower(coalesce((SELECT name FROM categories WHERE categories.id = ${transactions.categoryId}), '')) LIKE ${pattern}
@@ -54,7 +66,26 @@ export async function GET(request: Request) {
     )` as never);
   }
   const rows = await db.select().from(transactions).where(and(...filters)).orderBy(desc(transactions.date), desc(transactions.createdAt));
-  return NextResponse.json({ transactions: await enrichTransactions(rows, userId) });
+  const tagRows = tag
+    ? rows.filter((row) => {
+      try {
+        return (JSON.parse(row.tags) as unknown[]).some((value) => typeof value === "string" && value.toLowerCase() === tag.toLowerCase());
+      } catch {
+        return false;
+      }
+    })
+    : rows;
+  const categoryRows = categoryId
+    ? tagRows.filter((row) => {
+      if (row.categoryId === categoryId) return true;
+      try {
+        return (JSON.parse(row.splits) as Array<{ categoryId: string }>).some((split) => split.categoryId === categoryId);
+      } catch {
+        return false;
+      }
+    })
+    : tagRows;
+  return NextResponse.json({ transactions: await enrichTransactions(categoryRows, userId) });
 }
 
 export async function POST(request: Request) {
@@ -64,6 +95,6 @@ export async function POST(request: Request) {
     const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title");
     return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400);
   }
-  try { return NextResponse.json({ transaction: serializeTransaction(await createTransaction(userId, parsed.data)) }, { status: 201 }); }
+  try { const transaction = await createTransaction(userId, parsed.data); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }, { status: 201 }); }
   catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to create transaction", 400); }
 }

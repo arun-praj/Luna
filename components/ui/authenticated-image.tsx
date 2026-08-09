@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import { authenticatedFetch } from "@/lib/auth-client";
 
 function isProtectedUpload(src: string) {
-  return src.startsWith("/api/uploads/account-images/") || src.startsWith("/api/uploads/savings-images/");
+  return src.startsWith("/api/uploads/account-images/")
+    || src.startsWith("/api/uploads/savings-images/")
+    || src.startsWith("/api/uploads/transaction-receipts/");
 }
 
 type AuthenticatedImageProps = {

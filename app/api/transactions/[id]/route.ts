@@ -16,8 +16,9 @@ export async function GET(request: Request, { params }: Context) {
   const categoryRows = await db.select({ id: categories.id, name: categories.name, type: categories.type, icon: categories.icon, color: categories.color }).from(categories).where(or(eq(categories.userId, userId), sql`${categories.userId} is null`));
   const accountById = new Map(accountRows.map((account) => [account.id, account]));
   const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
+  const serialized = serializeTransaction(transaction);
   return NextResponse.json({ transaction: {
-    ...serializeTransaction(transaction),
+    ...serialized,
     accountName: accountById.get(transaction.accountId)?.name ?? "Unknown account",
     accountType: accountById.get(transaction.accountId)?.type ?? null,
     accountCurrency: accountById.get(transaction.accountId)?.currency ?? "NPR",
@@ -31,6 +32,12 @@ export async function GET(request: Request, { params }: Context) {
     categoryType: transaction.categoryId ? categoryById.get(transaction.categoryId)?.type ?? null : null,
     categoryIcon: transaction.categoryId ? categoryById.get(transaction.categoryId)?.icon ?? null : null,
     categoryColor: transaction.categoryId ? categoryById.get(transaction.categoryId)?.color ?? null : null,
+    splits: serialized.splits.map((split) => ({
+      ...split,
+      categoryName: categoryById.get(split.categoryId)?.name ?? "Uncategorized",
+      categoryIcon: categoryById.get(split.categoryId)?.icon ?? null,
+      categoryColor: categoryById.get(split.categoryId)?.color ?? null,
+    })),
   } });
 }
 export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const parsed = transactionInput.safeParse(await request.json().catch(() => null)); if (!parsed.success) { const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title"); return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400); } try { return NextResponse.json({ transaction: serializeTransaction(await updateTransaction(userId, id, parsed.data)) }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to update transaction", 400); } }

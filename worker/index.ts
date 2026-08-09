@@ -1,6 +1,8 @@
 import handler from "vinext/server/app-router-entry";
 import { runScheduledNotifications } from "@/backend/notifications/scheduler";
 import { runScheduledReports } from "@/backend/reports/scheduler";
+import { runScheduledRecurringTransactions } from "@/backend/domain/recurring-service";
+import { runScheduledHomeAlerts } from "@/backend/domain/home-alert-service";
 
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -40,6 +42,8 @@ const lunaWorker = {
     const results = await Promise.allSettled([
       runScheduledNotifications(new Date(controller.scheduledTime)),
       runScheduledReports(new Date(controller.scheduledTime)),
+      runScheduledRecurringTransactions(new Date(controller.scheduledTime)),
+      runScheduledHomeAlerts(new Date(controller.scheduledTime)),
     ]);
     const failures = results.filter(
       (result): result is PromiseRejectedResult => result.status === "rejected",

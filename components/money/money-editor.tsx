@@ -15,13 +15,19 @@ function calculate(left: number, right: number, operator: Operator) {
 
 export function formatMoney(value: string) {
   const rawValue = value || "0";
+  const decimalIndex = rawValue.indexOf(".");
   const amount = Number(rawValue);
-  if (amount === 0) {
-    const decimalIndex = rawValue.indexOf(".");
-    return decimalIndex >= 0 ? `0${rawValue.slice(decimalIndex)}` : "0";
+  const integerPart = decimalIndex >= 0 ? rawValue.slice(0, decimalIndex) : rawValue;
+  const fractionalPart = decimalIndex >= 0 ? rawValue.slice(decimalIndex + 1) : "";
+  const formattedInteger = Number(integerPart || "0").toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  });
+
+  if (decimalIndex >= 0 && fractionalPart.length <= 2) {
+    return `${formattedInteger}.${fractionalPart}`;
   }
+
   const formatted = amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
   return rawValue.endsWith(".") ? `${formatted}.` : formatted;
@@ -38,11 +44,17 @@ export function MoneyEditor({
   confirmLabel = "Set",
   confirmDisabled = false,
   confirmValidation,
+  liveValidation,
+  validationAction,
+  previousLabel = "Original",
   topContent,
+  headerContent,
+  instanceKey,
   cancelVariant = "icon",
   cancelLabel = "Cancel money edit",
   dismissOnBackdrop = true,
   closeOnEscape = true,
+  skipCloseAnimation = false,
 }: {
   open: boolean;
   value: string;
@@ -54,11 +66,17 @@ export function MoneyEditor({
   confirmLabel?: string;
   confirmDisabled?: boolean | ((value: string) => boolean);
   confirmValidation?: (value: string) => string;
-  topContent?: React.ReactNode;
+  liveValidation?: (value: string) => string;
+  validationAction?: { label: string; onClick: () => void };
+  previousLabel?: string;
+  topContent?: React.ReactNode | ((draft: string) => React.ReactNode);
+  headerContent?: React.ReactNode;
+  instanceKey?: string;
   cancelVariant?: "icon" | "text";
   cancelLabel?: string;
   dismissOnBackdrop?: boolean;
   closeOnEscape?: boolean;
+  skipCloseAnimation?: boolean;
 }) {
   const [isMounted, setIsMounted] = React.useState(open);
   const [isClosing, setIsClosing] = React.useState(false);
@@ -73,6 +91,13 @@ export function MoneyEditor({
     }
 
     if (!isMounted) return;
+    if (skipCloseAnimation) {
+      const frame = window.requestAnimationFrame(() => {
+        setIsMounted(false);
+        setIsClosing(false);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
     const frame = window.requestAnimationFrame(() => setIsClosing(true));
     const timer = window.setTimeout(() => {
       setIsMounted(false);
@@ -82,13 +107,13 @@ export function MoneyEditor({
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [isMounted, open]);
+  }, [isMounted, open, skipCloseAnimation]);
 
   if (!isMounted || typeof document === "undefined") return null;
 
   return (
     <MoneyEditorPanel
-      key={value}
+      key={`${instanceKey ?? "money"}:${value}`}
       value={value}
       onCancel={onCancel}
       onSet={onSet}
@@ -98,7 +123,11 @@ export function MoneyEditor({
       confirmLabel={confirmLabel}
       confirmDisabled={confirmDisabled}
       confirmValidation={confirmValidation}
+      liveValidation={liveValidation}
+      validationAction={validationAction}
+      previousLabel={previousLabel}
       topContent={topContent}
+      headerContent={headerContent}
       cancelVariant={cancelVariant}
       cancelLabel={cancelLabel}
       dismissOnBackdrop={dismissOnBackdrop}
@@ -118,7 +147,11 @@ function MoneyEditorPanel({
   confirmLabel,
   confirmDisabled,
   confirmValidation,
+  liveValidation,
+  validationAction,
+  previousLabel,
   topContent,
+  headerContent,
   cancelVariant,
   cancelLabel,
   dismissOnBackdrop,
@@ -134,7 +167,11 @@ function MoneyEditorPanel({
   confirmLabel: string;
   confirmDisabled: boolean | ((value: string) => boolean);
   confirmValidation?: (value: string) => string;
-  topContent?: React.ReactNode;
+  liveValidation?: (value: string) => string;
+  validationAction?: { label: string; onClick: () => void };
+  previousLabel: string;
+  topContent?: React.ReactNode | ((draft: string) => React.ReactNode);
+  headerContent?: React.ReactNode;
   cancelVariant: "icon" | "text";
   cancelLabel: string;
   dismissOnBackdrop: boolean;
@@ -144,9 +181,10 @@ function MoneyEditorPanel({
   const [draft, setDraft] = React.useState(value || "0");
   const [operator, setOperator] = React.useState<Operator | null>(null);
   const [leftValue, setLeftValue] = React.useState<number | null>(null);
-  const [freshEntry, setFreshEntry] = React.useState(false);
+  const [freshEntry, setFreshEntry] = React.useState(true);
   const [validationMessage, setValidationMessage] = React.useState("");
   const isConfirmDisabled = typeof confirmDisabled === "function" ? confirmDisabled(draft) : confirmDisabled;
+  const liveValidationMessage = liveValidation?.(draft) ?? "";
 
   const confirm = () => {
     const message = confirmValidation?.(draft) ?? "";
@@ -197,8 +235,13 @@ function MoneyEditorPanel({
 
   const deleteLastDigit = React.useCallback(() => {
     setValidationMessage("");
+    if (freshEntry) {
+      setFreshEntry(false);
+      setDraft("0");
+      return;
+    }
     setDraft((current) => (current.length > 1 ? current.slice(0, -1) : "0"));
-  }, []);
+  }, [freshEntry]);
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -257,12 +300,15 @@ function MoneyEditorPanel({
     >
       <div className={`w-full rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)] ${isClosing ? "drawer-exit" : "drawer-enter"}`}>
         <div className="mx-auto w-full max-w-[480px]">
-          <div className={`grid items-center ${cancelVariant === "text" ? "grid-cols-[72px_1fr_44px]" : confirmPlacement === "top" ? "grid-cols-[44px_1fr_64px]" : "grid-cols-[44px_1fr_44px]"}`}>
+          {headerContent ? <div className="mb-3">{headerContent}</div> : null}
+          <div
+            className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center"
+          >
             <button
               type="button"
               aria-label={cancelLabel}
               onClick={onCancel}
-              className={cancelVariant === "text" ? "flex h-11 items-center justify-start rounded-[10px] px-2 text-sm font-semibold text-expense hover:bg-expense-soft" : "flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"}
+              className={cancelVariant === "text" ? "justify-self-start flex h-11 items-center rounded-[10px] px-2 text-sm font-semibold text-expense hover:bg-expense-soft" : "justify-self-start flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-muted-foreground hover:bg-surface-subtle"}
             >
               {cancelVariant === "text" ? cancelLabel : <X aria-hidden="true" className="size-5" />}
             </button>
@@ -274,12 +320,14 @@ function MoneyEditorPanel({
                 {formatMoney(draft)}
                 <span className="ml-2 text-sm text-muted-foreground">{currency}</span>
               </p>
-              <p className="mt-0.5 truncate text-[11px] font-medium text-muted-foreground">
-                Original{" "}
-                <span className="font-semibold tabular-nums text-foreground">
-                  {formatMoney(value)} {currency}
-                </span>
-              </p>
+              {draft !== value || leftValue !== null ? (
+                <p className="mt-0.5 truncate text-[11px] font-medium text-muted-foreground">
+                  {previousLabel}{" "}
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {formatMoney(value)} {currency}
+                  </span>
+                </p>
+              ) : null}
               {leftValue !== null && operator ? (
                 <p className="text-[11px] font-semibold text-primary">
                   {formatMoney(String(leftValue))} {operator}
@@ -292,20 +340,29 @@ function MoneyEditorPanel({
                 aria-label="Set money amount"
                 disabled={isConfirmDisabled}
                 onClick={confirm}
-                className="flex h-10 items-center justify-center gap-1 rounded-[10px] border border-primary/20 bg-primary-soft px-3 text-sm font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-45"
+                className="justify-self-end flex h-11 items-center justify-center gap-1.5 rounded-[10px] border border-primary/20 bg-primary-soft px-3 text-sm font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-45"
               >
-                <Check aria-hidden="true" className="size-4" />
+                <Check aria-hidden="true" className="size-4 shrink-0" />
                 {confirmLabel}
               </button>
             ) : <span aria-hidden="true" />}
           </div>
 
-          {topContent ? <div className="mt-3">{topContent}</div> : null}
+          {topContent ? (
+            <div className="mt-3">
+              {typeof topContent === "function" ? topContent(draft) : topContent}
+            </div>
+          ) : null}
 
           {validationMessage ? (
-            <p role="alert" className="mt-3 rounded-[11px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-xs font-semibold leading-5 text-expense">
-              {validationMessage}
-            </p>
+            <div role="alert" className="mt-3 rounded-[11px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-xs font-semibold leading-5 text-expense">
+              <p>{validationMessage}</p>
+              {validationAction ? (
+                <button type="button" onClick={validationAction.onClick} className="mt-1 inline-flex rounded-[6px] bg-card/70 px-2 py-1 font-semibold text-primary underline decoration-primary/45 underline-offset-2 transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+                  {validationAction.label}
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           <div className="mt-3 grid grid-cols-[1fr_64px] gap-2">
@@ -361,11 +418,16 @@ function MoneyEditorPanel({
 
           {confirmPlacement === "bottom" ? (
             <div className="mt-4 border-t border-border pt-3">
+              {liveValidationMessage ? (
+                <div role="alert" className="mb-3 rounded-[11px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-xs font-semibold leading-5 text-expense">
+                  {liveValidationMessage}
+                </div>
+              ) : null}
               <button
                 type="button"
                 aria-label={confirmLabel}
                 disabled={isConfirmDisabled}
-                onClick={() => onSet(draft || "0")}
+                onClick={confirm}
                 className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-[0_8px_18px_rgb(53_107_104_/_0.15)] transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Check aria-hidden="true" className="size-4" />

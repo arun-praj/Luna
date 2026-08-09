@@ -23,14 +23,18 @@ import {
   Utensils,
   WalletCards,
   GraduationCap,
+  Gauge,
+  ChevronRight,
 } from "lucide-react";
 
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { sumMoney } from "@/lib/money";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
 import { transactionTypeMeta as transactionMeta } from "@/components/transactions/transaction-presentation";
+import type { Budget } from "@/lib/budgets";
 import {
   ListDataSkeleton,
   PageDataSkeleton,
@@ -131,6 +135,7 @@ export default function CategoryActivityPage({
   const [loadedPeriod, setLoadedPeriod] = useState<AppliedPeriod | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [monthlyBudget, setMonthlyBudget] = useState<Budget | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -162,9 +167,10 @@ export default function CategoryActivityPage({
       authenticatedFetch("/api/categories"),
       authenticatedFetch(`/api/transactions?${query.toString()}`),
       authenticatedFetch("/api/auth/me"),
+      authenticatedFetch("/api/budgets?period=monthly"),
     ])
       .then(
-        async ([categoryResponse, transactionResponse, profileResponse]) => {
+        async ([categoryResponse, transactionResponse, profileResponse, budgetResponse]) => {
           if (!categoryResponse.ok || !transactionResponse.ok)
             throw new Error(
               transactionResponse.status === 401
@@ -182,6 +188,7 @@ export default function CategoryActivityPage({
                 user?: { currency?: string };
               })
             : null;
+          const budgetResult = budgetResponse.ok ? await budgetResponse.json() as { budgets: Budget[] } : { budgets: [] };
           const selectedCategory = categoryResult.categories.find(
             (item) => item.id === categoryId,
           );
@@ -191,6 +198,7 @@ export default function CategoryActivityPage({
             setTransactions(transactionResult.transactions);
             setCurrency(profileResult?.user?.currency ?? "NPR");
             setLoadedPeriod(period);
+            setMonthlyBudget(budgetResult.budgets.find((budget) => budget.categoryId === categoryId) ?? null);
           }
         },
       )
@@ -216,7 +224,7 @@ export default function CategoryActivityPage({
   const categoryAccent = category?.color ?? "#e3eee9";
   const total = useMemo(
     () =>
-      transactions.reduce((sum, transaction) => sum + transaction.amount, 0),
+      transactions.reduce((sum, transaction) => sumMoney([sum, transaction.amount]), 0),
     [transactions],
   );
   const isLoadingActivity = loadedPeriod !== period;
@@ -241,7 +249,7 @@ export default function CategoryActivityPage({
           className="-mx-4 sm:-mx-5"
           style={{ backgroundColor: categoryAccent }}
         >
-          <StickyPageHeader className="!w-full bg-transparent px-4 pb-3 sm:px-5">
+          <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <Link
@@ -260,13 +268,20 @@ export default function CategoryActivityPage({
                   </p>
                 </div>
               </div>
-              <Link
-                href={withReturnTo(`/categories/${category.id}/edit`, currentRoute)}
-                aria-label="Edit category"
-                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-              >
-                <Edit3 aria-hidden="true" className="size-[18px]" />
-              </Link>
+              <div className="flex shrink-0 items-center gap-2">
+                <DatePicker
+                  initialMode="month"
+                  initialLabel={period.label}
+                  onApply={setPeriod}
+                />
+                <Link
+                  href={withReturnTo(`/categories/${category.id}/edit`, currentRoute)}
+                  aria-label="Edit category"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  <Edit3 aria-hidden="true" className="size-[18px]" />
+                </Link>
+              </div>
             </div>
           </StickyPageHeader>
           <section
@@ -290,6 +305,18 @@ export default function CategoryActivityPage({
             </p>
           </section>
         </div>
+        {category.type === "expense" ? (
+          <section aria-labelledby="category-budget-heading" className="mt-6">
+            <Link href={`/budgets?period=monthly&${monthlyBudget ? `budget=${monthlyBudget.id}` : `category=${category.id}`}&returnTo=${encodeURIComponent(currentRoute)}`} className="flex items-center gap-3 rounded-[16px] border border-border bg-card p-4 shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-[12px] bg-primary-soft text-primary"><Gauge aria-hidden="true" className="size-5" /></span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Monthly budget</p><h2 id="category-budget-heading" className="mt-1 text-sm font-semibold">{monthlyBudget ? `${monthlyBudget.percentage}% used` : "Set budget"}</h2></div>{monthlyBudget ? <p className={`shrink-0 text-sm font-semibold tabular-nums ${monthlyBudget.percentage >= 100 ? "text-expense" : monthlyBudget.percentage >= 80 ? "text-warning-foreground" : "text-primary"}`}>{currency} {formatAmount(monthlyBudget.remaining < 0 ? Math.abs(monthlyBudget.remaining) : monthlyBudget.remaining)}<span className="block text-right text-[10px] font-medium text-muted-foreground">{monthlyBudget.remaining < 0 ? "over" : "remaining"}</span></p> : null}</div>
+                {monthlyBudget ? <><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle"><div className={`h-full rounded-full ${monthlyBudget.percentage >= 100 ? "bg-expense" : monthlyBudget.percentage >= 80 ? "bg-warning" : "bg-primary"}`} style={{ width: `${Math.min(100, monthlyBudget.percentage)}%` }} /></div><p className="mt-2 text-[11px] font-semibold text-primary">Edit budget</p></> : <p className="mt-1 text-xs text-muted-foreground">Keep this category within a comfortable limit.</p>}
+              </div>
+              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-foreground-subtle" />
+            </Link>
+          </section>
+        ) : null}
         <section
           aria-labelledby="category-transactions-heading"
           className="mt-8"
@@ -306,11 +333,6 @@ export default function CategoryActivityPage({
                 Transactions
               </h2>
             </div>
-            <DatePicker
-              initialMode="month"
-              initialLabel={period.label}
-              onApply={setPeriod}
-            />
           </div>
           {error ? (
             <div

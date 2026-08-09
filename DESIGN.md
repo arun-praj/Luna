@@ -183,6 +183,7 @@ Mobile is the primary design target. Larger layouts should enhance the same info
 - Preview cards must protect long names and large amounts with `min-width: 0`, truncation, and responsive type sizing.
 - Mobile date and time pickers use a bottom drawer rather than a full-screen page. The drawer respects top and bottom safe areas, has rounded top corners, a dimmed backdrop, a visible drag handle, and a sticky header with explicit close and Done actions.
 - Goal target dates use the same bottom-drawer calendar pattern. The current date is highlighted by default, selecting a date updates the form without dismissing the drawer, and the user confirms with Done; native browser date popovers are not used.
+- Mobile choice fields use the same bottom-drawer picker pattern as calendars. Do not use native `<select>` controls in creation or editing forms when a choice can be presented as a branded, thumb-friendly list with an explicit close or Done action.
 
 ## 7. Shape, Border, and Elevation
 
@@ -313,6 +314,13 @@ scroll horizontally rather than stacking every account into a tall list.
 - Preserve keyboard and assistive technology state with `aria-pressed` on each
   option. Do not replace this pattern with a native select or a vertical stack
   unless there are too few choices for scrolling to be meaningful.
+
+### In-app choice controls
+
+- User-facing choices such as accounts, categories, types, frequencies, and currencies use the app's styled button or bottom-drawer picker pattern.
+- Never use an unstyled native browser `<select>` for a product choice; it is visually inconsistent and difficult to use reliably on mobile.
+- The trigger keeps the selected value visible, shows the relevant supporting detail such as currency, and exposes its expanded state with `aria-expanded`.
+- Picker drawers use a dimmed backdrop, drag handle, clear title, explicit close action, tappable option rows, and an accessible selected state.
 
 ### Cards
 
@@ -448,6 +456,13 @@ Avoid placing more than one chart above the fold.
 - The recurring reminder time is displayed and stored in the user’s local time. Frequency changes save independently and remain available offline.
 - Destructive actions appear at the end, separated from routine settings.
 - Currency, locale, and start-of-week settings explain their downstream effect.
+
+### Product voice and copy
+
+- Use concise, factual labels and descriptions that explain the current state or available action.
+- Avoid aspirational, motivational, anthropomorphic, or AI-sounding sentences such as “Keep the important things moving.”
+- Do not add marketing-style copy to operational screens; prefer direct language such as “Recurring transactions,” “Upcoming,” and “Review before posting.”
+- Operational overview content should sit on the page background with the screen header and navigation; avoid nested colored dashboard cards when a seamless section will work.
 
 ## 12. Motion
 

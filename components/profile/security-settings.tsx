@@ -116,14 +116,14 @@ export function SecuritySettingsCard({ userId }: { userId: string }) {
   }
 
   return (
-    <section aria-labelledby="security-heading" className="mt-6 overflow-hidden rounded-[14px] border border-border bg-card">
-      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((value) => !value)} className="flex min-h-[72px] w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35">
+    <section aria-labelledby="security-heading" className={`mt-3 overflow-hidden rounded-[14px] border bg-card transition-colors ${isOpen ? "border-primary/30" : "border-border"}`}>
+      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((value) => !value)} className={`flex min-h-[76px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${isOpen ? "bg-primary-soft/70" : "hover:bg-surface-subtle"}`}>
         <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary"><ShieldCheck aria-hidden="true" className="size-[18px]" /></span>
-        <span className="min-w-0 flex-1"><span id="security-heading" className="block text-[15px] font-semibold">Security</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">Password and authenticator protection</span></span>
-        <ChevronDown aria-hidden="true" className={`size-5 shrink-0 text-foreground-subtle transition-transform ${isOpen ? "rotate-180" : ""}`} />
+        <span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">Account protection</span><span id="security-heading" className="mt-0.5 block text-[15px] font-semibold">Security</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">Password, biometrics and authenticator.</span></span>
+        <ChevronDown aria-hidden="true" className={`size-5 shrink-0 text-foreground-subtle transition-transform ${isOpen ? "rotate-180 text-primary" : ""}`} />
       </button>
       {isOpen ? (
-        <div className="border-t border-border px-4 py-5">
+        <div className="border-t-2 border-primary/15 bg-surface-subtle/55 px-3 py-4 sm:px-4">
           <div className="rounded-[12px] border border-border bg-background p-4">
             <div className="flex items-start gap-3">
               <span className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-[10px] ${isBiometricEnabled ? "bg-primary-soft text-primary" : "bg-surface-subtle text-primary"}`}>

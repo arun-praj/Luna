@@ -5,8 +5,8 @@ import { format, isSameDay, isSameMonth, sub } from "date-fns";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
-  History,
   Minus,
   Plus,
   X,
@@ -32,10 +32,24 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
+const MONTH_OPTIONS = Array.from({ length: 18 }, (_, index) => ({
+  month: index % 12,
+  year: CURRENT_DATE.getFullYear() + Math.floor(index / 12),
+}));
 const UNITS = ["days", "weeks", "months", "years"] as const;
 
 type PeriodUnit = (typeof UNITS)[number];
+type MonthOption = (typeof MONTH_OPTIONS)[number];
 export type FilterMode = "day" | "month" | "custom" | "last" | "all";
+
+type QuickPeriod = {
+  label: string;
+  mode: FilterMode;
+  from?: Date;
+  to?: Date;
+  amount?: number;
+  unit?: PeriodUnit;
+};
 
 export type AppliedPeriod = {
   mode: FilterMode;
@@ -56,9 +70,18 @@ function formatRange(range: DateRange) {
 }
 
 function formatLastPeriod(amount: number, unit: PeriodUnit) {
+  if (amount === 1 && unit === "months") return "Last month";
   const singularUnit = unit.slice(0, -1);
   return `Last ${amount} ${amount === 1 ? singularUnit : unit}`;
 }
+
+const QUICK_PERIODS: QuickPeriod[] = [
+  { label: "Last month", mode: "last", amount: 1, unit: "months" },
+  { label: "Last 3 months", mode: "last", amount: 3, unit: "months" },
+  { label: "This year", mode: "custom", from: new Date(CURRENT_DATE.getFullYear(), 0, 1), to: CURRENT_DATE },
+  { label: "Last year", mode: "custom", from: new Date(CURRENT_DATE.getFullYear() - 1, 0, 1), to: new Date(CURRENT_DATE.getFullYear() - 1, 11, 31) },
+  { label: "All time", mode: "all" },
+];
 
 function CompactDivider() {
   return <div aria-hidden="true" className="h-px bg-border" />;
@@ -95,9 +118,10 @@ export function DatePicker({
   const [committedMode, setCommittedMode] =
     React.useState<FilterMode>(initialMode);
   const [draftMode, setDraftMode] = React.useState<FilterMode>("day");
-  const [selectedMonth, setSelectedMonth] = React.useState(
-    CURRENT_DATE.getMonth(),
-  );
+  const [selectedMonth, setSelectedMonth] = React.useState<MonthOption>({
+    month: CURRENT_DATE.getMonth(),
+    year: CURRENT_DATE.getFullYear(),
+  });
   const [customRange, setCustomRange] = React.useState<DateRange>({
     from: undefined,
     to: undefined,
@@ -107,6 +131,7 @@ export function DatePicker({
   const monthScrollerRef = React.useRef<HTMLDivElement>(null);
   const [amount, setAmount] = React.useState(4);
   const [unit, setUnit] = React.useState<PeriodUnit>("weeks");
+  const [quickPeriodLabel, setQuickPeriodLabel] = React.useState<string | null>(null);
   const TriggerIcon = triggerIcon ?? CalendarDays;
 
   const setOpenState = (nextOpen: boolean) => {
@@ -163,36 +188,48 @@ export function DatePicker({
     };
   }, [open]);
 
-  const chooseCustomRange = (range: DateRange | undefined) => {
-    if (!range) return;
-    setCustomRange(range);
-    setDraftMode("custom");
-    if (range.from) setCalendarMonth(range.from);
-  };
-
   const canApply =
     draftMode !== "day" &&
     (draftMode !== "custom" || Boolean(customRange.from && customRange.to));
 
-  const applyFilter = () => {
-    if (!canApply) return;
+  const applyFilter = (overrides: {
+    mode?: FilterMode;
+    selectedMonth?: MonthOption;
+    customRange?: DateRange;
+    amount?: number;
+    unit?: PeriodUnit;
+    quickPeriodLabel?: string | null;
+  } = {}) => {
+    const nextMode = overrides.mode ?? draftMode;
+    const nextSelectedMonth = overrides.selectedMonth ?? selectedMonth;
+    const nextCustomRange = overrides.customRange ?? customRange;
+    const nextAmount = overrides.amount ?? amount;
+    const nextUnit = overrides.unit ?? unit;
+    const nextQuickPeriodLabel = Object.hasOwn(overrides, "quickPeriodLabel")
+      ? overrides.quickPeriodLabel
+      : quickPeriodLabel;
+    const nextCanApply =
+      nextMode !== "day" &&
+      (nextMode !== "custom" || Boolean(nextCustomRange.from && nextCustomRange.to));
+
+    if (!nextCanApply) return;
 
     let nextLabel = periodLabel;
     let from: Date | undefined;
     let to: Date | undefined;
-    if (draftMode === "month") {
-      nextLabel = `${MONTHS[selectedMonth]} ${CURRENT_DATE.getFullYear()}`;
-      from = new Date(CURRENT_DATE.getFullYear(), selectedMonth, 1);
-      to = new Date(CURRENT_DATE.getFullYear(), selectedMonth + 1, 0);
-    } else if (draftMode === "custom" && customRange.from && customRange.to) {
-      nextLabel = formatRange(customRange);
-      from = customRange.from;
-      to = customRange.to;
-    } else if (draftMode === "last") {
-      nextLabel = formatLastPeriod(amount, unit);
-      from = sub(CURRENT_DATE, { [unit]: amount });
+    if (nextMode === "month") {
+      nextLabel = `${MONTHS[nextSelectedMonth.month]} ${nextSelectedMonth.year}`;
+      from = new Date(nextSelectedMonth.year, nextSelectedMonth.month, 1);
+      to = new Date(nextSelectedMonth.year, nextSelectedMonth.month + 1, 0);
+    } else if (nextMode === "custom" && nextCustomRange.from && nextCustomRange.to) {
+      nextLabel = nextQuickPeriodLabel ?? formatRange(nextCustomRange);
+      from = nextCustomRange.from;
+      to = nextCustomRange.to;
+    } else if (nextMode === "last") {
+      nextLabel = formatLastPeriod(nextAmount, nextUnit);
+      from = sub(CURRENT_DATE, { [nextUnit]: nextAmount });
       to = CURRENT_DATE;
-    } else if (draftMode === "all") {
+    } else if (nextMode === "all") {
       nextLabel = "All time";
     } else {
       from = CURRENT_DATE;
@@ -200,9 +237,41 @@ export function DatePicker({
     }
 
     setPeriodLabel(nextLabel);
-    setCommittedMode(draftMode);
-    onApply?.({ mode: draftMode, label: nextLabel, from, to });
+    setCommittedMode(nextMode);
+    onApply?.({ mode: nextMode, label: nextLabel, from, to });
+    setCalendarOpen(false);
     setOpen(false);
+  };
+
+  const chooseCustomRange = (range: DateRange | undefined) => {
+    if (!range) return;
+    setCustomRange(range);
+    setQuickPeriodLabel(null);
+    setDraftMode("custom");
+    if (range.from) setCalendarMonth(range.from);
+    if (!hideApplyButton && range.from && range.to) {
+      applyFilter({ mode: "custom", customRange: range, quickPeriodLabel: null });
+    }
+  };
+
+  const chooseQuickPeriod = (period: QuickPeriod) => {
+    setDraftMode(period.mode);
+    setQuickPeriodLabel(period.label);
+    const nextCustomRange = { from: period.from, to: period.to };
+    if (period.from || period.to) setCustomRange(nextCustomRange);
+    if (period.amount && period.unit) {
+      setAmount(period.amount);
+      setUnit(period.unit);
+    }
+    if (!hideApplyButton) {
+      applyFilter({
+        mode: period.mode,
+        customRange: nextCustomRange,
+        amount: period.amount,
+        unit: period.unit,
+        quickPeriodLabel: period.label,
+      });
+    }
   };
 
   return (
@@ -256,7 +325,7 @@ export function DatePicker({
                   type="button"
                   aria-label="Apply period filter"
                   disabled={!canApply}
-                  onClick={applyFilter}
+                  onClick={() => applyFilter()}
                   className="flex size-11 items-center justify-center justify-self-end rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"
                 >
                   <Check aria-hidden="true" className="size-5" />
@@ -271,35 +340,48 @@ export function DatePicker({
                     Choose a month
                   </h2>
                   <span className="text-[11px] font-semibold tabular-nums text-muted-foreground">
-                    {CURRENT_DATE.getFullYear()}
+                    {CURRENT_DATE.getFullYear()}–{CURRENT_DATE.getFullYear() + 1}
                   </span>
                 </div>
                 <div ref={monthScrollerRef} className="-mx-4 mt-2 flex snap-x gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-5 sm:px-5">
-                  {MONTHS.map((month, index) => {
-                    const selected = selectedMonth === index;
-                    const current = index === CURRENT_DATE.getMonth();
+                  {MONTH_OPTIONS.map(({ month: monthIndex, year }) => {
+                    const month = MONTHS[monthIndex];
+                    const selected = selectedMonth.month === monthIndex && selectedMonth.year === year;
+                    const current = monthIndex === CURRENT_DATE.getMonth() && year === CURRENT_DATE.getFullYear();
 
                     return (
                       <button
                         type="button"
                         aria-pressed={selected}
-                        aria-label={`${month}${current ? " (current month)" : ""}${selected ? " (selected)" : ""}`}
-                        className={`relative flex min-h-10 min-w-[64px] snap-start items-center justify-center gap-1.5 rounded-[9px] border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${current ? "ring-1 ring-income/45 ring-offset-1 ring-offset-background" : ""} ${
+                        aria-label={`${month} ${year}${current ? " (current month)" : ""}${selected ? " (selected)" : ""}`}
+                        className={`relative flex min-h-14 min-w-[72px] snap-start flex-col items-center justify-center rounded-[9px] border px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
                           selected
                             ? "border-primary bg-primary-soft text-primary"
                             : current
-                              ? "border-income/45 bg-income-soft/60 text-income"
+                              ? "border-border bg-card text-primary"
                             : "border-border bg-card text-muted-foreground hover:bg-surface-subtle hover:text-foreground"
                         }`}
-                        key={month}
+                        key={`${year}-${monthIndex}`}
                         data-current-month={current ? "true" : undefined}
                         onClick={() => {
-                          setSelectedMonth(index);
+                          const nextSelectedMonth = { month: monthIndex, year };
+                          setSelectedMonth(nextSelectedMonth);
+                          setQuickPeriodLabel(null);
                           setDraftMode("month");
+                          if (!hideApplyButton) {
+                            applyFilter({
+                              mode: "month",
+                              selectedMonth: nextSelectedMonth,
+                              quickPeriodLabel: null,
+                            });
+                          }
                         }}
                       >
-                        {month}
-                        {current ? <span aria-hidden="true" className="size-1.5 rounded-full bg-income" /> : null}
+                        <span className="inline-flex items-center gap-1 text-sm font-semibold">
+                          {month}
+                          {current ? <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" /> : null}
+                        </span>
+                        <span className="text-[10px] font-medium tabular-nums text-muted-foreground">{year}</span>
                       </button>
                     );
                   })}
@@ -321,6 +403,7 @@ export function DatePicker({
                       : "border-border bg-card hover:bg-surface-subtle"
                   }`}
                   onClick={() => {
+                    setQuickPeriodLabel(null);
                     setDraftMode("custom");
                     setCalendarMonth(customRange.from ?? CURRENT_DATE);
                     setCalendarOpen(true);
@@ -362,13 +445,14 @@ export function DatePicker({
                 <h2 id="last-heading" className="text-sm font-semibold">
                   Last number of
                 </h2>
-                <div className="mt-2 grid grid-cols-[40px_1fr_40px_108px] items-center gap-2">
+                <div className="mt-2 grid grid-cols-[40px_1fr_40px_116px] items-center gap-2">
                   <button
                     type="button"
                     aria-label="Decrease period amount"
                     disabled={amount <= 1}
                     onClick={() => {
                       setAmount((current) => Math.max(1, current - 1));
+                      setQuickPeriodLabel(null);
                       setDraftMode("last");
                     }}
                     className="flex size-10 items-center justify-center rounded-[9px] bg-surface-subtle text-foreground hover:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:opacity-40"
@@ -387,51 +471,52 @@ export function DatePicker({
                     disabled={amount >= 99}
                     onClick={() => {
                       setAmount((current) => Math.min(99, current + 1));
+                      setQuickPeriodLabel(null);
                       setDraftMode("last");
                     }}
                     className="flex size-10 items-center justify-center rounded-[9px] bg-surface-subtle text-foreground hover:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:opacity-40"
                   >
                     <Plus aria-hidden="true" className="size-4" />
                   </button>
-                  <select
-                    aria-label="Period unit"
-                    value={unit}
-                    onChange={(event) => {
-                      setUnit(event.target.value as PeriodUnit);
-                      setDraftMode("last");
-                    }}
-                    className="h-10 min-w-0 rounded-[9px] border border-border bg-background px-2 text-sm font-semibold outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  >
-                    {UNITS.map((option) => (
-                      <option key={option} value={option}>
-                        {option[0].toUpperCase() + option.slice(1)}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative min-w-0">
+                    <select
+                      aria-label="Period unit"
+                      value={unit}
+                      onChange={(event) => {
+                        setUnit(event.target.value as PeriodUnit);
+                        setQuickPeriodLabel(null);
+                        setDraftMode("last");
+                      }}
+                      className="h-10 w-full appearance-none rounded-[10px] border border-border bg-card px-3 pr-8 text-sm font-semibold text-foreground shadow-[0_1px_2px_rgb(23_32_29_/_0.03)] outline-none transition-colors hover:bg-surface-subtle focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    >
+                      {UNITS.map((option) => (
+                        <option key={option} value={option}>
+                          {option[0].toUpperCase() + option.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  </div>
                 </div>
               </section>
 
               <CompactDivider />
 
-              <section aria-labelledby="all-heading">
-                <button
-                  type="button"
-                  aria-pressed={draftMode === "all"}
-                  onClick={() => setDraftMode("all")}
-                  className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] border px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
-                    draftMode === "all"
-                      ? "border-primary bg-primary-soft text-primary"
-                      : "border-border bg-card text-foreground hover:bg-surface-subtle"
-                  }`}
-                >
-                  <span className="flex size-8 items-center justify-center rounded-[8px] bg-surface-subtle text-primary">
-                    <History aria-hidden="true" className="size-4" />
-                  </span>
-                  <span className="flex-1 text-sm font-semibold">All time</span>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    All data
-                  </span>
-                </button>
+              <section aria-labelledby="quick-periods-heading">
+                <h2 id="quick-periods-heading" className="text-sm font-semibold">Quick ranges</h2>
+                <div className="-mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-5 sm:px-5">
+                  {QUICK_PERIODS.map((period) => (
+                    <button
+                      key={period.label}
+                      type="button"
+                      aria-pressed={(quickPeriodLabel ?? periodLabel) === period.label && draftMode === period.mode}
+                      onClick={() => chooseQuickPeriod(period)}
+                      className={`min-h-10 shrink-0 rounded-full border px-3.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${(quickPeriodLabel ?? periodLabel) === period.label && draftMode === period.mode ? "border-primary bg-primary-soft text-primary" : "border-border bg-card text-foreground hover:bg-surface-subtle"}`}
+                    >
+                      {period.label}
+                    </button>
+                  ))}
+                </div>
               </section>
             </div>
 

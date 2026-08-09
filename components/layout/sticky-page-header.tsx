@@ -20,10 +20,10 @@ export function StickyPageHeader({
   return (
     <header
       className={cn(
-        "sticky top-0 z-20 w-[calc(100%+2rem)] self-start border-b bg-background/95 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur transition-[border-color,box-shadow] sm:w-[calc(100%+2.5rem)] sm:pt-8",
+        "sticky top-0 z-20 w-[calc(100%+2rem)] self-start border-b bg-background/72 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl backdrop-saturate-150 transition-[background-color,border-color,box-shadow] supports-[backdrop-filter]:bg-background/68 sm:w-[calc(100%+2.5rem)] sm:pt-8",
         scrolled
-          ? "border-border/80 shadow-[0_1px_0_rgb(23_32_29_/_0.02)]"
-          : "border-transparent",
+          ? "border-border/70 bg-background/82 shadow-[0_8px_24px_rgb(23_32_29_/_0.06)] supports-[backdrop-filter]:bg-background/76"
+          : "border-border/35 shadow-[0_1px_0_rgb(255_255_255_/_0.35)]",
         className,
       )}
     >

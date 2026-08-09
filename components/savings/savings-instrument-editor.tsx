@@ -16,6 +16,7 @@ import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
 import { getSavingsIconSource, savingsColorOptions, savingsImageOptions } from "@/lib/savings-appearance";
 import { Calendar } from "@/components/ui/calendar";
+import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
 
 type InstrumentType = { id: string; name: string; isDefault: boolean };
 export type SavingsInstrumentEditorData = {
@@ -73,8 +74,18 @@ export function SavingsInstrumentEditor({ instrumentId }: { instrumentId?: strin
   }, []);
   const [balanceEditorOpen, setBalanceEditorOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
+  const [initialDraft, setInitialDraft] = useState<string | null>(null);
   const typeTransition = useAnimatedVisibility(isTypeOpen);
   const dateTransition = useAnimatedVisibility(dateOpen);
+
+  const draftSnapshot = JSON.stringify({ currency, name, description, typeId, balance, interestRate, maturityDate, selectedIcon, customImage, selectedColor, customColor });
+  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(initialDraft !== null && draftSnapshot !== initialDraft);
+
+  useEffect(() => {
+    if (isLoading || initialDraft !== null) return;
+    const frame = window.requestAnimationFrame(() => setInitialDraft(draftSnapshot));
+    return () => window.cancelAnimationFrame(frame);
+  }, [draftSnapshot, isLoading, initialDraft]);
 
   useEffect(() => {
     let active = true;
@@ -175,7 +186,7 @@ export function SavingsInstrumentEditor({ instrumentId }: { instrumentId?: strin
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <Link href={backHref} aria-label={isNew ? "Cancel new savings instrument" : "Cancel editing savings instrument"} className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground"><X aria-hidden="true" className="size-5" /></Link>
+          <Link href={backHref} aria-label={isNew ? "Cancel new savings instrument" : "Cancel editing savings instrument"} onClick={(event) => { event.preventDefault(); requestDiscard(() => navigateWithRouteExit(() => router.push(backHref))); }} className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground"><X aria-hidden="true" className="size-5" /></Link>
           <div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">Saving Instruments</p><h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">{isNew ? "New instrument" : "Edit instrument"}</h1></div>
           <button type="button" aria-label={isNew ? "Add savings instrument" : "Save savings instrument changes"} onClick={() => void saveInstrument()} disabled={!canSave || isSaving || isLoading || imageStatus === "uploading"} className="flex size-11 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary disabled:pointer-events-none disabled:border-border disabled:bg-surface-subtle disabled:text-foreground-subtle"><Check aria-hidden="true" className="size-5" /></button>
         </StickyPageHeader>
@@ -197,7 +208,7 @@ export function SavingsInstrumentEditor({ instrumentId }: { instrumentId?: strin
           {!isNew ? <section className="mt-8 border-t border-border pt-6"><button type="button" onClick={() => void deleteInstrument()} disabled={isDeleting} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[11px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense disabled:opacity-60"><Trash2 className="size-[18px]" />{isDeleting ? "Deleting…" : "Delete instrument"}</button><p className="mt-2 text-center text-xs text-muted-foreground">Existing contribution history will remain available.</p></section> : null}
         </>}
       </div>
-      <MoneyEditor open={balanceEditorOpen} value={balance} title="Edit current balance" onCancel={() => setBalanceEditorOpen(false)} onSet={(nextBalance) => { setBalance(nextBalance); setBalanceEditorOpen(false); }} />
+      <MoneyEditor open={balanceEditorOpen} value={balance} title="Edit current balance" previousLabel="Previous balance" onCancel={() => setBalanceEditorOpen(false)} onSet={(nextBalance) => { setBalance(nextBalance); setBalanceEditorOpen(false); }} />
       {typeTransition.mounted ? (
         <div role="dialog" aria-modal="true" aria-labelledby="savings-type-title" className={`fixed inset-0 z-[70] flex items-end bg-foreground/25 ${typeTransition.closing ? "drawer-scrim-exit" : "drawer-scrim-enter"}`}>
           <div className={`${typeTransition.closing ? "drawer-exit" : "drawer-enter"} flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)]`}>
@@ -223,6 +234,7 @@ export function SavingsInstrumentEditor({ instrumentId }: { instrumentId?: strin
           </div>
         </div>
       ) : null}
+      {discardDialog}
       {dateTransition.mounted ? (
         <div role="dialog" aria-modal="true" aria-labelledby="savings-maturity-title" className={`fixed inset-0 z-[70] flex items-end bg-foreground/25 ${dateTransition.closing ? "drawer-scrim-exit" : "drawer-scrim-enter"}`}>
           <div className={`${dateTransition.closing ? "drawer-exit" : "drawer-enter"} flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)]`}>

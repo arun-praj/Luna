@@ -22,6 +22,34 @@
   }
 }
 
+@keyframes luna-loader-hop {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  45% {
+    transform: translate3d(0, -8px, 0) rotate(-1deg);
+  }
+
+  65% {
+    transform: translate3d(0, -4px, 0) rotate(1deg);
+  }
+}
+
+@keyframes luna-loader-shadow {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scaleX(1);
+  }
+
+  45% {
+    opacity: 0.2;
+    transform: scaleX(0.72);
+  }
+}
+
 @keyframes onboarding-page-enter {
   0% {
     opacity: 0;
@@ -179,6 +207,18 @@
   }
 }
 
+@keyframes transaction-picker-morph {
+  0% {
+    opacity: 0.98;
+    transform: translate3d(0, 10px, 0) scale(0.995);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 @keyframes route-data-reveal {
   0% {
     opacity: 0;
@@ -243,6 +283,24 @@ body:has([aria-modal="true"]) {
   pointer-events: none;
 }
 
+/* Bottom drawers share one dismiss affordance: swipe the top handle down, or
+   use the red close action at the left edge of the header. */
+[class*="rounded-t-"] > div:first-child:is([aria-hidden="true"], [class*="rounded-full"]) {
+  cursor: grab;
+  touch-action: none;
+}
+
+[class*="rounded-t-"] > header > button[aria-label^="Close" i] {
+  order: -1;
+  border-color: color-mix(in srgb, var(--expense) 24%, transparent) !important;
+  background: var(--expense-soft) !important;
+  color: var(--expense) !important;
+}
+
+.transaction-picker-morph {
+  animation: transaction-picker-morph 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .profile-scrim-enter {
   animation: profile-scrim-enter 260ms ease-out both;
 }
@@ -281,6 +339,14 @@ body:has([aria-modal="true"]) {
   animation: onboarding-float-slow 5.5s ease-in-out infinite;
 }
 
+.luna-loader-pet {
+  animation: luna-loader-hop 1.45s ease-in-out infinite;
+}
+
+.luna-loader-shadow {
+  animation: luna-loader-shadow 1.45s ease-in-out infinite;
+}
+
 .tutorial-panel-enter {
   animation: tutorial-panel-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -294,6 +360,8 @@ body:has([aria-modal="true"]) {
   .onboarding-step-enter,
   .onboarding-float,
   .onboarding-float-slow,
+  .luna-loader-pet,
+  .luna-loader-shadow,
   .tutorial-panel-enter,
   .tutorial-spotlight-pulse,
   .profile-route-enter,
@@ -304,6 +372,7 @@ body:has([aria-modal="true"]) {
   .drawer-scrim-exit,
   .drawer-enter,
   .drawer-exit,
+  .transaction-picker-morph,
   .profile-scrim-enter,
   .profile-scrim-exit,
   .profile-picker-enter,

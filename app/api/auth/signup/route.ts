@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (existing) return errorResponse("Unable to create account with those details", 409);
 
   const timestamp = new Date().toISOString();
-  const user = { id: randomUUID(), name: "", email: parsed.data.email, phone: parsed.data.phone ?? null, passwordHash: await hashPassword(parsed.data.password), currency: parsed.data.currency, monthlyReportEnabled: false, onboardingCompleted: false, tutorialStartedAt: null, tutorialCompletedAt: null, otpEnabled: false, twoFactorEnabled: false, twoFactorSecretEncrypted: null, twoFactorSetupSecretEncrypted: null, twoFactorBackupCodes: null, twoFactorVerifiedAt: null, emailVerifiedAt: null, phoneVerifiedAt: null, pwaInstallDismissedAt: null, lastLoginAt: null, avatarPreset: "sunrise", createdAt: timestamp, updatedAt: timestamp };
+  const user = { id: randomUUID(), name: "", email: parsed.data.email, phone: parsed.data.phone ?? null, passwordHash: await hashPassword(parsed.data.password), currency: parsed.data.currency, hideTotalBalance: false, monthlyReportEnabled: false, onboardingCompleted: false, tutorialStartedAt: null, tutorialCompletedAt: null, otpEnabled: false, twoFactorEnabled: false, twoFactorSecretEncrypted: null, twoFactorSetupSecretEncrypted: null, twoFactorBackupCodes: null, twoFactorVerifiedAt: null, emailVerifiedAt: null, phoneVerifiedAt: null, pwaInstallDismissedAt: null, lastLoginAt: null, avatarPreset: "sunrise", createdAt: timestamp, updatedAt: timestamp };
   await db.insert(users).values(user);
 
   const session = await createSession(user.id);

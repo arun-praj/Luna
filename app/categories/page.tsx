@@ -26,6 +26,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { GuideIcon } from "@/components/guides/feature-guide";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { Skeleton } from "@/components/ui/data-skeleton";
@@ -177,6 +178,7 @@ export default function CategoriesPage() {
                 Categories
               </h1>
             </div>
+            <GuideIcon href={withReturnTo("/categories/guide", currentRoute)} label="Categories" />
           </div>
           <Link
             href={withReturnTo("/categories/new", currentRoute)}

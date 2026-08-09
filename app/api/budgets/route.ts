@@ -1,11 +1,36 @@
-import { randomUUID } from "node:crypto";
-import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
+
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
-import { db } from "@/backend/db/client";
-import { categories, spendingBudgets } from "@/backend/db/schema";
+import { BudgetConflictError, createBudget, listBudgets } from "@/backend/domain/budget-service";
 import { budgetInput } from "@/backend/domain/validation";
+import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
+import type { BudgetPeriod } from "@/lib/budgets";
 
 export const runtime = "nodejs";
-export async function GET(request: Request) { const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401); return NextResponse.json({ budgets: await db.select().from(spendingBudgets).where(eq(spendingBudgets.userId, userId)).orderBy(asc(spendingBudgets.period), asc(spendingBudgets.name)) }); }
-export async function POST(request: Request) { const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401); const parsed = budgetInput.safeParse(await request.json().catch(() => null)); if (!parsed.success) return errorResponse("Invalid budget", 400); if (parsed.data.categoryId) { const [category] = await db.select().from(categories).where(and(eq(categories.id, parsed.data.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1); if (!category) return errorResponse("Category not found", 400); } const id = randomUUID(); await db.insert(spendingBudgets).values({ id, userId, categoryId: parsed.data.categoryId ?? null, name: parsed.data.name, limitAmount: parsed.data.limitAmount, period: parsed.data.period }); const [budget] = await db.select().from(spendingBudgets).where(eq(spendingBudgets.id, id)).limit(1); return NextResponse.json({ budget }, { status: 201 }); }
+const periods = new Set<BudgetPeriod>(["weekly", "monthly", "yearly"]);
+
+export async function GET(request: Request) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  const requested = new URL(request.url).searchParams.get("period") as BudgetPeriod | null;
+  const period = requested && periods.has(requested) ? requested : "monthly";
+  return NextResponse.json({ budgets: await listBudgets(userId, period), period });
+}
+
+export async function POST(request: Request) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  const parsed = budgetInput.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return errorResponse("Invalid budget", 400);
+  try {
+    const created = await createBudget(userId, parsed.data);
+    scheduleHomeAlertRepair(userId);
+    const budgets = await listBudgets(userId, created.period);
+    return NextResponse.json({ budget: budgets.find((budget) => budget.id === created.id) }, { status: 201 });
+  } catch (error) {
+    if (error instanceof BudgetConflictError) {
+      return NextResponse.json({ error: error.message, existingBudgetId: error.budgetId }, { status: 409 });
+    }
+    return errorResponse(error instanceof Error ? error.message : "Unable to create budget", 400);
+  }
+}

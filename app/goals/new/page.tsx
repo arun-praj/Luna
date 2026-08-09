@@ -13,6 +13,7 @@ import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-a
 import { authenticatedFetch } from "@/lib/auth-client";
 import { getReturnTo } from "@/lib/navigation";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
+import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
 
 type Account = { id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; isDefault?: boolean };
 
@@ -26,13 +27,24 @@ export default function NewGoalPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
+  const [monthlyContribution, setMonthlyContribution] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const [dateOpen, setDateOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [accountId, setAccountId] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [initialDraft, setInitialDraft] = useState<string | null>(null);
   const dateTransition = useAnimatedVisibility(dateOpen);
+
+  const draftSnapshot = JSON.stringify({ name, targetAmount, monthlyContribution, targetDate, accountId });
+  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(initialDraft !== null && draftSnapshot !== initialDraft);
+
+  useEffect(() => {
+    if (!accounts.length || initialDraft !== null) return;
+    const frame = window.requestAnimationFrame(() => setInitialDraft(draftSnapshot));
+    return () => window.cancelAnimationFrame(frame);
+  }, [accounts.length, draftSnapshot, initialDraft]);
 
   useEffect(() => {
     void authenticatedFetch("/api/accounts").then(async (response) => {
@@ -47,7 +59,8 @@ export default function NewGoalPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number(targetAmount);
-    if (!name.trim() || !Number.isFinite(amount) || amount <= 0 || !accountId) {
+    const monthlyAmount = Number(monthlyContribution || 0);
+    if (!name.trim() || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(monthlyAmount) || monthlyAmount < 0 || !accountId) {
       setError("Add a name, target amount, and goal account.");
       return;
     }
@@ -56,7 +69,7 @@ export default function NewGoalPage() {
     const response = await authenticatedFetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), targetAmount: amount, targetDate: targetDate || null, accountId }),
+      body: JSON.stringify({ name: name.trim(), targetAmount: amount, monthlyContribution: monthlyAmount, targetDate: targetDate || null, accountId }),
     }).catch(() => null);
     if (!response?.ok) {
       const result = await response?.json().catch(() => null) as { error?: string } | null;
@@ -75,12 +88,13 @@ export default function NewGoalPage() {
   };
 
   return <main className="page-route-enter min-h-dvh bg-background"><div className="mx-auto w-full max-w-[560px] px-4 pb-12 sm:px-5">
-    <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5"><Link href={backHref} aria-label="Back to goals" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div><p className="text-xs font-medium text-muted-foreground">Goals</p><h1 className="text-[25px] font-semibold tracking-[-0.04em]">New goal</h1></div></StickyPageHeader>
+    <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5"><Link href={backHref} aria-label="Back to goals" onClick={(event) => { event.preventDefault(); requestDiscard(() => router.push(backHref)); }} className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div><p className="text-xs font-medium text-muted-foreground">Goals</p><h1 className="text-[25px] font-semibold tracking-[-0.04em]">New goal</h1></div></StickyPageHeader>
     <h2 className="mt-8 px-1 text-[22px] font-semibold tracking-[-0.04em]">Give your money a destination</h2>
     <form onSubmit={submit} className="mt-5 space-y-5 rounded-[18px] border border-border bg-card p-4 sm:p-5">
       {error ? <p role="alert" className="rounded-[12px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-sm font-medium text-expense">{error}</p> : null}
       <label className="block"><span className="block text-xs font-semibold text-muted-foreground">Goal name</span><p className="mb-1.5 mt-1 text-xs text-muted-foreground">What are you saving for?</p><input required value={name} onChange={(event) => setName(event.target.value)} maxLength={100} className="h-12 w-full rounded-[11px] border border-border bg-background px-3 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" /></label>
       <label className="block"><span className="block text-xs font-semibold text-muted-foreground">Target amount</span><p className="mb-1.5 mt-1 text-xs text-muted-foreground">How much do you want to save?</p><input required inputMode="decimal" type="number" min="0.01" step="0.01" value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} className="h-12 w-full rounded-[11px] border border-border bg-background px-3 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" /></label>
+      <label className="block"><span className="block text-xs font-semibold text-muted-foreground">Monthly set-aside</span><p className="mb-1.5 mt-1 text-xs text-muted-foreground">How much do you want to set aside for this goal per month?</p><input inputMode="decimal" type="number" min="0" step="0.01" value={monthlyContribution} onChange={(event) => setMonthlyContribution(event.target.value)} placeholder="Optional" className="h-12 w-full rounded-[11px] border border-border bg-background px-3 text-sm font-medium outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20" /></label>
       <fieldset className="min-w-0">
         <legend className="text-xs font-semibold text-muted-foreground">Goal account{selectedAccount ? <span className="ml-2 font-semibold text-muted-foreground">· {selectedAccount.currency}</span> : null}</legend>
         <div className="mt-2 flex min-w-0 max-w-full gap-2 overflow-x-auto overscroll-x-contain px-0.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -97,5 +111,6 @@ export default function NewGoalPage() {
       <button type="submit" disabled={saving || !accounts.length} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60">{saving ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}{saving ? "Creating goal…" : "Create goal"}</button>
     </form>
     {dateTransition.mounted ? <div role="presentation" className={`fixed inset-0 z-[70] flex items-end bg-foreground/25 ${dateTransition.closing ? "drawer-scrim-exit" : "drawer-scrim-enter"}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setDateOpen(false); }}><section role="dialog" aria-modal="true" aria-labelledby="goal-target-date-title" className={`flex max-h-[88dvh] w-full flex-col rounded-t-[24px] border-t border-border bg-background shadow-[0_-18px_50px_rgb(23_32_29_/_0.18)] ${dateTransition.closing ? "drawer-exit" : "drawer-enter"}`} onMouseDown={(event) => event.stopPropagation()}><div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-foreground/20" aria-hidden="true" /><header className="flex shrink-0 items-center justify-between border-b border-border px-4 pb-3 pt-3"><button type="button" aria-label="Close target date picker" onClick={() => setDateOpen(false)} className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground"><X aria-hidden="true" className="size-5" /></button><h2 id="goal-target-date-title" className="text-base font-semibold">Choose target date</h2><button type="button" onClick={() => setDateOpen(false)} className="rounded-[10px] bg-primary-soft px-3 py-2 text-sm font-semibold text-primary">Done</button></header><div className="flex flex-1 items-start justify-center overflow-y-auto px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"><div className="w-full max-w-[420px] space-y-3"><Calendar mode="single" month={calendarMonth} onMonthChange={setCalendarMonth} selected={targetDate ? new Date(`${targetDate}T12:00:00`) : undefined} modifiers={{ today: new Date() }} onSelect={(selected) => { if (selected) setTargetDate(format(selected, "yyyy-MM-dd")); }} className="w-full rounded-[18px] border border-border bg-card p-4 shadow-[0_18px_50px_rgb(23_32_29_/_0.10)] [--cell-size:2.5rem] min-[420px]:[--cell-size:2.75rem]" /><div className="flex items-center justify-between gap-3 rounded-[14px] border border-border bg-card px-4 py-3"><p className="text-xs text-muted-foreground">Pick the date you want to reach this goal.</p>{targetDate ? <button type="button" onClick={() => setTargetDate("")} className="shrink-0 text-xs font-semibold text-primary">Clear</button> : null}</div></div></div></section></div> : null}
+    {discardDialog}
   </div></main>;
 }

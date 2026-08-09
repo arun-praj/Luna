@@ -5,6 +5,8 @@ import { AuthRedirectListener } from "@/components/auth/auth-redirect-listener";
 import { BiometricLockGate } from "@/components/auth/biometric-lock-gate";
 import { RouteTransition } from "@/components/layout/route-transition";
 import { OfflineRuntime } from "@/components/offline/offline-runtime";
+import { DrawerInteractions } from "@/components/layout/drawer-interactions";
+import { AppleDockNavigation } from "@/components/layout/apple-dock";
 
 export const metadata: Metadata = {
   title: "Luna — personal finance",
@@ -35,7 +37,9 @@ export default function RootLayout({
         <OfflineRuntime />
         <AuthRedirectListener />
         <RouteTransition />
+        <DrawerInteractions />
         <BiometricLockGate>{children}</BiometricLockGate>
+        <AppleDockNavigation />
       </body>
     </html>
   );

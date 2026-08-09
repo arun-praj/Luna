@@ -1,4 +1,5 @@
 // SQLite schema used by Cloudflare D1 and local Wrangler development.
+import { sql } from "drizzle-orm";
 import {
   integer,
   index,
@@ -20,6 +21,9 @@ export const users = sqliteTable(
     phone: text("phone"),
     passwordHash: text("password_hash").notNull(),
     currency: text("currency").notNull().default("NPR"),
+    hideTotalBalance: integer("hide_total_balance", { mode: "boolean" })
+      .notNull()
+      .default(false),
     monthlyReportEnabled: integer("monthly_report_enabled", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -162,6 +166,7 @@ export const notificationSettings = sqliteTable("notification_settings", {
   recurringDueEnabled: integer("recurring_due_enabled", { mode: "boolean" })
     .notNull()
     .default(true),
+  loanPaymentDueEnabled: integer("loan_payment_due_enabled", { mode: "boolean" }).notNull().default(true),
   recurringTransactionEnabled: integer("recurring_transaction_enabled", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -191,7 +196,7 @@ export const notificationDeliveries = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     kind: text("kind", {
-      enum: ["goal_milestone", "recurring_due", "recurring_transaction", "low_balance"],
+      enum: ["goal_milestone", "recurring_due", "recurring_transaction", "loan_payment_due", "low_balance"],
     }).notNull(),
     referenceId: text("reference_id").notNull(),
     occurrenceKey: text("occurrence_key").notNull(),
@@ -200,6 +205,39 @@ export const notificationDeliveries = sqliteTable(
   (table) => [
     uniqueIndex("notification_deliveries_unique").on(table.userId, table.kind, table.referenceId, table.occurrenceKey),
     index("notification_deliveries_user_idx").on(table.userId, table.sentAt),
+  ],
+);
+
+export const homeAlerts = sqliteTable(
+  "home_alerts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["budget", "goal", "loan", "recurring"] }).notNull(),
+    sourceId: text("source_id").notNull(),
+    occurrenceKey: text("occurrence_key").notNull(),
+    showAt: isoTimestamp("show_at"),
+    expiresAt: optionalIsoTimestamp("expires_at"),
+    shownAt: optionalIsoTimestamp("shown_at"),
+    dismissedAt: optionalIsoTimestamp("dismissed_at"),
+    resolvedAt: optionalIsoTimestamp("resolved_at"),
+    payload: text("payload").notNull(),
+    hardUrgency: integer("hard_urgency").notNull().default(0),
+    deterministicRank: integer("deterministic_rank").notNull().default(0),
+    aiStatus: text("ai_status", { enum: ["pending", "ready", "fallback"] }).notNull().default("pending"),
+    aiRank: integer("ai_rank"),
+    aiSuppressed: integer("ai_suppressed", { mode: "boolean" }).notNull().default(false),
+    aiTitle: text("ai_title"),
+    aiDetail: text("ai_detail"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    uniqueIndex("home_alerts_identity_unique").on(table.userId, table.kind, table.sourceId, table.occurrenceKey),
+    index("home_alerts_user_visibility_idx").on(table.userId, table.showAt, table.dismissedAt, table.resolvedAt),
+    index("home_alerts_ai_pending_idx").on(table.aiStatus, table.createdAt),
   ],
 );
 
@@ -339,11 +377,88 @@ export const goals = sqliteTable(
     name: text("name").notNull(),
     targetAmount: real("target_amount").notNull(),
     allocatedAmount: real("allocated_amount").notNull().default(0),
+    monthlyContribution: real("monthly_contribution").notNull().default(0),
     status: text("status", { enum: ["active", "completed", "archived"] }).notNull().default("active"),
     targetDate: text("target_date"),
     accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
   },
   (table) => [index("goals_user_idx").on(table.userId)],
+);
+
+export const loans = sqliteTable(
+  "loans",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    counterparty: text("counterparty"),
+    direction: text("direction", { enum: ["borrowed", "lent"] }).notNull(),
+    currency: text("currency").notNull(),
+    originalPrincipal: real("original_principal").notNull(),
+    interestMethod: text("interest_method", { enum: ["none", "reducing", "flat"] }).notNull().default("none"),
+    paymentFrequency: text("payment_frequency", { enum: ["weekly", "monthly", "quarterly", "yearly"] }),
+    scheduledPayment: real("scheduled_payment"),
+    termCount: integer("term_count"),
+    startDate: text("start_date").notNull(),
+    firstDueDate: text("first_due_date"),
+    nextDueDate: text("next_due_date"),
+    status: text("status", { enum: ["active", "paid_off", "archived"] }).notNull().default("active"),
+    notes: text("notes"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [index("loans_user_idx").on(table.userId), uniqueIndex("loans_account_unique").on(table.accountId)],
+);
+
+export const loanRatePeriods = sqliteTable(
+  "loan_rate_periods",
+  {
+    id: text("id").primaryKey(),
+    loanId: text("loan_id").notNull().references(() => loans.id, { onDelete: "cascade" }),
+    annualRate: real("annual_rate").notNull(),
+    effectiveDate: text("effective_date").notNull(),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [index("loan_rate_periods_loan_idx").on(table.loanId), uniqueIndex("loan_rate_periods_effective_unique").on(table.loanId, table.effectiveDate)],
+);
+
+export const loanInstallments = sqliteTable(
+  "loan_installments",
+  {
+    id: text("id").primaryKey(),
+    loanId: text("loan_id").notNull().references(() => loans.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    dueDate: text("due_date").notNull(),
+    expectedPrincipal: real("expected_principal").notNull().default(0),
+    expectedInterest: real("expected_interest").notNull().default(0),
+    expectedFees: real("expected_fees").notNull().default(0),
+    paidPrincipal: real("paid_principal").notNull().default(0),
+    paidInterest: real("paid_interest").notNull().default(0),
+    paidFees: real("paid_fees").notNull().default(0),
+    status: text("status", { enum: ["pending", "partial", "paid", "skipped"] }).notNull().default("pending"),
+  },
+  (table) => [index("loan_installments_loan_idx").on(table.loanId), uniqueIndex("loan_installments_sequence_unique").on(table.loanId, table.sequence)],
+);
+
+export const loanPaymentEvents = sqliteTable(
+  "loan_payment_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    loanId: text("loan_id").notNull().references(() => loans.id, { onDelete: "restrict" }),
+    accountId: text("account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
+    installmentId: text("installment_id").references(() => loanInstallments.id, { onDelete: "set null" }),
+    kind: text("kind", { enum: ["disbursement", "payment", "reversal"] }).notNull(),
+    principal: real("principal").notNull().default(0),
+    interest: real("interest").notNull().default(0),
+    fees: real("fees").notNull().default(0),
+    date: text("date").notNull(),
+    clientGeneratedId: text("client_generated_id"),
+    reversedEventId: text("reversed_event_id"),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [index("loan_payment_events_loan_idx").on(table.loanId), uniqueIndex("loan_payment_events_client_unique").on(table.clientGeneratedId)],
 );
 
 export const spendingBudgets = sqliteTable(
@@ -355,8 +470,16 @@ export const spendingBudgets = sqliteTable(
     name: text("name").notNull(),
     limitAmount: real("limit_amount").notNull(),
     period: text("period", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
+    clientGeneratedId: text("client_generated_id"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
   },
-  (table) => [index("spending_budgets_user_idx").on(table.userId)],
+  (table) => [
+    index("spending_budgets_user_idx").on(table.userId),
+    uniqueIndex("spending_budgets_client_unique").on(table.clientGeneratedId),
+    uniqueIndex("spending_budgets_overall_period_unique").on(table.userId, table.period).where(sql`${table.categoryId} IS NULL`),
+    uniqueIndex("spending_budgets_category_period_unique").on(table.userId, table.period, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+  ],
 );
 
 export const recurringTemplates = sqliteTable(
@@ -368,9 +491,15 @@ export const recurringTemplates = sqliteTable(
     type: text("type", { enum: ["expense", "income", "savings", "transfer"] }).notNull(),
     amount: real("amount").notNull(),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
+    title: text("title").notNull().default(""),
     notes: text("notes"),
     frequency: text("frequency", { enum: ["daily", "weekly", "monthly", "yearly"] }).notNull(),
     nextDueDate: text("next_due_date").notNull(),
+    endDate: text("end_date"),
+    approvalRequired: integer("approval_required", { mode: "boolean" }).notNull().default(true),
+    transferToAccountId: text("transfer_to_account_id").references(() => accounts.id),
+    savingsInstrumentId: text("savings_instrument_id").references(() => savingsInstruments.id),
+    goalId: text("goal_id").references(() => goals.id, { onDelete: "set null" }),
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   },
   (table) => [index("recurring_templates_user_idx").on(table.userId)],
@@ -385,7 +514,9 @@ export const transactions = sqliteTable(
     type: text("type", { enum: ["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"] }).notNull(),
     amount: real("amount").notNull(),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
+    splits: text("splits").notNull().default("[]"),
     title: text("title").notNull().default(""),
+    merchantName: text("merchant_name"),
     notes: text("notes"),
     tags: text("tags").notNull().default("[]"),
     isRecurring: integer("is_recurring", { mode: "boolean" }).notNull().default(false),
@@ -394,6 +525,9 @@ export const transactions = sqliteTable(
     goalId: text("goal_id").references(() => goals.id, { onDelete: "set null" }),
     savingsInstrumentId: text("savings_instrument_id").references(() => savingsInstruments.id, { onDelete: "set null" }),
     transferToAccountId: text("transfer_to_account_id").references(() => accounts.id),
+    loanId: text("loan_id").references(() => loans.id, { onDelete: "set null" }),
+    loanPaymentEventId: text("loan_payment_event_id").references(() => loanPaymentEvents.id, { onDelete: "set null" }),
+    loanComponent: text("loan_component", { enum: ["disbursement", "principal", "interest", "fee"] }),
     date: text("date").notNull(),
     transactionAt: text("transaction_at").notNull().default(""),
     syncStatus: text("sync_status", { enum: ["synced", "pending", "failed"] }).notNull().default("synced"),
@@ -405,6 +539,24 @@ export const transactions = sqliteTable(
     index("transactions_user_date_idx").on(table.userId, table.date),
     index("transactions_account_idx").on(table.accountId),
     uniqueIndex("transactions_client_generated_id_unique").on(table.clientGeneratedId),
+  ],
+);
+
+export const recurringOccurrences = sqliteTable(
+  "recurring_occurrences",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    recurringTemplateId: text("recurring_template_id").notNull().references(() => recurringTemplates.id, { onDelete: "cascade" }),
+    scheduledDate: text("scheduled_date").notNull(),
+    status: text("status", { enum: ["pending", "posted", "skipped"] }).notNull().default("pending"),
+    transactionId: text("transaction_id").references(() => transactions.id, { onDelete: "set null" }),
+    createdAt: isoTimestamp("created_at").notNull(),
+    updatedAt: isoTimestamp("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("recurring_occurrences_template_date_unique").on(table.recurringTemplateId, table.scheduledDate),
+    index("recurring_occurrences_user_status_idx").on(table.userId, table.status, table.scheduledDate),
   ],
 );
 
@@ -440,6 +592,24 @@ export const dataExports = sqliteTable(
   ],
 );
 
+export const dataImports = sqliteTable(
+  "data_imports",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    sourceExportedAt: text("source_exported_at"),
+    status: text("status", { enum: ["requested", "completed", "failed"] }).notNull().default("requested"),
+    requestedAt: isoTimestamp("requested_at"),
+    completedAt: optionalIsoTimestamp("completed_at"),
+    bytes: integer("bytes"),
+    itemCount: integer("item_count"),
+  },
+  (table) => [
+    index("data_imports_user_idx").on(table.userId),
+    index("data_imports_requested_at_idx").on(table.requestedAt),
+  ],
+);
+
 export const accountDeletionRequests = sqliteTable(
   "account_deletion_requests",
   {
@@ -466,6 +636,7 @@ export const schema = {
   passwordResetTokens,
   notificationSettings,
   accounts,
+  homeAlerts,
   reportDeliveries,
   reportCache,
   reportGenerationLimits,
@@ -474,11 +645,17 @@ export const schema = {
   savingsInstrumentTypes,
   savingsInstruments,
   goals,
+  loans,
+  loanRatePeriods,
+  loanInstallments,
+  loanPaymentEvents,
   spendingBudgets,
   recurringTemplates,
+  recurringOccurrences,
   transactions,
   transactionHistory,
   dataExports,
+  dataImports,
   accountDeletionRequests,
 };
 

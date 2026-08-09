@@ -14,7 +14,10 @@ import { getRxStorageDexie } from "rxdb/plugins/storage-dexie";
 import type {
   OfflineAccount,
   OfflineCategory,
+  OfflineBudget,
+  OfflineBudgetMutation,
   OfflineProfile,
+  OfflineLoan,
   OfflineSavingsInstrument,
   OfflineTransaction,
 } from "@/lib/offline/types";
@@ -28,7 +31,10 @@ type OfflineCollections = {
   accounts: RxCollection<OfflineAccount>;
   categories: RxCollection<OfflineCategory>;
   savingsInstruments: RxCollection<OfflineSavingsInstrument>;
+  loans: RxCollection<OfflineLoan>;
   transactions: RxCollection<OfflineTransaction>;
+  budgets: RxCollection<OfflineBudget>;
+  budgetMutations: RxCollection<OfflineBudgetMutation>;
 };
 
 export type CocomelonOfflineDatabase = RxDatabase<OfflineCollections>;
@@ -43,7 +49,7 @@ const boundedNullableString = {
 
 const profileSchema: RxJsonSchema<OfflineProfile> = {
   title: "offline profile",
-  version: 0,
+  version: 1,
   primaryKey: "id",
   type: "object",
   additionalProperties: false,
@@ -53,10 +59,11 @@ const profileSchema: RxJsonSchema<OfflineProfile> = {
     name: { type: "string", maxLength: 160 },
     email: { type: "string", maxLength: 320 },
     currency: { type: "string", maxLength: 3 },
+    hideTotalBalance: { type: "boolean" },
     avatarPreset: { type: "string", maxLength: 240 },
     cachedAt: { type: "string", maxLength: 40 },
   },
-  required: ["id", "userId", "name", "email", "currency", "avatarPreset", "cachedAt"],
+  required: ["id", "userId", "name", "email", "currency", "hideTotalBalance", "avatarPreset", "cachedAt"],
 };
 
 const accountSchema: RxJsonSchema<OfflineAccount> = {
@@ -133,9 +140,11 @@ const savingsInstrumentSchema: RxJsonSchema<OfflineSavingsInstrument> = {
   indexes: ["userId"],
 };
 
+const loanSchema: RxJsonSchema<OfflineLoan> = { title: "offline loan", version: 0, primaryKey: "id", type: "object", additionalProperties: false, properties: { id: { type: "string", maxLength: 220 }, serverId: { type: "string", maxLength: 100 }, userId: { type: "string", maxLength: 100 }, accountId: { type: "string", maxLength: 100 }, name: { type: "string", maxLength: 160 }, counterparty: boundedNullableString, direction: { type: "string", enum: ["borrowed", "lent"], maxLength: 10 }, currency: { type: "string", maxLength: 3 }, originalPrincipal: { type: "number" }, outstandingPrincipal: { type: "number" }, nextDueDate: { ...nullableString, maxLength: 10 }, status: { type: "string", enum: ["active", "paid_off", "archived"], maxLength: 10 }, cachedAt: { type: "string", maxLength: 40 } }, required: ["id", "serverId", "userId", "accountId", "name", "counterparty", "direction", "currency", "originalPrincipal", "outstandingPrincipal", "nextDueDate", "status", "cachedAt"], indexes: [["userId", "status"]] };
+
 const transactionSchema: RxJsonSchema<OfflineTransaction> = {
   title: "offline transaction",
-  version: 1,
+  version: 2,
   primaryKey: "id",
   type: "object",
   additionalProperties: false,
@@ -152,6 +161,7 @@ const transactionSchema: RxJsonSchema<OfflineTransaction> = {
     amount: { type: "number" },
     categoryId: { ...nullableString, maxLength: 100 },
     title: { type: "string", maxLength: 220 },
+    merchantName: { ...nullableString, maxLength: 120 },
     notes: nullableString,
     tags: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 30 },
     date: { type: "string", maxLength: 10 },
@@ -179,7 +189,7 @@ const transactionSchema: RxJsonSchema<OfflineTransaction> = {
   },
   required: [
     "id", "serverId", "userId", "accountId", "type", "amount", "categoryId",
-    "title", "notes", "tags", "date", "transactionAt", "transferToAccountId",
+    "title", "merchantName", "notes", "tags", "date", "transactionAt", "transferToAccountId",
     "savingsInstrumentId", "clientGeneratedId", "syncStatus", "syncError",
     "accountName", "accountType", "accountCurrency", "accountIcon", "accountColor",
     "destinationAccountName", "destinationAccountType", "destinationAccountIcon",
@@ -191,6 +201,63 @@ const transactionSchema: RxJsonSchema<OfflineTransaction> = {
     ["userId", "syncStatus"],
     ["userId", "date"],
   ],
+};
+
+const budgetCategoryProperties = {
+  id: { type: "string", maxLength: 100 },
+  name: { type: "string", maxLength: 160 },
+  icon: boundedNullableString,
+  color: boundedNullableString,
+} as const;
+
+const budgetSchema: RxJsonSchema<OfflineBudget> = {
+  title: "offline budget",
+  version: 0,
+  primaryKey: "localId",
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    localId: { type: "string", maxLength: 220 },
+    id: { type: "string", maxLength: 100 },
+    serverId: { ...nullableString, maxLength: 100 },
+    userId: { type: "string", maxLength: 100 },
+    categoryId: { ...nullableString, maxLength: 100 },
+    name: { type: "string", maxLength: 180 },
+    limitAmount: { type: "number" },
+    period: { type: "string", enum: ["weekly", "monthly", "yearly"], maxLength: 10 },
+    clientGeneratedId: { ...nullableString, maxLength: 100 },
+    createdAt: { type: "string", maxLength: 40 },
+    updatedAt: { type: "string", maxLength: 40 },
+    spent: { type: "number" },
+    remaining: { type: "number" },
+    percentage: { type: "number" },
+    periodStart: { type: "string", maxLength: 10 },
+    periodEnd: { type: "string", maxLength: 10 },
+    category: { type: ["object", "null"], properties: budgetCategoryProperties, required: ["id", "name", "icon", "color"] },
+    syncStatus: { type: "string", enum: ["synced", "pending", "failed"], maxLength: 10 },
+    syncError: nullableString,
+    deleted: { type: "boolean" },
+    cachedAt: { type: "string", maxLength: 40 },
+  },
+  required: ["localId", "id", "serverId", "userId", "categoryId", "name", "limitAmount", "period", "clientGeneratedId", "createdAt", "updatedAt", "spent", "remaining", "percentage", "periodStart", "periodEnd", "category", "syncStatus", "syncError", "deleted", "cachedAt"],
+  indexes: [["userId", "period"], ["userId", "syncStatus"]],
+};
+
+const budgetMutationSchema: RxJsonSchema<OfflineBudgetMutation> = {
+  title: "offline budget mutation",
+  version: 0,
+  primaryKey: "id",
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: { type: "string", maxLength: 100 }, userId: { type: "string", maxLength: 100 }, budgetId: { type: "string", maxLength: 100 },
+    operation: { type: "string", enum: ["create", "update", "delete"], maxLength: 10 }, categoryId: { ...nullableString, maxLength: 100 },
+    limitAmount: { type: "number" }, period: { type: "string", enum: ["weekly", "monthly", "yearly"], maxLength: 10 },
+    clientGeneratedId: { type: "string", maxLength: 100 }, status: { type: "string", enum: ["synced", "pending", "failed"], maxLength: 10 },
+    error: nullableString, createdAt: { type: "string", maxLength: 40 }, updatedAt: { type: "string", maxLength: 40 },
+  },
+  required: ["id", "userId", "budgetId", "operation", "categoryId", "limitAmount", "period", "clientGeneratedId", "status", "error", "createdAt", "updatedAt"],
+  indexes: [["userId", "status"]],
 };
 
 let databasePromise: Promise<CocomelonOfflineDatabase> | null = null;
@@ -230,16 +297,31 @@ export function getOfflineDatabase() {
         eventReduce: true,
       });
       await db.addCollections({
-        profiles: { schema: profileSchema },
+        profiles: {
+          schema: profileSchema,
+          migrationStrategies: {
+            1: (document: Omit<OfflineProfile, "hideTotalBalance"> & { hideTotalBalance?: boolean }) => ({
+              ...document,
+              hideTotalBalance: document.hideTotalBalance ?? false,
+            }),
+          },
+        },
         accounts: { schema: accountSchema },
         categories: { schema: categorySchema },
         savingsInstruments: { schema: savingsInstrumentSchema },
+        loans: { schema: loanSchema },
         transactions: {
           schema: transactionSchema,
           migrationStrategies: {
             1: (document: OfflineTransaction) => document,
+            2: (document: OfflineTransaction & { merchantName?: string | null }) => ({
+              ...document,
+              merchantName: document.merchantName ?? null,
+            }),
           },
         },
+        budgets: { schema: budgetSchema },
+        budgetMutations: { schema: budgetMutationSchema },
       });
       return db;
     })().catch((error) => {

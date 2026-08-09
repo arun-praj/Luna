@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, Landmark, Plus } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { GuideIcon } from "@/components/guides/feature-guide";
 import { ListDataSkeleton, Skeleton } from "@/components/ui/data-skeleton";
 import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { authenticatedFetch } from "@/lib/auth-client";
@@ -50,7 +51,7 @@ export default function SavingsInstrumentsPage() {
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <div className="flex min-w-0 items-center gap-3"><Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">Manage your money</p><h1 className="truncate text-[26px] font-semibold tracking-[-0.04em]">Saving Instruments</h1></div></div>
+          <div className="flex min-w-0 items-center gap-3"><Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">Manage your money</p><h1 className="truncate text-[26px] font-semibold tracking-[-0.04em]">Saving Instruments</h1></div><GuideIcon href={withReturnTo("/savings-instruments/guide", currentRoute)} label="Saving instruments" /></div>
           <Link href={withReturnTo("/savings-instruments/new", currentRoute)} aria-label="Add saving instrument" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary"><Plus aria-hidden="true" className="size-[19px]" /></Link>
         </StickyPageHeader>
         <section aria-label="Savings overview" className="mt-8 grid grid-cols-2 divide-x divide-border rounded-[14px] border border-border bg-card"><div className="min-w-0 px-4 py-4"><p className="text-xs font-semibold text-muted-foreground">Total saved</p><p className="mt-2 truncate text-[22px] font-semibold tracking-[-0.035em] tabular-nums">{isLoading ? <Skeleton className="inline-block h-7 w-28 align-middle" /> : <><span className="mr-1 text-xs tracking-normal text-muted-foreground">{currency}</span>{formatAmount(totalBalance)}</>}</p></div><div className="min-w-0 px-4 py-4"><p className="text-xs font-semibold text-muted-foreground">Instruments</p><p className="mt-2 truncate text-[22px] font-semibold tracking-[-0.035em] tabular-nums">{isLoading ? <Skeleton className="inline-block h-7 w-12 align-middle" /> : instruments.length}</p></div></section>

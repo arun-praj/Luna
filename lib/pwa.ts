@@ -25,7 +25,19 @@ export function initializePwa() {
     deferredInstallPrompt = null;
     notify();
   });
-  if ("serviceWorker" in navigator) {
+  if ("serviceWorker" in navigator && isLocalDevelopmentHost()) {
+    // Vite owns the complete module graph in development. A worker left over
+    // from a PWA test can otherwise serve stale module URLs after a restart.
+    void navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .then(() => caches.keys())
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key.startsWith("budget-static-"))
+          .map((key) => caches.delete(key)),
+      ))
+      .catch(() => undefined);
+  } else if ("serviceWorker" in navigator) {
     void navigator.serviceWorker.register("/sw.js", { scope: "/" })
       .then(async (registration) => {
         await navigator.serviceWorker.ready;

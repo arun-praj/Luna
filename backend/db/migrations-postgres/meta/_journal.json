@@ -85,6 +85,76 @@
       "when": 1786033177829,
       "tag": "0011_tricky_wallow",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786090887000,
+      "tag": "0012_decimal_safe_money",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786113610745,
+      "tag": "0013_recurring_occurrences",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786113611000,
+      "tag": "0014_transaction_splits",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786113612000,
+      "tag": "0015_transaction_merchant",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786113613000,
+      "tag": "0016_loans",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786280400000,
+      "tag": "0017_data_imports",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786264551908,
+      "tag": "0018_plain_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786269767249,
+      "tag": "0019_green_nightmare",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786275038681,
+      "tag": "0020_gifted_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786284000000,
+      "tag": "0021_budget_sync",
+      "breakpoints": true
     }
   ]
 }

@@ -6,15 +6,17 @@ import { db } from "@/backend/db/client";
 import {
   accounts,
   goals,
+  loans,
   notificationDeliveries,
   notificationSettings,
   recurringTemplates,
 } from "@/backend/db/schema";
 
-type NotificationKind = "goal_milestone" | "recurring_due" | "recurring_transaction" | "low_balance";
+type NotificationKind = "goal_milestone" | "recurring_due" | "recurring_transaction" | "loan_payment_due" | "low_balance";
 type NotificationSettingsRow = typeof notificationSettings.$inferSelect;
 type PushSubscription = Parameters<typeof webpush.sendNotification>[0];
 type LocalDateTime = { date: string; time: string; weekday: number; dayOfMonth: number };
+export type PushDeliveryResult = "sent" | "not_configured" | "subscription_expired" | "rejected" | "failed";
 
 const MILESTONES = [25, 50, 75, 100];
 
@@ -98,6 +100,7 @@ function enabled(settings: NotificationSettingsRow, kind: NotificationKind) {
   if (kind === "goal_milestone") return settings.goalMilestonesEnabled;
   if (kind === "recurring_due") return settings.recurringDueEnabled;
   if (kind === "recurring_transaction") return settings.recurringTransactionEnabled;
+  if (kind === "loan_payment_due") return settings.loanPaymentDueEnabled;
   return settings.lowBalanceEnabled;
 }
 
@@ -108,9 +111,7 @@ async function sendUserNotification(
   occurrenceKey: string,
   payload: { title: string; body: string; url?: string },
 ) {
-  const config = vapidConfig();
-  const subscription = parseSubscription(settings.pushSubscription);
-  if (!config || !subscription || !enabled(settings, kind)) return false;
+  if (!enabled(settings, kind)) return false;
 
   const deliveryId = crypto.randomUUID();
   const [delivery] = await db.insert(notificationDeliveries).values({
@@ -124,28 +125,49 @@ async function sendUserNotification(
 
   if (!delivery) return false;
 
-  try {
-    await webpush.sendNotification(subscription, JSON.stringify({
+  const result = await deliverPush(settings, {
       ...payload,
       icon: "/favicon.ico",
       badge: "/favicon.ico",
       tag: `${kind}-${referenceId}`,
-    }), {
+    });
+  if (result !== "sent") {
+    await db.delete(notificationDeliveries).where(eq(notificationDeliveries.id, deliveryId));
+    return false;
+  }
+  return true;
+}
+
+async function deliverPush(
+  settings: NotificationSettingsRow,
+  payload: { title: string; body: string; url?: string; icon?: string; badge?: string; tag?: string },
+): Promise<PushDeliveryResult> {
+  const config = vapidConfig();
+  const subscription = parseSubscription(settings.pushSubscription);
+  if (!config || !subscription) return "not_configured";
+
+  try {
+    await webpush.sendNotification(subscription, JSON.stringify(payload), {
       TTL: 60 * 60 * 24,
       urgency: "normal",
       vapidDetails: config,
     });
-    return true;
+    return "sent";
   } catch (error) {
-    await db.delete(notificationDeliveries).where(eq(notificationDeliveries.id, deliveryId));
     if (errorStatus(error) === 404 || errorStatus(error) === 410) {
       await db.update(notificationSettings)
         .set({ pushSubscription: null })
         .where(eq(notificationSettings.userId, settings.userId));
-    } else {
-      console.error("Luna notification delivery failed", { kind, userId: settings.userId, error });
+      return "subscription_expired";
     }
-    return false;
+    if ([400, 401, 403].includes(errorStatus(error) ?? 0)) {
+      return "rejected";
+    }
+    console.error("Luna notification delivery failed", {
+      userId: settings.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return "failed";
   }
 }
 
@@ -160,7 +182,6 @@ function recurringTransactionIsScheduled(
 
 async function notifyUser(settings: NotificationSettingsRow, now: Date) {
   const local = localDateTime(now, settings.timezone || "UTC");
-  if (local.time !== reminderTime(settings)) return;
 
   if (settings.recurringDueEnabled) {
     const dueTemplates = await db.select({ id: recurringTemplates.id, type: recurringTemplates.type, amount: recurringTemplates.amount, nextDueDate: recurringTemplates.nextDueDate })
@@ -176,7 +197,15 @@ async function notifyUser(settings: NotificationSettingsRow, now: Date) {
     }
   }
 
-  if (settings.recurringTransactionEnabled && recurringTransactionIsScheduled(settings.recurringTransactionFrequency, local)) {
+  if (settings.loanPaymentDueEnabled) {
+    const dueLoans = await db.select({ id: loans.id, name: loans.name, nextDueDate: loans.nextDueDate }).from(loans).where(and(eq(loans.userId, settings.userId), eq(loans.status, "active"), isNotNull(loans.nextDueDate)));
+    for (const loan of dueLoans) if (loan.nextDueDate && loan.nextDueDate <= local.date) await sendUserNotification(settings, "loan_payment_due", loan.id, loan.nextDueDate, { title: loan.nextDueDate < local.date ? "Loan payment overdue" : "Loan payment due", body: `${loan.name} needs your review. Confirm the payment when it appears on your account.`, url: `/loans/${loan.id}` });
+  }
+
+  // Date-driven notifications are evaluated on every cron tick. Only the
+  // recurring-transaction reminder is intentionally tied to the user's
+  // configured reminder time.
+  if (settings.recurringTransactionEnabled && local.time === reminderTime(settings) && recurringTransactionIsScheduled(settings.recurringTransactionFrequency, local)) {
     await sendUserNotification(settings, "recurring_transaction", "schedule", local.date, {
       title: "Recurring transaction reminder",
       body: "Review and record your recurring transaction in Luna.",
@@ -222,4 +251,19 @@ export async function runScheduledNotifications(now = new Date()) {
   for (const userSettings of settings) {
     await notifyUser(userSettings, now);
   }
+}
+
+export async function sendTestNotification(userId: string): Promise<PushDeliveryResult> {
+  const [settings] = await db.select().from(notificationSettings)
+    .where(eq(notificationSettings.userId, userId))
+    .limit(1);
+  if (!settings) return "not_configured";
+  return deliverPush(settings, {
+    title: "Luna notifications are working",
+    body: "This test used the same background delivery path as your reminders and low balance alerts.",
+    url: "/profile",
+    icon: "/favicon.ico",
+    badge: "/favicon.ico",
+    tag: `notification-test-${Date.now()}`,
+  });
 }

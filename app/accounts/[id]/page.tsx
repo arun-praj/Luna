@@ -10,10 +10,12 @@ import {
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
-import { MoneyEditor } from "@/components/money/money-editor";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { sumMoney } from "@/lib/money";
+import { VerifyBalanceEditor } from "@/components/accounts/verify-balance-editor";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
+import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { transactionTypeMeta as transactionMeta } from "@/components/transactions/transaction-presentation";
 import {
   ListDataSkeleton,
@@ -24,14 +26,14 @@ type Account = {
   id: string;
   name: string;
   type:
-    | "checking"
-    | "cash"
-    | "credit_card"
-    | "general"
-    | "savings"
-    | "investment"
-    | "loan"
-    | "other";
+  | "checking"
+  | "cash"
+  | "credit_card"
+  | "general"
+  | "savings"
+  | "investment"
+  | "loan"
+  | "other";
   currency: string;
   currentBalance: number;
   icon: string | null;
@@ -122,8 +124,8 @@ export default function AccountActivityPage({
   const [period, setPeriod] = useState<AppliedPeriod>(defaultAccountPeriod);
   const [loadedPeriod, setLoadedPeriod] = useState<AppliedPeriod | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingBalance, setIsSavingBalance] = useState(false);
   const [balanceEditorOpen, setBalanceEditorOpen] = useState(false);
+  const [transactionRefreshKey, setTransactionRefreshKey] = useState(0);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -216,7 +218,7 @@ export default function AccountActivityPage({
     return () => {
       active = false;
     };
-  }, [accountId, period]);
+  }, [accountId, period, transactionRefreshKey]);
 
   const categoryNames = useMemo(
     () => new Map(categories.map((category) => [category.id, category.name])),
@@ -224,35 +226,11 @@ export default function AccountActivityPage({
   );
   const income = transactions
     .filter((transaction) => transaction.type === "income")
-    .reduce((total, transaction) => total + transaction.amount, 0);
+    .reduce((total, transaction) => sumMoney([total, transaction.amount]), 0);
   const expenses = transactions
     .filter((transaction) => transaction.type === "expense")
-    .reduce((total, transaction) => total + transaction.amount, 0);
+    .reduce((total, transaction) => sumMoney([total, transaction.amount]), 0);
   const isLoadingTransactions = loadedPeriod !== period;
-  async function saveBalance(nextBalance: string) {
-    if (!account || isSavingBalance) return;
-    setIsSavingBalance(true);
-    setError("");
-    const response = await authenticatedFetch(`/api/accounts/${account.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ openingBalance: Number(nextBalance) }),
-    }).catch(() => null);
-    if (response?.ok) {
-      const result = (await response.json()) as { account: Account };
-      setAccount(result.account);
-      setBalanceEditorOpen(false);
-    } else {
-      const result = await response?.json().catch(() => null) as { error?: string } | null;
-      setError(
-        response?.status === 401
-          ? "Your session expired. Please sign in again before updating the balance."
-          : result?.error ?? "Could not update account balance.",
-      );
-    }
-    setIsSavingBalance(false);
-  }
-
   if (isLoading) return <PageDataSkeleton label="Loading account" />;
   if (!account)
     return (
@@ -266,58 +244,71 @@ export default function AccountActivityPage({
       </main>
     );
 
+  const accountAccent = getAccountBackgroundColor(account.backgroundColor, account.type);
+
   return (
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-28 sm:px-5">
-        <StickyPageHeader className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              href={backHref}
-              aria-label="Back"
-              className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-            >
-              <ArrowLeft aria-hidden="true" className="size-5" />
-            </Link>
-            <div className="min-w-0">
-              <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">
-                {account.name}
-              </h1>
-              <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
-                {typeLabels[account.type]}
-                {account.isDefault ? " · Default" : ""}
-              </p>
+        <div className="-mx-4 sm:-mx-5" style={{ backgroundColor: accountAccent }}>
+          <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <Link
+                  href={backHref}
+                  aria-label="Back"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                >
+                  <ArrowLeft aria-hidden="true" className="size-5" />
+                </Link>
+                <div className="min-w-0">
+                  <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">
+                    {account.name}
+                  </h1>
+                  <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
+                    {typeLabels[account.type]}
+                    {account.isDefault ? " · Default" : ""}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)}
+                aria-label="Edit account"
+                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              >
+                <Edit3 aria-hidden="true" className="size-[18px]" />
+              </Link>
             </div>
-          </div>
-          <Link
-            href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)}
-            aria-label="Edit account"
-            className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+          </StickyPageHeader>
+          <section
+            aria-label="Current account balance"
+            className="border-y border-black/10 px-4 py-8 text-center text-foreground sm:px-5"
           >
-            <Edit3 aria-hidden="true" className="size-[18px]" />
-          </Link>
-        </StickyPageHeader>
-        <section
-          aria-label="Current account balance"
-          className="border-y border-border py-8 text-center"
-        >
-          <div className="mx-auto flex size-12 items-center justify-center overflow-hidden rounded-[14px] border border-border bg-card">
-            <AccountAvatar icon={account.icon} name={account.name} type={account.type} backgroundColor={account.backgroundColor} size={48} />
-          </div>
-          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Current balance
-          </p>
-          <button
-            type="button"
-            aria-label="Edit current balance"
-            onClick={() => setBalanceEditorOpen(true)}
-            className="mt-1 block w-full rounded-[10px] text-[46px] font-bold leading-none tracking-[-0.06em] tabular-nums text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/35"
-          >
-            {formatAmount(account.currentBalance)}
-          </button>
-          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.1em] text-primary">
-            {account.currency}
-          </p>
-        </section>
+            <div className="mx-auto flex size-12 items-center justify-center overflow-hidden rounded-[14px] border border-black/10 bg-white/55">
+              <AccountAvatar icon={account.icon} name={account.name} type={account.type} backgroundColor={account.backgroundColor} size={48} />
+            </div>
+            <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Current balance
+            </p>
+            <button
+              type="button"
+              aria-label="Verify and edit current balance"
+              onClick={() => setBalanceEditorOpen(true)}
+              className="mt-1 block w-full rounded-[10px] text-[46px] font-bold leading-none tracking-[-0.06em] tabular-nums text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/35"
+            >
+              {formatAmount(account.currentBalance)}
+            </button>
+            <p className="mt-2 text-sm font-semibold uppercase tracking-[0.1em] text-primary">
+              {account.currency}
+            </p>
+            <button
+              type="button"
+              onClick={() => setBalanceEditorOpen(true)}
+              className="mt-2 inline-flex min-h-7 items-center justify-center rounded-[8px] px-2 text-xs font-semibold text-primary underline decoration-primary/35 underline-offset-4 transition-colors hover:bg-primary-soft hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            >
+              Verify &amp; edit balance
+            </button>
+          </section>
+        </div>
         <section
           aria-label="Account period summary"
           className="mt-5 grid grid-cols-2 divide-x divide-border rounded-[14px] border border-border bg-card"
@@ -442,13 +433,12 @@ export default function AccountActivityPage({
           )}
         </section>
       </div>
-      <MoneyEditor
+      <VerifyBalanceEditor
         open={balanceEditorOpen}
-        value={String(account.currentBalance)}
-        title={isSavingBalance ? "Saving balance…" : "Edit balance"}
-        currency={account.currency}
-        onCancel={() => setBalanceEditorOpen(false)}
-        onSet={(nextBalance) => void saveBalance(nextBalance)}
+        account={account}
+        onClose={() => setBalanceEditorOpen(false)}
+        onSaved={(nextAccount) => { setAccount((current) => current ? { ...current, ...nextAccount } : current); setBalanceEditorOpen(false); setLoadedPeriod(null); setTransactionRefreshKey((current) => current + 1); }}
+        onReviewTransactions={() => { setBalanceEditorOpen(false); window.requestAnimationFrame(() => { document.getElementById("account-transactions-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }); }); }}
       />
     </main>
   );

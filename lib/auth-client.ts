@@ -4,9 +4,12 @@ const ACCESS_TOKEN_KEY = "budget_access_token";
 const REFRESH_WINDOW_SECONDS = 60;
 const API_CACHE_TTL_MS = 120_000;
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+const REFRESH_REQUEST_TIMEOUT_MS = 10_000;
 const API_CACHE_STORAGE_KEY = "cocomelon.api-cache";
 export const ONLINE_DATA_CHANGED_EVENT = "cocomelon:online-data-changed";
 let refreshPromise: Promise<string | null> | null = null;
+
+class RefreshUnavailableError extends Error {}
 
 type ApiCacheEntry = {
   data: unknown;
@@ -117,6 +120,11 @@ export function clearAccessToken() {
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
 }
 
+function clearAccessTokenIfCurrent(expectedToken: string | null) {
+  if (getAccessToken() !== expectedToken) return;
+  clearAccessToken();
+}
+
 function clearLunaDeviceCache() {
   if (typeof window === "undefined") return;
 
@@ -152,41 +160,82 @@ function tokenExpiresSoon(token: string | null) {
   }
 }
 
-async function performRefresh(signal?: AbortSignal) {
-  const refresh = await fetch("/api/auth/refresh", { method: "POST", signal });
-  if (!refresh.ok) {
-    clearAccessToken();
-    return null;
+async function performRefresh() {
+  const tokenAtStart = getAccessToken();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REFRESH_REQUEST_TIMEOUT_MS);
+  try {
+    let refresh: Response;
+    try {
+      refresh = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } catch (reason) {
+      throw new RefreshUnavailableError(
+        reason instanceof Error ? reason.message : "Refresh request failed",
+      );
+    }
+
+    if (refresh.status === 401 || refresh.status === 403) {
+      // Only a definitive invalid/revoked session may clear the local token.
+      // A temporary 5xx or network failure must leave the session recoverable.
+      clearAccessTokenIfCurrent(tokenAtStart);
+      return null;
+    }
+    if (!refresh.ok) {
+      throw new RefreshUnavailableError(`Refresh request failed with HTTP ${refresh.status}`);
+    }
+
+    const session = (await refresh.json()) as { accessToken?: string };
+    if (!session.accessToken) {
+      throw new RefreshUnavailableError("Refresh response was missing an access token");
+    }
+
+    // Do not overwrite a newer login or refresh that completed while this
+    // request was in flight.
+    const currentToken = getAccessToken();
+    if (currentToken !== tokenAtStart) return currentToken;
+    setAccessToken(session.accessToken);
+    return session.accessToken;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  const session = (await refresh.json()) as { accessToken?: string };
-  if (!session.accessToken) {
-    clearAccessToken();
-    return null;
-  }
-  setAccessToken(session.accessToken);
-  return session.accessToken;
 }
 
-async function refreshAccessToken(signal?: AbortSignal) {
+async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     const refreshWithTabLock = async () => {
       if ("locks" in navigator && navigator.locks?.request) {
-        const refreshUnderLock = async () => {
+        return navigator.locks.request("budget-auth-refresh", async () => {
           const latestToken = getAccessToken();
-          return tokenExpiresSoon(latestToken) ? performRefresh(signal) : latestToken;
-        };
-        return signal
-          ? navigator.locks.request("budget-auth-refresh", { signal }, refreshUnderLock)
-          : navigator.locks.request("budget-auth-refresh", refreshUnderLock);
+          return tokenExpiresSoon(latestToken) ? performRefresh() : latestToken;
+        });
       }
-      return performRefresh(signal);
+      return performRefresh();
     };
     return refreshWithTabLock();
   })().finally(() => {
     refreshPromise = null;
   });
   return refreshPromise;
+}
+
+export async function refreshSessionIfNeeded() {
+  const token = getAccessToken();
+  if (!token || !tokenExpiresSoon(token)) return token;
+  try {
+    const refreshedToken = await refreshAccessToken();
+    if (!refreshedToken && !getAccessToken()) notifyAuthExpired();
+    return refreshedToken;
+  } catch {
+    // Keep the existing access token for a later retry when the failure was
+    // caused by a temporary network, Worker, or database problem.
+    return getAccessToken() ?? token;
+  }
 }
 
 export async function authenticatedFetch(
@@ -248,9 +297,6 @@ async function fetchAndCache(
   cacheKey: string,
 ) {
   const response = await fetchWithAuth(input, init);
-  if (response.status === 401) {
-    clearAccessToken();
-  }
   if (!response.ok) return response;
   try {
     const data = (await response.clone().json()) as unknown;
@@ -293,13 +339,33 @@ async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   try {
     let token = getAccessToken();
-    if (tokenExpiresSoon(token)) token = await refreshAccessToken(requestSignal);
+    let initialRefreshFailed = false;
+    let initialRefreshCompleted = false;
+    if (tokenExpiresSoon(token)) {
+      try {
+        const refreshedToken = await refreshAccessToken();
+        initialRefreshCompleted = true;
+        token = refreshedToken;
+      } catch {
+        initialRefreshFailed = true;
+      }
+    }
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(input, { ...init, headers, signal: requestSignal });
     if (response.status !== 401) return markMutationSuccess(response);
-    const refreshedToken = await refreshAccessToken(requestSignal);
-    if (!refreshedToken) {
+    if (initialRefreshFailed) return response;
+    if (initialRefreshCompleted && !token && !getAccessToken()) {
       notifyAuthExpired();
+      return response;
+    }
+    let refreshedToken: string | null;
+    try {
+      refreshedToken = await refreshAccessToken();
+    } catch {
+      return response;
+    }
+    if (!refreshedToken) {
+      if (!getAccessToken()) notifyAuthExpired();
       return response;
     }
     headers.set("Authorization", `Bearer ${refreshedToken}`);

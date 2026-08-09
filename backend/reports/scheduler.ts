@@ -7,6 +7,7 @@ import { db } from "@/backend/db/client";
 import { reportDeliveries, users } from "@/backend/db/schema";
 import { buildReport, getPreviousMonthBounds } from "./report-service";
 import { buildReportPdf } from "./report-pdf";
+import { writeReportCache } from "./report-cache";
 
 function configuredHour() {
   const hour = Number(process.env.REPORT_MONTHLY_HOUR ?? "8");
@@ -36,6 +37,7 @@ export async function runScheduledReports(now = new Date()) {
 
     try {
       const report = await buildReport(recipient.id, "monthly", now, bounds);
+      await writeReportCache(recipient.id, report);
       await sendReportEmail({
         to: recipient.email,
         periodLabel: report.period.label,

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
-import { userTags } from "@/backend/db/schema";
+import { transactions, userTags } from "@/backend/db/schema";
 import { tagInput } from "@/backend/domain/validation";
 
 export const runtime = "nodejs";
@@ -12,7 +12,21 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
-  return NextResponse.json({ tags: await db.select().from(userTags).where(eq(userTags.userId, userId)).orderBy(asc(userTags.name)) });
+  const [savedTags, transactionRows] = await Promise.all([
+    db.select({ name: userTags.name }).from(userTags).where(eq(userTags.userId, userId)).orderBy(asc(userTags.name)),
+    db.select({ tags: transactions.tags }).from(transactions).where(eq(transactions.userId, userId)),
+  ]);
+  const names = new Map(savedTags.map((tag) => [tag.name.toLowerCase(), tag.name]));
+  for (const row of transactionRows) {
+    try {
+      for (const value of JSON.parse(row.tags) as unknown[]) {
+        if (typeof value === "string" && value.trim()) names.set(value.toLowerCase(), value.trim());
+      }
+    } catch {
+      // Ignore malformed legacy tag data; it should not prevent the picker from opening.
+    }
+  }
+  return NextResponse.json({ tags: [...names.values()].sort((left, right) => left.localeCompare(right)).map((name) => ({ name })) });
 }
 
 export async function POST(request: Request) {

@@ -14,7 +14,6 @@ export function LoginForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [challengeToken, setChallengeToken] = useState("");
   const [returnPath] = useState(() => typeof window === "undefined" ? "/" : safeReturnPath(new URLSearchParams(window.location.search).get("next")));
-  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const sessionCheckAbort = useRef<AbortController | null>(null);
   const router = useRouter();
 
@@ -28,10 +27,7 @@ export function LoginForm() {
         const result = (await response.json()) as { user?: { onboardingCompleted?: boolean; emailVerifiedAt?: string | null } };
         if (active) router.replace(result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`);
       })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setIsCheckingSession(false);
-      });
+      .catch(() => undefined);
     return () => {
       active = false;
       controller.abort();
@@ -100,7 +96,6 @@ export function LoginForm() {
 
   return (
     <div className="mt-5">
-      {isCheckingSession ? <p className="rounded-[11px] bg-primary-soft px-3 py-2.5 text-sm font-semibold text-primary">Checking your session…</p> : null}
       <form onSubmit={handleSubmit} className="space-y-3">
         {challengeToken ? (
           <label className="block">

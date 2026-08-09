@@ -27,6 +27,8 @@ import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { navigateWithRouteExit } from "@/lib/route-motion";
 import { getReturnTo } from "@/lib/navigation";
+import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const accountTypes = [
   { value: "checking", label: "Bank", icon: Landmark },
@@ -192,10 +194,23 @@ export function AccountEditor({
   const [isLoading, setIsLoading] = useState(Boolean(accountId && !account));
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState("");
   const autoSaveReady = useRef(false);
   const autoSaveTimer = useRef<number | null>(null);
   const autoSaveInFlight = useRef(false);
+  const negativeBalanceSettingRef = useRef<HTMLDivElement>(null);
+  const [highlightNegativeBalance, setHighlightNegativeBalance] = useState(false);
+  const [initialDraft, setInitialDraft] = useState<string | null>(null);
+
+  const draftSnapshot = JSON.stringify({ name, type, currency, balance, includeInTotal, allowNegativeBalance, selectedColor, customColor, selectedImage, customImage });
+  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(initialDraft !== null && draftSnapshot !== initialDraft);
+
+  useEffect(() => {
+    if (isLoading || initialDraft !== null) return;
+    const frame = window.requestAnimationFrame(() => setInitialDraft(draftSnapshot));
+    return () => window.cancelAnimationFrame(frame);
+  }, [draftSnapshot, isLoading, initialDraft]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -203,6 +218,27 @@ export function AccountEditor({
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (!isNew) return;
+    const requestedCurrency = new URLSearchParams(window.location.search).get("currency")?.toUpperCase();
+    if (!requestedCurrency || !currencyCodes.includes(requestedCurrency)) return;
+    const frame = window.requestAnimationFrame(() => setCurrency(requestedCurrency));
+    return () => window.cancelAnimationFrame(frame);
+  }, [isNew]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("focus") !== "allow-negative-balance") return;
+    const frame = window.requestAnimationFrame(() => {
+      negativeBalanceSettingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightNegativeBalance(true);
+    });
+    const timer = window.setTimeout(() => setHighlightNegativeBalance(false), 3200);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [isLoading]);
 
   useEffect(() => {
     if (!accountId || account) return;
@@ -218,10 +254,13 @@ export function AccountEditor({
 
   async function deleteAccount() {
     const id = loadedAccount?.id ?? accountId;
-    if (!id || !window.confirm("Delete this account? Transactions must be reassigned first.")) return;
+    if (!id) return;
     setIsDeleting(true); setError("");
     const response = await authenticatedFetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => null);
-    if (response?.ok) navigateWithRouteExit(() => router.push(backHref)); else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not delete account."); }
+    if (response?.ok) {
+      setDeleteOpen(false);
+      navigateWithRouteExit(() => router.push(backHref));
+    } else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not delete account."); }
     setIsDeleting(false);
   }
 
@@ -350,6 +389,10 @@ export function AccountEditor({
           <Link
             href={backHref}
             aria-label={isNew ? "Cancel new account" : "Cancel editing account"}
+            onClick={(event) => {
+              event.preventDefault();
+              requestDiscard(() => navigateWithRouteExit(() => router.push(backHref)));
+            }}
             className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
             <X aria-hidden="true" className="size-5" />
@@ -509,7 +552,7 @@ export function AccountEditor({
             </button>
           </div>
 
-          <div className="flex items-start justify-between gap-4 border-t border-border pt-5">
+          <div ref={negativeBalanceSettingRef} className={`-mx-2 flex scroll-mt-24 items-start justify-between gap-4 rounded-[12px] border-t px-2 pt-5 transition-[background-color,box-shadow] duration-300 ${highlightNegativeBalance ? "border-primary/45 bg-primary-soft/65 shadow-[0_0_0_3px_rgb(53_107_104_/_0.16)]" : "border-border"}`}>
             <div>
               <p className="text-sm font-semibold">Allow negative balance</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -647,7 +690,7 @@ export function AccountEditor({
           <section className="mt-8 border-t border-border pt-6">
             <button
               type="button"
-              onClick={() => void deleteAccount()}
+              onClick={() => setDeleteOpen(true)}
               disabled={isDeleting || isLoading}
               className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[11px] border border-expense/25 bg-expense-soft px-4 text-sm font-semibold text-expense transition-colors hover:border-expense/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-expense/30 disabled:opacity-60"
             >
@@ -659,12 +702,24 @@ export function AccountEditor({
             </p>
           </section>
         ) : null}
+        <ConfirmDialog
+          open={deleteOpen}
+          title="Delete account?"
+          description="Transactions must be reassigned first. This account cannot be recovered after deletion."
+          confirmLabel="Delete account"
+          destructive
+          busy={isDeleting}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={deleteAccount}
+        />
+        {discardDialog}
       </div>
 
       <MoneyEditor
         open={balanceEditorOpen}
         value={balance}
         title="Edit starting balance"
+        previousLabel="Previous balance"
         onCancel={() => setBalanceEditorOpen(false)}
         onSet={(nextBalance) => {
           setBalance(nextBalance);

@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
-import { reportCache, reportGenerationLimits, users } from "@/backend/db/schema";
+import { reportGenerationLimits, users } from "@/backend/db/schema";
 import { isSmtpConfigured, sendReportEmail } from "@/backend/auth/email";
-import { buildReport, getPeriodBounds, getReportFingerprint, REPORT_PERIODS, type ReportData, type ReportPeriod } from "@/backend/reports/report-service";
+import { buildReport, getPeriodBounds, REPORT_PERIODS, type ReportData, type ReportPeriod } from "@/backend/reports/report-service";
 import { buildReportPdf } from "@/backend/reports/report-pdf";
+import { readCachedReport, writeReportCache } from "@/backend/reports/report-cache";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,12 @@ class ReportGenerationLimitError extends Error {
   }
 }
 
+class ReportCacheMissError extends Error {
+  constructor() {
+    super("REPORT_CACHE_MISS");
+  }
+}
+
 function parseReportJson(value: string) {
   try {
     const parsed = postedReportSchema.safeParse(JSON.parse(value));
@@ -96,36 +103,19 @@ async function claimReportGeneration(userId: string) {
   if (!claim) throw new ReportGenerationLimitError();
 }
 
-async function getCachedOrGenerateReport(userId: string, period: ReportPeriod) {
+async function getCachedReport(userId: string, period: ReportPeriod) {
   const bounds = getPeriodBounds(period);
-  const fingerprint = await getReportFingerprint(userId, period, new Date(), bounds);
-  const [cached] = await db.select({ transactionFingerprint: reportCache.transactionFingerprint, reportJson: reportCache.reportJson }).from(reportCache).where(and(eq(reportCache.userId, userId), eq(reportCache.periodType, period), eq(reportCache.periodStart, bounds.start))).limit(1);
-  if (cached?.transactionFingerprint === fingerprint) {
-    const report = parseReportJson(cached.reportJson);
-    if (report) return report;
-  }
+  const cached = await readCachedReport(userId, period, bounds);
+  const report = cached ? parseReportJson(JSON.stringify(cached)) : null;
+  if (report) return report;
+  throw new ReportCacheMissError();
+}
 
+async function refreshReport(userId: string, period: ReportPeriod) {
   await claimReportGeneration(userId);
+  const bounds = getPeriodBounds(period);
   const report = await buildReport(userId, period, new Date(), bounds);
-  const cacheValues = {
-    id: `${userId}:${period}:${bounds.start}`,
-    userId,
-    periodType: period,
-    periodStart: bounds.start,
-    periodEnd: bounds.end,
-    transactionFingerprint: fingerprint,
-    reportJson: JSON.stringify(report),
-    generatedAt: new Date().toISOString(),
-  };
-  await db.insert(reportCache).values(cacheValues).onConflictDoUpdate({
-    target: [reportCache.userId, reportCache.periodType, reportCache.periodStart],
-    set: {
-      periodEnd: cacheValues.periodEnd,
-      transactionFingerprint: cacheValues.transactionFingerprint,
-      reportJson: cacheValues.reportJson,
-      generatedAt: cacheValues.generatedAt,
-    },
-  });
+  await writeReportCache(userId, report);
   return report;
 }
 
@@ -136,8 +126,9 @@ export async function GET(request: Request) {
   const period = requestedPeriod(url.searchParams.get("period"));
   let report: ReportData;
   try {
-    report = await getCachedOrGenerateReport(userId, period);
+    report = await getCachedReport(userId, period);
   } catch (error) {
+    if (error instanceof ReportCacheMissError) return NextResponse.json({ status: "preparing", period }, { status: 202, headers: { "Cache-Control": "no-store" } });
     if (error instanceof ReportGenerationLimitError) return errorResponse("You have reached the limit of 3 new report generations today. Try again tomorrow.", 429);
     throw error;
   }
@@ -157,17 +148,24 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
-  const body = (await request.json().catch(() => null)) as { period?: string; format?: string; sendEmail?: boolean; report?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { period?: string; format?: string; sendEmail?: boolean; refresh?: boolean; report?: unknown } | null;
   const period = requestedPeriod(body?.period ?? null);
   const postedReport = postedReportSchema.safeParse(body?.report);
   let report: ReportData;
-  if (postedReport.success && postedReport.data.period.type === period) {
+  if (body?.refresh) {
+    try {
+      report = await refreshReport(userId, period);
+    } catch (error) {
+      if (error instanceof ReportGenerationLimitError) return errorResponse("You have reached the limit of 3 new report generations today. Try again tomorrow.", 429);
+      throw error;
+    }
+  } else if (postedReport.success && postedReport.data.period.type === period) {
     report = postedReport.data as ReportData;
   } else {
     try {
-      report = await getCachedOrGenerateReport(userId, period);
+      report = await getCachedReport(userId, period);
     } catch (error) {
-      if (error instanceof ReportGenerationLimitError) return errorResponse("You have reached the limit of 3 new report generations today. Try again tomorrow.", 429);
+      if (error instanceof ReportCacheMissError) return errorResponse("Report is still being prepared. Try again shortly.", 409);
       throw error;
     }
   }

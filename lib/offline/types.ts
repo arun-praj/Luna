@@ -14,6 +14,7 @@ export type OfflineProfile = {
   name: string;
   email: string;
   currency: string;
+  hideTotalBalance: boolean;
   avatarPreset: string;
   cachedAt: string;
 };
@@ -58,6 +59,22 @@ export type OfflineSavingsInstrument = {
   cachedAt: string;
 };
 
+export type OfflineLoan = {
+  id: string;
+  serverId: string;
+  userId: string;
+  accountId: string;
+  name: string;
+  counterparty: string | null;
+  direction: "borrowed" | "lent";
+  currency: string;
+  originalPrincipal: number;
+  outstandingPrincipal: number;
+  nextDueDate: string | null;
+  status: "active" | "paid_off" | "archived";
+  cachedAt: string;
+};
+
 export type OfflineTransaction = {
   id: string;
   serverId: string | null;
@@ -67,6 +84,7 @@ export type OfflineTransaction = {
   amount: number;
   categoryId: string | null;
   title: string;
+  merchantName: string | null;
   notes: string | null;
   tags: string[];
   date: string;
@@ -99,6 +117,7 @@ export type OfflineTransactionInput = {
   amount: number;
   categoryId?: string | null;
   title: string;
+  merchantName?: string | null;
   notes?: string | null;
   tags?: string[];
   date: string;
@@ -107,10 +126,38 @@ export type OfflineTransactionInput = {
   savingsInstrumentId?: string | null;
 };
 
+export type OfflineBudget = Budget & {
+  localId: string;
+  serverId: string | null;
+  syncStatus: OfflineSyncStatus;
+  syncError: string | null;
+  deleted: boolean;
+  cachedAt: string;
+};
+
+export type OfflineBudgetMutation = {
+  id: string;
+  userId: string;
+  budgetId: string;
+  operation: "create" | "update" | "delete";
+  categoryId: string | null;
+  limitAmount: number;
+  period: BudgetPeriod;
+  clientGeneratedId: string;
+  status: OfflineSyncStatus;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OfflineSnapshot = {
   profile: OfflineProfile | null;
   accounts: OfflineAccount[];
   categories: OfflineCategory[];
   savingsInstruments: OfflineSavingsInstrument[];
+  loans: OfflineLoan[];
   transactions: OfflineTransaction[];
+  budgets: OfflineBudget[];
+  budgetMutations: OfflineBudgetMutation[];
 };
+import type { Budget, BudgetPeriod } from "@/lib/budgets";

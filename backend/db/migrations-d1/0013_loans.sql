@@ -1,0 +1,17 @@
+CREATE TABLE `loans` (`id` text PRIMARY KEY NOT NULL, `user_id` text NOT NULL, `account_id` text NOT NULL, `name` text NOT NULL, `counterparty` text, `direction` text NOT NULL, `currency` text NOT NULL, `original_principal` real NOT NULL, `interest_method` text DEFAULT 'none' NOT NULL, `payment_frequency` text, `scheduled_payment` real, `term_count` integer, `start_date` text NOT NULL, `first_due_date` text, `next_due_date` text, `status` text DEFAULT 'active' NOT NULL, `notes` text, `created_at` text NOT NULL, `updated_at` text NOT NULL, FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE cascade, FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE restrict);
+--> statement-breakpoint
+CREATE INDEX `loans_user_idx` ON `loans` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `loans_account_unique` ON `loans` (`account_id`);--> statement-breakpoint
+CREATE TABLE `loan_rate_periods` (`id` text PRIMARY KEY NOT NULL, `loan_id` text NOT NULL, `annual_rate` real NOT NULL, `effective_date` text NOT NULL, `created_at` text NOT NULL, FOREIGN KEY (`loan_id`) REFERENCES `loans`(`id`) ON DELETE cascade);--> statement-breakpoint
+CREATE INDEX `loan_rate_periods_loan_idx` ON `loan_rate_periods` (`loan_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `loan_rate_periods_effective_unique` ON `loan_rate_periods` (`loan_id`,`effective_date`);--> statement-breakpoint
+CREATE TABLE `loan_installments` (`id` text PRIMARY KEY NOT NULL, `loan_id` text NOT NULL, `sequence` integer NOT NULL, `due_date` text NOT NULL, `expected_principal` real DEFAULT 0 NOT NULL, `expected_interest` real DEFAULT 0 NOT NULL, `expected_fees` real DEFAULT 0 NOT NULL, `paid_principal` real DEFAULT 0 NOT NULL, `paid_interest` real DEFAULT 0 NOT NULL, `paid_fees` real DEFAULT 0 NOT NULL, `status` text DEFAULT 'pending' NOT NULL, FOREIGN KEY (`loan_id`) REFERENCES `loans`(`id`) ON DELETE cascade);--> statement-breakpoint
+CREATE INDEX `loan_installments_loan_idx` ON `loan_installments` (`loan_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `loan_installments_sequence_unique` ON `loan_installments` (`loan_id`,`sequence`);--> statement-breakpoint
+CREATE TABLE `loan_payment_events` (`id` text PRIMARY KEY NOT NULL, `user_id` text NOT NULL, `loan_id` text NOT NULL, `account_id` text NOT NULL, `installment_id` text, `kind` text NOT NULL, `principal` real DEFAULT 0 NOT NULL, `interest` real DEFAULT 0 NOT NULL, `fees` real DEFAULT 0 NOT NULL, `date` text NOT NULL, `client_generated_id` text, `reversed_event_id` text, `created_at` text NOT NULL, FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE cascade, FOREIGN KEY (`loan_id`) REFERENCES `loans`(`id`) ON DELETE restrict, FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE restrict, FOREIGN KEY (`installment_id`) REFERENCES `loan_installments`(`id`) ON DELETE set null);--> statement-breakpoint
+CREATE INDEX `loan_payment_events_loan_idx` ON `loan_payment_events` (`loan_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `loan_payment_events_client_unique` ON `loan_payment_events` (`client_generated_id`);--> statement-breakpoint
+ALTER TABLE `notification_settings` ADD `loan_payment_due_enabled` integer DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE `transactions` ADD `loan_id` text REFERENCES loans(id);--> statement-breakpoint
+ALTER TABLE `transactions` ADD `loan_payment_event_id` text REFERENCES loan_payment_events(id);--> statement-breakpoint
+ALTER TABLE `transactions` ADD `loan_component` text;

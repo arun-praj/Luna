@@ -1,3 +1,5 @@
+import { addMoney } from "@/lib/money";
+
 export type CurrencyTotals = Record<string, number>;
 
 export function addCurrencyAmount(
@@ -6,7 +8,7 @@ export function addCurrencyAmount(
   amount: number,
 ) {
   const code = currency.trim().toUpperCase() || "NPR";
-  totals[code] = (totals[code] ?? 0) + amount;
+  totals[code] = addMoney(totals[code] ?? 0, amount);
 }
 
 export function currencyEntries(totals: CurrencyTotals) {

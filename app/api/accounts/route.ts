@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { accounts, transactions, users } from "@/backend/db/schema";
 import { accountInput, accountOrderInput } from "@/backend/domain/validation";
+import { normalizeMoney } from "@/lib/money";
 
 export const runtime = "nodejs";
 
@@ -19,17 +20,18 @@ export async function GET(request: Request) {
   const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
   const monthStart = `${month}-01`;
   const nextMonthStart = `${nextMonth}-01`;
+  const includeLoanAccounts = new URL(request.url).searchParams.get("includeLoanAccounts") === "true";
   const accountRows = await db
     .select()
     .from(accounts)
-    .where(eq(accounts.userId, userId))
+    .where(includeLoanAccounts ? eq(accounts.userId, userId) : and(eq(accounts.userId, userId), ne(accounts.type, "loan")))
     .orderBy(asc(accounts.displayOrder), asc(accounts.name))
     ;
   const monthlyRows = await db
     .select({
       accountId: transactions.accountId,
       type: transactions.type,
-      total: sql<number>`coalesce(sum(${transactions.amount}), 0)`,
+      total: sql<number>`round(coalesce(sum(${transactions.amount}), 0), 2)`,
     })
     .from(transactions)
     .where(and(
@@ -51,6 +53,7 @@ export async function GET(request: Request) {
     month,
     accounts: accountRows.map((account) => ({
       ...account,
+      currentBalance: normalizeMoney(account.currentBalance),
       ...(monthlyByAccount.get(account.id) ?? { monthlyIncome: 0, monthlyExpense: 0 }),
     })),
   });
@@ -76,7 +79,7 @@ export async function POST(request: Request) {
     await db.batch([insertAccount]);
   }
   const [account] = await db.select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))).limit(1);
-  return NextResponse.json({ account }, { status: 201 });
+  return NextResponse.json({ account: account ? { ...account, currentBalance: normalizeMoney(account.currentBalance) } : account }, { status: 201 });
 }
 
 export async function PATCH(request: Request) {
@@ -84,7 +87,7 @@ export async function PATCH(request: Request) {
   if (!userId) return errorResponse("Authentication required", 401);
   const parsed = accountOrderInput.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return errorResponse("Invalid account order", 400);
-  const owned = (await db.select({ id: accounts.id }).from(accounts).where(eq(accounts.userId, userId))).map((account) => account.id);
+  const owned = (await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, userId), ne(accounts.type, "loan")))).map((account) => account.id);
   const ownedSet = new Set(owned);
   const requested = parsed.data.accountIds;
   if (
@@ -95,5 +98,5 @@ export async function PATCH(request: Request) {
   for (const [index, id] of requested.entries()) {
     await db.update(accounts).set({ displayOrder: index }).where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
   }
-  return NextResponse.json({ accounts: await db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(asc(accounts.displayOrder), asc(accounts.name)) });
+  return NextResponse.json({ accounts: await db.select().from(accounts).where(and(eq(accounts.userId, userId), ne(accounts.type, "loan"))).orderBy(asc(accounts.displayOrder), asc(accounts.name)) });
 }

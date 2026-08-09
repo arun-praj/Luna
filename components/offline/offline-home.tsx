@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { createElement, useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -25,6 +25,7 @@ import { getAccountBackgroundColor } from "@/lib/account-appearance";
 import { avatarForPreset } from "@/lib/avatar";
 import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
 import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
+import { addMoney, sumMoney } from "@/lib/money";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { useOfflineSnapshot } from "@/lib/offline/use-offline-snapshot";
 import {
@@ -77,13 +78,13 @@ function adjustedBalances(accounts: OfflineAccount[], transactions: OfflineTrans
     if (transaction.syncStatus === "synced") continue;
     if (transaction.type === "goal_spend") continue;
     const current = balances.get(transaction.accountId) ?? 0;
-    if (transaction.type === "income") balances.set(transaction.accountId, current + transaction.amount);
-    else if (transaction.type === "adjust_balance") balances.set(transaction.accountId, current + transaction.amount);
-    else balances.set(transaction.accountId, current - transaction.amount);
+    if (transaction.type === "income") balances.set(transaction.accountId, addMoney(current, transaction.amount));
+    else if (transaction.type === "adjust_balance") balances.set(transaction.accountId, addMoney(current, transaction.amount));
+    else balances.set(transaction.accountId, addMoney(current, -transaction.amount));
     if (transaction.type === "transfer" && transaction.transferToAccountId) {
       balances.set(
         transaction.transferToAccountId,
-        (balances.get(transaction.transferToAccountId) ?? 0) + transaction.amount,
+        addMoney(balances.get(transaction.transferToAccountId) ?? 0, transaction.amount),
       );
     }
   }
@@ -123,6 +124,8 @@ function OfflineTransactionComposer({
   const transition = useAnimatedVisibility(open);
   const [type, setType] = useState<ComposerType>("expense");
   const [title, setTitle] = useState("");
+  const [merchantName, setMerchantName] = useState("");
+  const [merchantOpen, setMerchantOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState("");
   const [destinationAccountId, setDestinationAccountId] = useState("");
@@ -148,7 +151,7 @@ function OfflineTransactionComposer({
     ? `Cross-currency transfers are not supported yet. Both accounts must use ${selectedAccount.currency}.`
     : "";
   const projectedBalance = selectedAccount
-    ? selectedAccount.currentBalance + (type === "income" ? numericAmount : -numericAmount)
+    ? addMoney(selectedAccount.currentBalance, type === "income" ? numericAmount : -numericAmount)
     : 0;
   const errors = {
     title: title.trim() ? "" : `Add a title for this ${type}.`,
@@ -173,6 +176,8 @@ function OfflineTransactionComposer({
 
   const resetAndClose = () => {
     setTitle("");
+    setMerchantName("");
+    setMerchantOpen(false);
     setAmount("");
     setNotes("");
     setDestinationAccountId("");
@@ -197,6 +202,7 @@ function OfflineTransactionComposer({
         amount: numericAmount,
         categoryId,
         title: title.trim(),
+        merchantName: merchantName.trim() || null,
         notes: notes.trim() || null,
         date,
         transactionAt: new Date(`${date}T${time}:00`).toISOString(),
@@ -273,6 +279,15 @@ function OfflineTransactionComposer({
           />
           {attempted && errors.title ? <span className="mt-1.5 block text-xs font-medium text-expense">{errors.title}</span> : null}
         </label>
+
+        {merchantOpen ? (
+          <label className="mt-3 block">
+            <span className="flex items-center justify-between gap-3 text-xs font-semibold text-muted-foreground"><span>{type === "income" ? "Payer" : "Merchant"} <span className="font-medium">· Optional</span></span><button type="button" onClick={() => { setMerchantName(""); setMerchantOpen(false); }} className="text-expense">Remove</button></span>
+            <input autoFocus value={merchantName} onChange={(event) => setMerchantName(event.target.value)} placeholder={type === "income" ? "Who paid you?" : "Who did you pay?"} maxLength={120} className="mt-2 h-11 w-full rounded-[12px] border border-border bg-card px-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+          </label>
+        ) : (
+          <button type="button" onClick={() => setMerchantOpen(true)} className="mt-3 text-xs font-semibold text-primary underline decoration-primary/35 underline-offset-4">+ Add {type === "income" ? "payer" : "merchant"}</button>
+        )}
 
         <div className="mt-4 grid grid-cols-[minmax(0,1fr)_92px] gap-3">
           <label className="block">
@@ -404,6 +419,8 @@ export function OfflineHome() {
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState("");
   const [online, setOnline] = useState(false);
+  const [balanceRevealed, setBalanceRevealed] = useState(false);
+  const revealTimer = useRef<number | null>(null);
 
   useEffect(() => subscribeToNetworkStatus(setOnline), []);
   useEffect(() => {
@@ -413,6 +430,19 @@ export function OfflineHome() {
     ) return;
     void checkInternetConnection().then(setOnline);
   }, []);
+  useEffect(() => () => {
+    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+  }, []);
+
+  function revealBalance() {
+    if (!snapshot.profile?.hideTotalBalance) return;
+    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    setBalanceRevealed(true);
+    revealTimer.current = window.setTimeout(() => {
+      setBalanceRevealed(false);
+      revealTimer.current = null;
+    }, 5000);
+  }
 
   const balances = useMemo(
     () => adjustedBalances(snapshot.accounts, snapshot.transactions),
@@ -432,11 +462,11 @@ export function OfflineHome() {
     : balanceByCurrency[0]?.[0] ?? currency;
   const totalBalance = balanceByCurrency.find(([code]) => code === primaryCurrency)?.[1] ?? 0;
   const otherBalances = balanceByCurrency.filter(([code]) => code !== primaryCurrency);
-  const income = snapshot.transactions.filter((transaction) => transaction.type === "income").reduce((total, transaction) => total + transaction.amount, 0);
-  const expenses = snapshot.transactions.filter((transaction) => transaction.type === "expense").reduce((total, transaction) => total + transaction.amount, 0);
-  const savings = snapshot.transactions.filter((transaction) => transaction.type === "savings").reduce((total, transaction) => total + transaction.amount, 0);
-  const pendingCount = snapshot.transactions.filter((transaction) => transaction.syncStatus === "pending").length;
-  const failedCount = snapshot.transactions.filter((transaction) => transaction.syncStatus === "failed").length;
+  const income = sumMoney(snapshot.transactions.filter((transaction) => transaction.type === "income").map((transaction) => transaction.amount));
+  const expenses = sumMoney(snapshot.transactions.filter((transaction) => transaction.type === "expense").map((transaction) => transaction.amount));
+  const savings = sumMoney(snapshot.transactions.filter((transaction) => transaction.type === "savings").map((transaction) => transaction.amount));
+  const pendingCount = snapshot.transactions.filter((transaction) => transaction.syncStatus === "pending").length + snapshot.budgetMutations.filter((mutation) => mutation.status === "pending").length;
+  const failedCount = snapshot.transactions.filter((transaction) => transaction.syncStatus === "failed").length + snapshot.budgetMutations.filter((mutation) => mutation.status === "failed").length;
   const queuedCount = pendingCount + failedCount;
   const lastSyncLabel = formatLastSync(snapshot.profile?.cachedAt ?? null);
   const firstName = snapshot.profile?.name.trim().split(/\s+/)[0] || "there";
@@ -467,6 +497,20 @@ export function OfflineHome() {
     window.sessionStorage.removeItem("cocomelon.offline-return-path");
     window.location.replace(returnPath);
   };
+
+  useEffect(() => {
+    if (!online) return;
+    if (
+      process.env.NODE_ENV === "development" &&
+      new URLSearchParams(window.location.search).get("preview") === "1"
+    ) return;
+
+    // Do not leave someone trapped in the offline shell after the authoritative
+    // same-origin probe has recovered. A document navigation also replaces any
+    // stale service-worker navigation response with the live application.
+    const redirect = window.setTimeout(goOnline, 400);
+    return () => window.clearTimeout(redirect);
+  }, [online]);
 
   return (
     <>
@@ -522,6 +566,15 @@ export function OfflineHome() {
                   </p>
                 </div>
               </div>
+              {snapshot.budgetMutations.some((mutation) => mutation.status === "failed") ? (
+                <div className="mt-2 space-y-1.5" aria-label="Budget sync errors">
+                  {snapshot.budgetMutations.filter((mutation) => mutation.status === "failed").map((mutation) => (
+                    <p key={mutation.id} className="rounded-[9px] bg-expense-soft px-2.5 py-2 text-[10px] font-medium leading-4 text-expense">
+                      Budget {mutation.operation} needs attention · {mutation.error ?? "Tap retry when your connection is stable."}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <button type="button" onClick={() => void reconnect()} disabled={checking} className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[11px] border border-primary/20 bg-card px-4 text-xs font-semibold text-primary shadow-sm disabled:opacity-60">
               {checking ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="size-4" />}
@@ -542,10 +595,12 @@ export function OfflineHome() {
                 <p id="offline-balance-heading" className="text-sm font-medium text-muted-foreground">Total balance</p>
                 {isLoading ? <Skeleton className="mt-2 h-11 w-48" /> : (
                   <p className="mt-2 font-sans text-[38px] font-semibold leading-none tracking-[-0.05em] tabular-nums">
-                    <span className="mr-2 text-[16px] tracking-normal text-muted-foreground">{primaryCurrency}</span>{formatCurrencyAmount(totalBalance)}
+                    <span className="mr-2 text-[16px] tracking-normal text-muted-foreground">{primaryCurrency}</span>
+                    {snapshot.profile?.hideTotalBalance && !balanceRevealed ? <button type="button" onClick={revealBalance} aria-label="Reveal total balance for 5 seconds" className="rounded-md font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">****</button> : formatCurrencyAmount(totalBalance)}
                   </p>
                 )}
-                {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([code, amount], index) => <span key={code}>{index ? " · " : ""}{code} {formatCurrencyAmount(amount)}</span>)}</p> : null}
+                {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([code, amount], index) => <span key={code}>{index ? " · " : ""}{code} {snapshot.profile?.hideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>)}</p> : null}
+                {snapshot.profile?.hideTotalBalance ? <p aria-hidden={balanceRevealed} className={`mt-2 text-xs text-muted-foreground ${balanceRevealed ? "invisible" : ""}`}>Tap the balance to view it for 5 seconds.</p> : null}
               </div>
               {queuedCount ? (
                 <span className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-info-soft px-2.5 py-1 text-[11px] font-semibold text-info">
@@ -606,7 +661,7 @@ export function OfflineHome() {
                           <p className={`shrink-0 text-sm font-semibold tabular-nums ${positive || adjustmentSign === "+" ? "text-income" : transaction.type === "transfer" ? "text-info" : "text-expense"}`}>{positive ? "+" : adjustmentSign ?? (transaction.type === "transfer" ? "" : "−")}{transaction.accountCurrency} {formatAmount(Math.abs(transaction.amount))}</p>
                         </div>
                         <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="truncate">{transaction.notes || transaction.categoryName || transaction.type}</span>
+                          <span className="truncate">{transaction.merchantName || transaction.notes || transaction.categoryName || transaction.type}</span>
                           <span aria-hidden="true">·</span>
                           <span className="shrink-0">{transaction.accountName}</span>
                           {transaction.syncStatus !== "synced" ? <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 font-semibold ${transaction.syncStatus === "failed" ? "bg-expense-soft text-expense" : "bg-info-soft text-info"}`}>{transaction.syncStatus === "failed" ? "Needs attention" : "Waiting to sync"}</span> : null}

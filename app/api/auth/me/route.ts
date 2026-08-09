@@ -23,11 +23,12 @@ export async function PATCH(request: Request) {
   const parsed = z.object({
     name: z.string().trim().min(1).max(100).optional(),
     currency: z.string().trim().toUpperCase().length(3).optional(),
+    hideTotalBalance: z.boolean().optional(),
     monthlyReportEnabled: z.boolean().optional(),
     avatarPreset: z.string().trim().max(200).refine(isAvatarPreset).optional(),
-  }).refine((value) => value.name !== undefined || value.currency !== undefined || value.monthlyReportEnabled !== undefined || value.avatarPreset !== undefined).safeParse(await request.json().catch(() => null));
+  }).refine((value) => value.name !== undefined || value.currency !== undefined || value.hideTotalBalance !== undefined || value.monthlyReportEnabled !== undefined || value.avatarPreset !== undefined).safeParse(await request.json().catch(() => null));
   if (!parsed.success) return errorResponse("Invalid profile update", 400);
-  const updates = { updatedAt: new Date().toISOString(), ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}), ...(parsed.data.currency !== undefined ? { currency: parsed.data.currency } : {}), ...(parsed.data.monthlyReportEnabled !== undefined ? { monthlyReportEnabled: parsed.data.monthlyReportEnabled } : {}), ...(parsed.data.avatarPreset !== undefined ? { avatarPreset: parsed.data.avatarPreset } : {}) };
+  const updates = { updatedAt: new Date().toISOString(), ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}), ...(parsed.data.currency !== undefined ? { currency: parsed.data.currency } : {}), ...(parsed.data.hideTotalBalance !== undefined ? { hideTotalBalance: parsed.data.hideTotalBalance } : {}), ...(parsed.data.monthlyReportEnabled !== undefined ? { monthlyReportEnabled: parsed.data.monthlyReportEnabled } : {}), ...(parsed.data.avatarPreset !== undefined ? { avatarPreset: parsed.data.avatarPreset } : {}) };
   await db.update(users).set(updates).where(eq(users.id, userId));
   const user = await getUserById(userId);
   return user ? NextResponse.json({ user: toPublicUserProfile(user) }) : errorResponse("Authentication required", 401);

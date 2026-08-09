@@ -72,7 +72,7 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <div className="-mx-4 sm:-mx-5" style={{ backgroundColor: heroColor }}>
-          <StickyPageHeader className="!w-full bg-transparent px-4 pb-3 sm:px-5">
+          <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <Link

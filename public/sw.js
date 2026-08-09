@@ -1,5 +1,5 @@
 /* Luna PWA worker. Keep this file dependency-free so it works offline. */
-const STATIC_CACHE = "budget-static-v15";
+const STATIC_CACHE = "budget-static-v34";
 const OFFLINE_SHELL = "/offline";
 const CORE_ASSETS = [
   "/manifest.webmanifest",
@@ -84,6 +84,15 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  // Never cache Vite's development module graph. Those URLs are generated
+  // independently for React, React DOM, route modules, and HMR. Serving an old
+  // optimized dependency beside a newly generated renderer creates multiple
+  // React runtimes and causes invalid-hook errors across unrelated pages.
+  const isLocalDevelopment = self.location.hostname === "localhost" ||
+    self.location.hostname === "127.0.0.1" ||
+    self.location.hostname === "::1";
+  if (isLocalDevelopment) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

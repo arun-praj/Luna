@@ -14,12 +14,17 @@ import {
 } from "@/lib/offline/database";
 import type {
   OfflineAccount,
+  OfflineBudget,
+  OfflineBudgetMutation,
   OfflineCategory,
   OfflineProfile,
+  OfflineLoan,
   OfflineSavingsInstrument,
   OfflineTransaction,
   OfflineTransactionInput,
 } from "@/lib/offline/types";
+import { budgetPeriodBounds, withBudgetProgress, type Budget, type BudgetPeriod } from "@/lib/budgets";
+import { normalizeMoney } from "@/lib/money";
 
 const SYNC_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -31,6 +36,7 @@ type PublicProfileResponse = {
     name: string;
     email: string;
     currency: string;
+    hideTotalBalance?: boolean;
     avatarPreset: string;
   };
 };
@@ -71,6 +77,7 @@ type SavingsResponse = {
     icon: string | null;
   }>;
 };
+type LoanResponse = { loans: Array<{ id: string; accountId: string; name: string; counterparty: string | null; direction: "borrowed" | "lent"; currency: string; originalPrincipal: number; outstandingPrincipal: number; nextDueDate: string | null; status: "active" | "paid_off" | "archived" }> };
 
 type ServerTransaction = Omit<OfflineTransaction, "id" | "serverId" | "userId" | "syncError"> & {
   id: string;
@@ -78,6 +85,39 @@ type ServerTransaction = Omit<OfflineTransaction, "id" | "serverId" | "userId" |
 };
 
 type TransactionResponse = { transactions: ServerTransaction[] };
+type BudgetResponse = { budgets: Budget[] };
+
+export type OfflineBudgetInput = {
+  categoryId: string | null;
+  limitAmount: number;
+  period: BudgetPeriod;
+};
+
+function toOfflineBudget(userId: string, budget: Budget, cachedAt = new Date().toISOString()): OfflineBudget {
+  return {
+    ...budget,
+    localId: localDocumentId(userId, budget.clientGeneratedId ?? budget.id),
+    serverId: budget.id,
+    syncStatus: "synced",
+    syncError: null,
+    deleted: false,
+    cachedAt,
+  };
+}
+
+async function cacheRemoteBudgets(userId: string, budgets: Budget[]) {
+  const database = await getOfflineDatabase();
+  const cachedAt = new Date().toISOString();
+  const remote = budgets.map((budget) => toOfflineBudget(userId, budget, cachedAt));
+  await database.budgets.bulkUpsert(remote);
+  const pendingIds = new Set((await database.budgetMutations.find({ selector: { userId, status: { $in: ["pending", "failed"] } } }).exec()).map((document) => document.toJSON().budgetId));
+  const remoteIds = new Set(budgets.map((budget) => budget.id));
+  const cached = await database.budgets.find({ selector: { userId, syncStatus: "synced" } }).exec();
+  await Promise.all(cached.filter((document) => {
+    const budget = document.toJSON();
+    return !remoteIds.has(budget.id) && !pendingIds.has(budget.id);
+  }).map((document) => document.remove()));
+}
 
 function monthBounds() {
   const now = new Date();
@@ -99,6 +139,7 @@ function toOfflineTransaction(userId: string, transaction: ServerTransaction): O
     amount: transaction.amount,
     categoryId: transaction.categoryId ?? null,
     title: transaction.title,
+    merchantName: transaction.merchantName ?? null,
     notes: transaction.notes ?? null,
     tags: [...transaction.tags],
     date: transaction.date,
@@ -145,25 +186,30 @@ export async function refreshOfflineSnapshot() {
   if (typeof window === "undefined") return false;
   const { from, to } = monthBounds();
   const query = new URLSearchParams({ from, to });
-  const [profileResponse, accountResponse, categoryResponse, savingsResponse, transactionResponse] =
+  const [profileResponse, accountResponse, categoryResponse, savingsResponse, loanResponse, transactionResponse, ...budgetResponses] =
     await Promise.all([
       syncFetch("/api/auth/me"),
       syncFetch("/api/accounts"),
       syncFetch("/api/categories"),
       syncFetch("/api/savings/instruments"),
+      syncFetch("/api/loans"),
       syncFetch(`/api/transactions?${query.toString()}`),
+      syncFetch("/api/budgets?period=weekly"),
+      syncFetch("/api/budgets?period=monthly"),
+      syncFetch("/api/budgets?period=yearly"),
     ]);
 
   if (!profileResponse.ok) return false;
-  if (![accountResponse, categoryResponse, savingsResponse, transactionResponse].every((response) => response.ok)) {
+  if (![accountResponse, categoryResponse, savingsResponse, loanResponse, transactionResponse, ...budgetResponses].every((response) => response.ok)) {
     return false;
   }
 
-  const [{ user }, accountData, categoryData, savingsData, transactionData] = await Promise.all([
+  const [{ user }, accountData, categoryData, savingsData, loanData, transactionData] = await Promise.all([
     profileResponse.json() as Promise<PublicProfileResponse>,
     accountResponse.json() as Promise<AccountResponse>,
     categoryResponse.json() as Promise<CategoryResponse>,
     savingsResponse.json() as Promise<SavingsResponse>,
+    loanResponse.json() as Promise<LoanResponse>,
     transactionResponse.json() as Promise<TransactionResponse>,
   ]);
   const db = await getOfflineDatabase();
@@ -175,6 +221,7 @@ export async function refreshOfflineSnapshot() {
     name: user.name,
     email: user.email,
     currency: user.currency,
+    hideTotalBalance: user.hideTotalBalance === true,
     avatarPreset: user.avatarPreset,
     cachedAt,
   };
@@ -215,30 +262,38 @@ export async function refreshOfflineSnapshot() {
     icon: instrument.icon ?? null,
     cachedAt,
   }));
+  const offlineLoans: OfflineLoan[] = loanData.loans.map((loan) => ({ id: localDocumentId(userId, loan.id), serverId: loan.id, userId, accountId: loan.accountId, name: loan.name, counterparty: loan.counterparty, direction: loan.direction, currency: loan.currency, originalPrincipal: loan.originalPrincipal, outstandingPrincipal: loan.outstandingPrincipal, nextDueDate: loan.nextDueDate, status: loan.status, cachedAt }));
   const remoteTransactions = transactionData.transactions.map((transaction) =>
     toOfflineTransaction(userId, transaction),
   );
+  const budgetData = await Promise.all(budgetResponses.map((response) => response.json() as Promise<BudgetResponse>));
+  const remoteBudgets = budgetData.flatMap((result) => result.budgets);
 
   await Promise.all([
     db.profiles.upsert(profile),
     db.accounts.bulkUpsert(accounts),
     db.categories.bulkUpsert(categories),
     db.savingsInstruments.bulkUpsert(savingsInstruments),
+    db.loans.bulkUpsert(offlineLoans),
     db.transactions.bulkUpsert(remoteTransactions),
+    cacheRemoteBudgets(userId, remoteBudgets),
   ]);
 
-  const [cachedAccounts, cachedCategories, cachedSavingsInstruments] = await Promise.all([
+  const [cachedAccounts, cachedCategories, cachedSavingsInstruments, cachedLoans] = await Promise.all([
     db.accounts.find({ selector: { userId } }).exec(),
     db.categories.find({ selector: { userId } }).exec(),
     db.savingsInstruments.find({ selector: { userId } }).exec(),
+    db.loans.find({ selector: { userId } }).exec(),
   ]);
   const remoteAccountIds = new Set(accounts.map((account) => account.serverId));
   const remoteCategoryIds = new Set(categories.map((category) => category.serverId));
   const remoteSavingsInstrumentIds = new Set(savingsInstruments.map((instrument) => instrument.serverId));
+  const remoteLoanIds = new Set(offlineLoans.map((loan) => loan.serverId));
   await Promise.all([
     ...cachedAccounts.filter((document) => !remoteAccountIds.has(document.toJSON().serverId)).map((document) => document.remove()),
     ...cachedCategories.filter((document) => !remoteCategoryIds.has(document.toJSON().serverId)).map((document) => document.remove()),
     ...cachedSavingsInstruments.filter((document) => !remoteSavingsInstrumentIds.has(document.toJSON().serverId)).map((document) => document.remove()),
+    ...cachedLoans.filter((document) => !remoteLoanIds.has(document.toJSON().serverId)).map((document) => document.remove()),
   ]);
 
   const remoteLocalIds = new Set(remoteTransactions.map((transaction) => transaction.id));
@@ -282,9 +337,10 @@ export async function queueOfflineTransaction(input: OfflineTransactionInput) {
     userId,
     accountId: input.accountId,
     type: input.type,
-    amount: input.amount,
+    amount: normalizeMoney(input.amount),
     categoryId: input.categoryId ?? null,
     title: input.title.trim(),
+    merchantName: input.merchantName?.trim() || null,
     notes: input.notes?.trim() || null,
     tags: input.tags ?? [],
     date: input.date,
@@ -335,6 +391,7 @@ function transactionSyncPayload(
     amount: transaction.amount,
     categoryId: transaction.categoryId,
     title: transaction.title,
+    merchantName: transaction.merchantName,
     notes: transaction.notes,
     tags: [...transaction.tags],
     date: transaction.date,
@@ -398,9 +455,132 @@ export async function syncPendingTransactions() {
   return syncedCount;
 }
 
+export async function queueOfflineBudgetCreate(input: OfflineBudgetInput) {
+  const userId = getActiveOfflineUserId();
+  if (!userId) throw new Error("Open Luna online once before creating an offline budget.");
+  const database = await getOfflineDatabase();
+  const existing = await database.budgets.findOne({ selector: { userId, period: input.period, categoryId: input.categoryId, deleted: false } }).exec();
+  if (existing) return { budget: existing.toJSON(), existing: true };
+  const id = window.crypto.randomUUID();
+  const mutationId = window.crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const categoryDocument = input.categoryId ? await database.categories.findOne({ selector: { userId, serverId: input.categoryId } }).exec() : null;
+  const category = categoryDocument?.toJSON() ?? null;
+  const bounds = budgetPeriodBounds(input.period, timestamp.slice(0, 10));
+  const progress = withBudgetProgress(input.limitAmount, 0);
+  const budget: OfflineBudget = {
+    id,
+    localId: localDocumentId(userId, id),
+    serverId: null,
+    userId,
+    categoryId: input.categoryId,
+    name: category ? `${category.name} budget` : "Overall budget",
+    period: input.period,
+    clientGeneratedId: mutationId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    category: category ? { id: category.serverId, name: category.name, icon: category.icon, color: category.color } : null,
+    ...progress,
+    periodStart: bounds.start,
+    periodEnd: bounds.end,
+    syncStatus: "pending",
+    syncError: null,
+    deleted: false,
+    cachedAt: timestamp,
+  };
+  const mutation: OfflineBudgetMutation = { id: mutationId, userId, budgetId: id, operation: "create", ...input, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp };
+  await Promise.all([database.budgets.insert(budget), database.budgetMutations.insert(mutation)]);
+  notifyOfflineDataChanged();
+  return { budget, existing: false };
+}
+
+export async function queueOfflineBudgetUpdate(budgetId: string, input: OfflineBudgetInput) {
+  const userId = getActiveOfflineUserId();
+  if (!userId) throw new Error("Open Luna online once before editing an offline budget.");
+  const database = await getOfflineDatabase();
+  const document = await database.budgets.findOne({ selector: { userId, id: budgetId } }).exec();
+  if (!document) throw new Error("Budget is not available offline.");
+  const current = document.toJSON();
+  const categoryDocument = input.categoryId ? await database.categories.findOne({ selector: { userId, serverId: input.categoryId } }).exec() : null;
+  const category = categoryDocument?.toJSON() ?? null;
+  const timestamp = new Date().toISOString();
+  const bounds = budgetPeriodBounds(input.period, timestamp.slice(0, 10));
+  const progress = withBudgetProgress(input.limitAmount, current.spent);
+  await document.incrementalPatch({
+    categoryId: input.categoryId, name: category ? `${category.name} budget` : "Overall budget", category: category ? { id: category.serverId, name: category.name, icon: category.icon, color: category.color } : null,
+    period: input.period, ...progress, periodStart: bounds.start, periodEnd: bounds.end, updatedAt: timestamp, syncStatus: "pending", syncError: null,
+  });
+  const pendingCreate = await database.budgetMutations.findOne({ selector: { userId, budgetId, operation: "create" } }).exec();
+  if (pendingCreate) {
+    await pendingCreate.incrementalPatch({ ...input, status: "pending", error: null, updatedAt: timestamp });
+  } else {
+    const mutationId = window.crypto.randomUUID();
+    await database.budgetMutations.insert({ id: mutationId, userId, budgetId, operation: "update", ...input, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
+  }
+  notifyOfflineDataChanged();
+  return document.toJSON();
+}
+
+export async function queueOfflineBudgetDelete(budgetId: string) {
+  const userId = getActiveOfflineUserId();
+  if (!userId) throw new Error("Open Luna online once before deleting an offline budget.");
+  const database = await getOfflineDatabase();
+  const document = await database.budgets.findOne({ selector: { userId, id: budgetId } }).exec();
+  if (!document) return;
+  const pendingCreate = await database.budgetMutations.findOne({ selector: { userId, budgetId, operation: "create" } }).exec();
+  if (pendingCreate && !document.toJSON().serverId) {
+    await Promise.all([pendingCreate.remove(), document.remove()]);
+  } else {
+    const current = document.toJSON();
+    const timestamp = new Date().toISOString();
+    const mutationId = window.crypto.randomUUID();
+    await document.incrementalPatch({ deleted: true, syncStatus: "pending", syncError: null, updatedAt: timestamp });
+    await database.budgetMutations.insert({ id: mutationId, userId, budgetId: current.serverId ?? current.id, operation: "delete", categoryId: current.categoryId, limitAmount: current.limitAmount, period: current.period, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
+  }
+  notifyOfflineDataChanged();
+}
+
+export async function syncPendingBudgets() {
+  if (typeof window === "undefined") return 0;
+  const userId = getActiveOfflineUserId();
+  if (!userId) return 0;
+  const database = await getOfflineDatabase();
+  const documents = await database.budgetMutations.find({ selector: { userId, status: { $in: ["pending", "failed"] } }, sort: [{ createdAt: "asc" }] }).exec();
+  if (!documents.length) return 0;
+  const mutations = documents.map((document) => {
+    const item = document.toJSON();
+    return item.operation === "delete"
+      ? { operation: item.operation, mutationId: item.id, budgetId: item.budgetId }
+      : { operation: item.operation, mutationId: item.id, budgetId: item.budgetId, input: { categoryId: item.categoryId, limitAmount: item.limitAmount, period: item.period, clientGeneratedId: item.clientGeneratedId, updatedAt: item.updatedAt } };
+  });
+  const response = await syncFetch("/api/budgets/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mutations }) });
+  const result = await response.json().catch(() => null) as { results?: Array<{ mutationId: string; status: "synced" | "failed"; budgetId?: string; error?: string }>; budgets?: Budget[]; error?: string } | null;
+  if (!response.ok || !result?.results) throw new Error(result?.error ?? "Unable to sync budgets.");
+  let synced = 0;
+  for (const document of documents) {
+    const mutation = document.toJSON();
+    const mutationResult = result.results.find((item) => item.mutationId === document.id);
+    if (mutationResult?.status === "synced") {
+      await document.remove();
+      if (mutation.operation === "delete") {
+        const deletedBudget = await database.budgets.findOne({ selector: { userId, id: mutation.budgetId } }).exec()
+          ?? await database.budgets.findOne({ selector: { userId, serverId: mutation.budgetId } }).exec();
+        await deletedBudget?.remove();
+      }
+      synced += 1;
+    } else {
+      await document.incrementalPatch({ status: "failed", error: mutationResult?.error ?? "Budget could not be synced.", updatedAt: new Date().toISOString() });
+    }
+  }
+  if (result.budgets) await cacheRemoteBudgets(userId, result.budgets);
+  notifyOfflineDataChanged();
+  return synced;
+}
+
 export async function reconcileOfflineData() {
   const online = await checkInternetConnection();
   if (!online) return false;
   await syncPendingTransactions();
+  await syncPendingBudgets();
   return refreshOfflineSnapshot();
 }
