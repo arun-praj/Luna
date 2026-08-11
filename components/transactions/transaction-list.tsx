@@ -61,6 +61,7 @@ export type ApiTransaction = {
   tags: string[];
   date: string;
   transactionAt: string;
+  createdAt?: string | null;
 };
 
 type TransactionListProps = {
@@ -117,6 +118,20 @@ function formatAmount(transaction: ApiTransaction) {
 
 function compactAccountName(account: string) {
   return account.replace(" Wallet", "").replace(" account", "");
+}
+
+function transactionTime(transaction: Pick<ApiTransaction, "date" | "transactionAt" | "createdAt">) {
+  const transactionAt = Date.parse(transaction.transactionAt);
+  if (!Number.isNaN(transactionAt)) return transactionAt;
+  const createdAt = Date.parse(transaction.createdAt ?? "");
+  if (!Number.isNaN(createdAt)) return createdAt;
+  return dateValue(transaction.date).getTime();
+}
+
+function timelineTime(item: TimelineItem) {
+  const timestamp = Date.parse(item.timestamp);
+  if (!Number.isNaN(timestamp)) return timestamp;
+  return dateValue(item.date).getTime();
 }
 
 export function TransactionList({ limit, searchable = false, period, includeAlerts = false }: TransactionListProps) {
@@ -176,9 +191,9 @@ export function TransactionList({ limit, searchable = false, period, includeAler
     };
   }, [period, refreshVersion, searchQuery, searchable]);
 
-  const visibleTransactions = limit
-    ? transactions.slice(0, limit)
-    : transactions;
+  const visibleTransactions = [...transactions]
+    .sort((left, right) => transactionTime(right) - transactionTime(left) || right.id.localeCompare(left.id))
+    .slice(0, limit);
   const groups = useMemo(() => {
     const timeline: TimelineItem[] = visibleTransactions.map((transaction) => ({
       kind: "transaction",
@@ -197,7 +212,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
       }
       timeline.push({ kind: "alert", id: alert.id, date, timestamp: alert.createdAt || alert.showAt, alert });
     }
-    timeline.sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+    timeline.sort((left, right) => timelineTime(right) - timelineTime(left) || right.id.localeCompare(left.id));
     const grouped = new Map<string, TimelineItem[]>();
     for (const item of timeline) grouped.set(item.date, [...(grouped.get(item.date) ?? []), item]);
     return [...grouped.entries()];

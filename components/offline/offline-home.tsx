@@ -10,6 +10,8 @@ import {
   Check,
   CloudOff,
   CloudUpload,
+  Eye,
+  EyeOff,
   Landmark,
   LoaderCircle,
   Plus,
@@ -444,6 +446,17 @@ export function OfflineHome() {
     }, 5000);
   }
 
+  function toggleBalanceVisibility() {
+    if (!snapshot.profile?.hideTotalBalance) return;
+    if (balanceRevealed) {
+      if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+      revealTimer.current = null;
+      setBalanceRevealed(false);
+      return;
+    }
+    revealBalance();
+  }
+
   const balances = useMemo(
     () => adjustedBalances(snapshot.accounts, snapshot.transactions),
     [snapshot.accounts, snapshot.transactions],
@@ -596,11 +609,17 @@ export function OfflineHome() {
                 {isLoading ? <Skeleton className="mt-2 h-11 w-48" /> : (
                   <p className="mt-2 font-sans text-[38px] font-semibold leading-none tracking-[-0.05em] tabular-nums">
                     <span className="mr-2 text-[16px] tracking-normal text-muted-foreground">{primaryCurrency}</span>
-                    {snapshot.profile?.hideTotalBalance && !balanceRevealed ? <button type="button" onClick={revealBalance} aria-label="Reveal total balance for 5 seconds" className="rounded-md font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">****</button> : formatCurrencyAmount(totalBalance)}
+                    {snapshot.profile?.hideTotalBalance ? (
+                      <button type="button" onClick={toggleBalanceVisibility} aria-label={balanceRevealed ? "Hide total balance" : "Show total balance"} className="inline-flex items-center gap-2 rounded-md font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+                        <span>{balanceRevealed ? formatCurrencyAmount(totalBalance) : "****"}</span>
+                        <span className="flex size-7 items-center justify-center rounded-full bg-surface-subtle text-muted-foreground shadow-sm">
+                          {balanceRevealed ? <Eye aria-hidden="true" className="size-4" /> : <EyeOff aria-hidden="true" className="size-4" />}
+                        </span>
+                      </button>
+                    ) : formatCurrencyAmount(totalBalance)}
                   </p>
                 )}
                 {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([code, amount], index) => <span key={code}>{index ? " · " : ""}{code} {snapshot.profile?.hideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>)}</p> : null}
-                {snapshot.profile?.hideTotalBalance ? <p aria-hidden={balanceRevealed} className={`mt-2 text-xs text-muted-foreground ${balanceRevealed ? "invisible" : ""}`}>Tap the balance to view it for 5 seconds.</p> : null}
               </div>
               {queuedCount ? (
                 <span className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-info-soft px-2.5 py-1 text-[11px] font-semibold text-info">

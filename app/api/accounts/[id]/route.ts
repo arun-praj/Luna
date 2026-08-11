@@ -31,7 +31,7 @@ export async function PATCH(request: Request, { params }: Context) {
   const updates = input;
   if (updates.isDefault) await db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId));
   if (Object.keys(updates).length > 0) await db.update(accounts).set(updates).where(eq(accounts.id, id));
-  if (openingBalance !== undefined) await createBalanceAdjustment(db, userId, id, openingBalance);
+  if (openingBalance !== undefined) await createBalanceAdjustment(userId, id, openingBalance);
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
   return NextResponse.json({ account: account ? { ...account, currentBalance: normalizeMoney(account.currentBalance) } : account });
 }

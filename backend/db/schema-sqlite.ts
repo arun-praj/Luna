@@ -306,6 +306,7 @@ export const accounts = sqliteTable(
     name: text("name").notNull(),
     type: text("type", { enum: ["checking", "cash", "credit_card", "general", "savings", "investment", "loan", "other"] }).notNull(),
     currency: text("currency").notNull().default("NPR"),
+    openingBalance: real("opening_balance").notNull().default(0),
     currentBalance: real("current_balance").notNull().default(0),
     isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     displayOrder: integer("display_order").notNull().default(0),

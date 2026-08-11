@@ -65,7 +65,12 @@ export async function GET(request: Request) {
       OR lower(coalesce((SELECT name FROM accounts AS destination_accounts WHERE destination_accounts.id = ${transactions.transferToAccountId}), '')) LIKE ${pattern}
     )` as never);
   }
-  const rows = await db.select().from(transactions).where(and(...filters)).orderBy(desc(transactions.date), desc(transactions.createdAt));
+  const rows = await db.select().from(transactions).where(and(...filters)).orderBy(
+    desc(transactions.transactionAt),
+    desc(transactions.date),
+    desc(transactions.createdAt),
+    desc(transactions.id),
+  );
   const tagRows = tag
     ? rows.filter((row) => {
       try {

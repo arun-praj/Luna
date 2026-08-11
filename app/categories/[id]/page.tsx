@@ -1,28 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  Banknote,
-  BriefcaseBusiness,
-  CarFront,
-  Clapperboard,
-  Dumbbell,
   Edit3,
-  Gift,
-  HeartPulse,
-  House,
-  PawPrint,
-  Plane,
-  ShieldCheck,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Sprout,
-  Utensils,
-  WalletCards,
-  GraduationCap,
   Gauge,
   ChevronRight,
 } from "lucide-react";
@@ -56,36 +38,6 @@ type CategoryTransaction = {
   date: string;
 };
 
-const iconMap = {
-  Plants: Sprout,
-  Home: House,
-  Housing: House,
-  Food: Utensils,
-  "Food & Drinks": Utensils,
-  "Online Shopping": ShoppingBag,
-  OnlineShopping: ShoppingBag,
-  ShoppingBag,
-  Shopping: ShoppingCart,
-  "Shopping Cart": ShoppingCart,
-  ShoppingCart,
-  Groceries: ShoppingBasket,
-  Travel: CarFront,
-  Flights: Plane,
-  Health: HeartPulse,
-  Fitness: Dumbbell,
-  "Fitness & Sports": Dumbbell,
-  Gifts: Gift,
-  Work: BriefcaseBusiness,
-  Wallet: WalletCards,
-  Cash: Banknote,
-  Education: GraduationCap,
-  Pets: PawPrint,
-  Pet: PawPrint,
-  Movies: Clapperboard,
-  "Movies & Entertainment": Clapperboard,
-  "Entertainment & Movies": Clapperboard,
-  Insurance: ShieldCheck,
-} as const;
 function formatAmount(amount: number) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 0,
@@ -218,9 +170,7 @@ export default function CategoryActivityPage({
     };
   }, [categoryId, period]);
 
-  const CategoryIcon = category
-    ? (iconMap[category.icon as keyof typeof iconMap] ?? House)
-    : House;
+  const categoryIcon = getCategoryIcon(category?.icon, category?.name);
   const categoryAccent = category?.color ?? "#e3eee9";
   const total = useMemo(
     () =>
@@ -292,7 +242,7 @@ export default function CategoryActivityPage({
               className="mx-auto flex size-12 items-center justify-center rounded-[14px] text-primary"
               style={{ backgroundColor: "rgba(255,255,255,0.58)" }}
             >
-              <CategoryIcon aria-hidden="true" className="size-6" />
+              {createElement(categoryIcon, { "aria-hidden": true, className: "size-6" })}
             </div>
             <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               Category activity

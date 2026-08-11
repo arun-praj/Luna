@@ -4,30 +4,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
-  Banknote,
-  BriefcaseBusiness,
-  CarFront,
-  Clapperboard,
-  Dumbbell,
-  Gift,
-  GraduationCap,
-  HeartPulse,
-  House,
-  PawPrint,
-  Plane,
   Plus,
   Search,
-  ShieldCheck,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Sprout,
-  Utensils,
   WalletCards,
 } from "lucide-react";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { GuideIcon } from "@/components/guides/feature-guide";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { getCategoryIcon } from "@/lib/category-appearance";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { Skeleton } from "@/components/ui/data-skeleton";
 
@@ -40,46 +24,6 @@ type Category = {
   usageFrequency: number;
 };
 
-const iconMap = {
-  Plants: Sprout,
-  Home: House,
-  Housing: House,
-  Food: Utensils,
-  "Food & Drinks": Utensils,
-  "Online Shopping": ShoppingBag,
-  OnlineShopping: ShoppingBag,
-  ShoppingBag,
-  Shopping: ShoppingCart,
-  "Shopping Cart": ShoppingCart,
-  ShoppingCart,
-  Groceries: ShoppingBasket,
-  Travel: CarFront,
-  Flights: Plane,
-  Health: HeartPulse,
-  Fitness: Dumbbell,
-  "Fitness & Sports": Dumbbell,
-  Gifts: Gift,
-  Work: BriefcaseBusiness,
-  Wallet: WalletCards,
-  Cash: Banknote,
-  Education: GraduationCap,
-  Pets: PawPrint,
-  Pet: PawPrint,
-  Movies: Clapperboard,
-  "Movies & Entertainment": Clapperboard,
-  "Entertainment & Movies": Clapperboard,
-  Insurance: ShieldCheck,
-} as const;
-const fallbackIcons = [
-  House,
-  Utensils,
-  ShoppingBag,
-  CarFront,
-  HeartPulse,
-  Gift,
-  BriefcaseBusiness,
-  WalletCards,
-];
 const colorClasses = [
   "border-[#c7dbd2] bg-[#e3eee9]",
   "border-[#e6c9c4] bg-[#f8e9e6]",
@@ -272,9 +216,7 @@ export default function CategoriesPage() {
             <div className="route-data-reveal mt-4 grid grid-cols-3 gap-2 min-[520px]:gap-3">
               {filteredCategories.map((category, index) => {
                 const iconColor = categoryForeground(category.color);
-                const Icon =
-                  iconMap[category.icon as keyof typeof iconMap] ??
-                  fallbackIcons[index % fallbackIcons.length];
+                const Icon = getCategoryIcon(category.icon, category.name);
                 return (
                   <Link
                     href={withReturnTo(`/categories/${category.id}`, currentRoute)}

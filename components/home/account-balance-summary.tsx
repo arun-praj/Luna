@@ -170,6 +170,17 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
     }, 5000);
   }
 
+  function toggleBalanceVisibility() {
+    if (!hideTotalBalance) return;
+    if (balanceRevealed) {
+      if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+      revealTimer.current = null;
+      setBalanceRevealed(false);
+      return;
+    }
+    revealBalance();
+  }
+
   const balanceByCurrency = useMemo(() => {
     const totals = {} as Record<string, number>;
     const detailedLoanAccounts = new Set(loans.map((loan) => loan.accountId));
@@ -337,7 +348,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
                   amount={formatCurrencyAmount(primaryBalance)}
                   hideTotalBalance={hideTotalBalance}
                   balanceRevealed={balanceRevealed}
-                  onReveal={revealBalance}
+                  onToggleVisibility={toggleBalanceVisibility}
                   href="/accounts"
                   className={`hover:text-primary ${primaryBalance < 0 ? "text-expense" : "text-income"}`}
                 />
@@ -347,7 +358,6 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
         </div>
       </div>
       {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([currency, amount], index) => <span key={currency}>{index ? " · " : ""}{currency} {hideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>)}</p> : null}
-      {hideTotalBalance ? <p aria-hidden={balanceRevealed} className={`mt-2 text-xs text-muted-foreground ${balanceRevealed ? "invisible" : ""}`}>Tap the balance to view it for 5 seconds.</p> : null}
 
       <MonthlyOverviewCards compact />
 

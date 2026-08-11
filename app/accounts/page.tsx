@@ -153,14 +153,14 @@ function SummaryAmount({
   preferredCurrency,
   hideTotalBalance = false,
   balanceRevealed = false,
-  onReveal,
+  onToggleVisibility,
 }: {
   entries: Array<[string, number]>;
   isLoading: boolean;
   preferredCurrency: string;
   hideTotalBalance?: boolean;
   balanceRevealed?: boolean;
-  onReveal?: () => void;
+  onToggleVisibility?: () => void;
 }) {
   if (isLoading) return <Skeleton className="inline-block h-7 w-24 align-middle" />;
   const [primary, ...others] = entries.length ? entries : [[preferredCurrency, 0] as [string, number]];
@@ -174,7 +174,7 @@ function SummaryAmount({
             amount={formatCurrencyAmount(primary[1])}
             hideTotalBalance={hideTotalBalance}
             balanceRevealed={balanceRevealed}
-            onReveal={onReveal ?? (() => undefined)}
+            onToggleVisibility={onToggleVisibility ?? (() => undefined)}
             className={amountColor}
           />
         </span>
@@ -391,6 +391,17 @@ export default function AccountsPage() {
     }, 5000);
   }
 
+  function toggleBalanceVisibility() {
+    if (!hideTotalBalance) return;
+    if (balanceRevealed) {
+      if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
+      balanceRevealTimer.current = null;
+      setBalanceRevealed(false);
+      return;
+    }
+    revealTotalBalance();
+  }
+
   const { excludedEntries, totalEntries } = useMemo(() => {
     const includedTotals: Record<string, number> = {};
     const excludedTotals: Record<string, number> = {};
@@ -497,9 +508,8 @@ export default function AccountsPage() {
                 preferredCurrency={displayCurrency}
                 hideTotalBalance={hideTotalBalance}
                 balanceRevealed={balanceRevealed}
-                onReveal={revealTotalBalance}
+                onToggleVisibility={toggleBalanceVisibility}
               />
-              {hideTotalBalance ? <span aria-hidden={balanceRevealed} className={`mt-1 block text-[10px] font-medium text-muted-foreground ${balanceRevealed ? "invisible" : ""}`}>Tap to view for 5 seconds</span> : null}
             </p>
           </div>
           <div className="min-w-0 px-4 py-4">

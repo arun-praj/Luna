@@ -4,37 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Baby,
-  Banknote,
-  BookOpen,
-  BriefcaseBusiness,
-  BusFront,
-  CarFront,
   Check,
-  Clapperboard,
-  Coffee,
-  Dumbbell,
-  Fuel,
-  Gamepad2,
-  Gift,
-  GraduationCap,
-  HeartPulse,
-  House,
-  Music,
   Palette,
-  PawPrint,
-  Plane,
-  Shirt,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Sprout,
-  Smartphone,
   Trash2,
-  Utensils,
-  WalletCards,
-  Wifi,
-  Wrench,
   X,
 } from "lucide-react";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
@@ -44,38 +16,9 @@ import { getReturnTo } from "@/lib/navigation";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { categoryIconOptions } from "@/lib/category-appearance";
 
-const iconOptions = [
-  { label: "Home", icon: House },
-  { label: "Food", icon: Utensils },
-  { label: "Shopping", icon: ShoppingBag },
-  { label: "Travel", icon: CarFront },
-  { label: "Health", icon: HeartPulse },
-  { label: "Gifts", icon: Gift },
-  { label: "Work", icon: BriefcaseBusiness },
-  { label: "Wallet", icon: WalletCards },
-  { label: "Plants", icon: Sprout },
-  { label: "Online Shopping", icon: ShoppingBag },
-  { label: "Shopping Cart", icon: ShoppingCart },
-  { label: "Groceries", icon: ShoppingBasket },
-  { label: "Coffee", icon: Coffee },
-  { label: "Fitness", icon: Dumbbell },
-  { label: "Education", icon: GraduationCap },
-  { label: "Flights", icon: Plane },
-  { label: "Pets", icon: PawPrint },
-  { label: "Gaming", icon: Gamepad2 },
-  { label: "Music", icon: Music },
-  { label: "Baby", icon: Baby },
-  { label: "Clothing", icon: Shirt },
-  { label: "Repairs", icon: Wrench },
-  { label: "Internet", icon: Wifi },
-  { label: "Cash", icon: Banknote },
-  { label: "Books", icon: BookOpen },
-  { label: "Phone", icon: Smartphone },
-  { label: "Fuel", icon: Fuel },
-  { label: "Bus", icon: BusFront },
-  { label: "Movies", icon: Clapperboard },
-];
+const iconOptions = categoryIconOptions;
 const quickIconOptions = iconOptions.slice(0, 8);
 
 const colorOptions = [

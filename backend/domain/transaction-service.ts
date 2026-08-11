@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { accounts, categories, goals, recurringTemplates, savingsInstruments, transactionHistory, transactions } from "@/backend/db/schema";
 import type { z } from "zod";
@@ -8,10 +8,22 @@ import { addMoney, normalizeMoney, subtractMoney } from "@/lib/money";
 
 export type TransactionInput = z.infer<typeof transactionInput>;
 type DatabaseExecutor = typeof db;
+type BatchStatement = Parameters<typeof db.batch>[0][number];
+type TransactionRow = typeof transactions.$inferSelect;
+type TransactionChange = {
+  row: TransactionRow;
+  direction: 1 | -1;
+};
 
 const BALANCE_ADJUSTMENT_CATEGORY = "Balance adjustment";
 
-export function serializeTransaction(row: typeof transactions.$inferSelect) {
+function normalizeTransactionAt(value: string | null | undefined, fallback: string) {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
+}
+
+export function serializeTransaction(row: TransactionRow) {
   return {
     ...row,
     amount: normalizeMoney(row.amount),
@@ -23,46 +35,61 @@ export function serializeTransaction(row: typeof transactions.$inferSelect) {
   };
 }
 
-function balanceDelta(type: typeof transactions.$inferSelect["type"], amount: number) {
+function balanceDelta(type: TransactionRow["type"], amount: number) {
   if (type === "goal_spend") return 0;
   return normalizeMoney(type === "income" || type === "adjust_balance" ? amount : -amount);
 }
 
-function goalAllocationDelta(type: typeof transactions.$inferSelect["type"], amount: number) {
+function goalAllocationDelta(type: TransactionRow["type"], amount: number) {
   if (type === "savings" || type === "goal_spend") {
     return normalizeMoney(type === "goal_spend" ? -amount : amount);
   }
   return 0;
 }
 
-type AccountBalanceChange = {
-  accountId: string;
-  type: typeof transactions.$inferSelect["type"];
-  amount: number;
-  transferToAccountId?: string | null;
-  direction: 1 | -1;
-};
+function instrumentDelta(row: TransactionRow, direction: 1 | -1) {
+  if (row.type !== "savings" || !row.savingsInstrumentId) return 0;
+  return direction === 1 ? row.amount : -row.amount;
+}
 
-async function assertProjectedAccountBalances(
-  tx: DatabaseExecutor,
-  userId: string,
-  changes: AccountBalanceChange[],
-) {
-  const deltas = new Map<string, number>();
-  for (const change of changes) {
-    const delta = change.direction === 1 ? balanceDelta(change.type, change.amount) : -balanceDelta(change.type, change.amount);
-    deltas.set(change.accountId, addMoney(deltas.get(change.accountId) ?? 0, delta));
-    if ((change.type === "transfer" || change.type === "savings") && change.transferToAccountId) {
-      deltas.set(change.transferToAccountId, addMoney(deltas.get(change.transferToAccountId) ?? 0, -delta));
+function executeBatch(statements: BatchStatement[]) {
+  if (!statements.length) return Promise.resolve([]);
+  return db.batch(statements as [BatchStatement, ...BatchStatement[]]);
+}
+
+function isAtomicPreconditionError(error: unknown) {
+  return error instanceof Error && error.message.includes("transaction_history.id");
+}
+
+async function executeFinancialBatch(statements: BatchStatement[]) {
+  try {
+    return await executeBatch(statements);
+  } catch (error) {
+    if (isAtomicPreconditionError(error)) {
+      throw new Error("Financial data changed while saving. Please retry.");
     }
+    throw error;
   }
-  for (const [accountId, delta] of deltas) {
-    const [account] = await tx.select().from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, userId))).limit(1);
-    if (!account) throw new Error("Account not found");
-    if (!account.allowNegativeBalance && addMoney(account.currentBalance, delta) < 0) {
-      throw new Error(`Account "${account.name}" cannot go below zero. Enable Allow negative balance in account settings.`);
-    }
-  }
+}
+
+/**
+ * D1 batch() is the transaction boundary. D1 does not expose a conditional
+ * rollback primitive, so a failed compare-and-set is converted into a
+ * deliberately rolled-back unique-key violation inside the same batch.
+ */
+function addAtomicGuard(statements: BatchStatement[], transactionId: string, userId: string, condition: SQL, timestamp: string) {
+  const guardId = randomUUID();
+  const guardInsert = sql`
+    INSERT INTO transaction_history (id, transaction_id, changed_by, change_type, changed_at)
+    SELECT ${guardId}, ${transactionId}, ${userId}, 'created', ${timestamp}
+    WHERE NOT (${condition})
+  `;
+  const guardRollback = sql`
+    INSERT INTO transaction_history (id, transaction_id, changed_by, change_type, changed_at)
+    SELECT ${guardId}, ${transactionId}, ${userId}, 'created', ${timestamp}
+    WHERE EXISTS (SELECT 1 FROM transaction_history WHERE id = ${guardId})
+  `;
+  statements.push(db.run(guardInsert), db.run(guardRollback));
 }
 
 function assertPositiveAmount(input: TransactionInput) {
@@ -120,27 +147,57 @@ async function assertReferences(tx: DatabaseExecutor, userId: string, input: Tra
     const [template] = await tx.select().from(recurringTemplates).where(and(eq(recurringTemplates.id, input.recurringTemplateId), eq(recurringTemplates.userId, userId))).limit(1);
     if (!template) throw new Error("Recurring template not found");
   }
-  if (goal) {
-    if (input.type === "savings" && goal.status === "archived") throw new Error("Archived goals cannot receive or return funds");
-  }
+  if (goal && input.type === "savings" && goal.status === "archived") throw new Error("Archived goals cannot receive or return funds");
   if (input.savingsInstrumentId) {
     const [instrument] = await tx.select().from(savingsInstruments).where(and(eq(savingsInstruments.id, input.savingsInstrumentId), eq(savingsInstruments.userId, userId))).limit(1);
     if (!instrument) throw new Error("Savings instrument not found");
   }
 }
 
-async function assertProjectedGoalAllocations(
-  tx: DatabaseExecutor,
-  userId: string,
-  changes: Array<{ goalId?: string | null; type: typeof transactions.$inferSelect["type"]; amount: number; direction: 1 | -1 }>,
-) {
+type AccountBalanceChange = {
+  accountId: string;
+  type: TransactionRow["type"];
+  amount: number;
+  transferToAccountId?: string | null;
+  direction: 1 | -1;
+};
+
+function accountChanges(changes: TransactionChange[]): AccountBalanceChange[] {
+  return changes.map(({ row, direction }) => ({
+    accountId: row.accountId,
+    type: row.type,
+    amount: row.amount,
+    transferToAccountId: row.transferToAccountId,
+    direction,
+  }));
+}
+
+async function assertProjectedAccountBalances(tx: DatabaseExecutor, userId: string, changes: AccountBalanceChange[]) {
   const deltas = new Map<string, number>();
   for (const change of changes) {
-    if (!change.goalId) continue;
-    const baseDelta = goalAllocationDelta(change.type, change.amount);
-    const delta = change.direction === 1 ? baseDelta : -baseDelta;
+    const delta = change.direction === 1 ? balanceDelta(change.type, change.amount) : -balanceDelta(change.type, change.amount);
+    deltas.set(change.accountId, addMoney(deltas.get(change.accountId) ?? 0, delta));
+    if ((change.type === "transfer" || change.type === "savings") && change.transferToAccountId) {
+      deltas.set(change.transferToAccountId, addMoney(deltas.get(change.transferToAccountId) ?? 0, -delta));
+    }
+  }
+  for (const [accountId, delta] of deltas) {
+    const [account] = await tx.select().from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, userId))).limit(1);
+    if (!account) throw new Error("Account not found");
+    if (!account.allowNegativeBalance && addMoney(account.currentBalance, delta) < 0) {
+      throw new Error(`Account "${account.name}" cannot go below zero. Enable Allow negative balance in account settings.`);
+    }
+  }
+}
+
+async function assertProjectedGoalAllocations(tx: DatabaseExecutor, userId: string, changes: TransactionChange[]) {
+  const deltas = new Map<string, number>();
+  for (const { row, direction } of changes) {
+    if (!row.goalId) continue;
+    const baseDelta = goalAllocationDelta(row.type, row.amount);
+    const delta = direction === 1 ? baseDelta : -baseDelta;
     if (delta === 0) continue;
-    deltas.set(change.goalId, addMoney(deltas.get(change.goalId) ?? 0, delta));
+    deltas.set(row.goalId, addMoney(deltas.get(row.goalId) ?? 0, delta));
   }
   for (const [goalId, delta] of deltas) {
     const [goal] = await tx.select().from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, userId))).limit(1);
@@ -162,7 +219,7 @@ async function assertGoalActionForCreate(tx: DatabaseExecutor, userId: string, i
   }
 }
 
-async function assertGoalActionForUpdate(tx: DatabaseExecutor, userId: string, old: typeof transactions.$inferSelect, input: TransactionInput) {
+async function assertGoalActionForUpdate(tx: DatabaseExecutor, userId: string, old: TransactionRow, input: TransactionInput) {
   if (input.type !== "goal_spend" || !input.goalId) return;
   const [goal] = await tx.select().from(goals).where(and(eq(goals.id, input.goalId), eq(goals.userId, userId))).limit(1);
   if (!goal) throw new Error("Goal not found");
@@ -171,114 +228,163 @@ async function assertGoalActionForUpdate(tx: DatabaseExecutor, userId: string, o
   if (input.amount > allocationAfterReversingOld) throw new Error("Spend amount cannot exceed the goal allocation");
 }
 
-async function applyEffect(tx: DatabaseExecutor, row: typeof transactions.$inferSelect, direction: 1 | -1) {
-  const baseDelta = balanceDelta(row.type, row.amount);
-  const delta = direction === 1 ? baseDelta : -baseDelta;
-  if (delta !== 0) {
-    await tx.update(accounts).set({ currentBalance: sql`round(${accounts.currentBalance} + ${delta}, 2)` }).where(eq(accounts.id, row.accountId));
-  }
-  if ((row.type === "transfer" || (row.type === "savings" && row.goalId)) && row.transferToAccountId) await tx.update(accounts).set({ currentBalance: sql`round(${accounts.currentBalance} + ${-delta}, 2)` }).where(eq(accounts.id, row.transferToAccountId));
-  const goalBaseDelta = row.goalId ? goalAllocationDelta(row.type, row.amount) : 0;
-  const goalDelta = direction === 1 ? goalBaseDelta : -goalBaseDelta;
-  if (row.goalId && goalDelta !== 0) {
-    await tx.update(goals).set({ allocatedAmount: sql`round(${goals.allocatedAmount} + ${goalDelta}, 2)` }).where(eq(goals.id, row.goalId));
-    const [goal] = await tx.select().from(goals).where(eq(goals.id, row.goalId)).limit(1);
-    if (goal) {
-      const isArchivedSpend = row.type === "goal_spend" && direction === 1 && goal.allocatedAmount <= 0;
-      const status = isArchivedSpend ? "archived" : goal.allocatedAmount >= goal.targetAmount ? "completed" : "active";
-      await tx.update(goals).set({ status }).where(eq(goals.id, goal.id));
+function goalActionCondition(input: TransactionInput, old?: TransactionRow) {
+  if (!input.goalId) return null;
+  const oldContribution = old && old.goalId === input.goalId ? goalAllocationDelta(old.type, old.amount) : 0;
+  const available = sql`round(${goals.allocatedAmount} - ${oldContribution}, 2)`;
+  if (input.type === "goal_spend") return sql`${available} >= ${input.amount} AND ${available} >= ${goals.targetAmount}`;
+  if (input.type === "savings" && input.amount < 0) return sql`${available} + ${input.amount} >= 0`;
+  return null;
+}
+
+async function getSnapshots(userId: string) {
+  const [accountRows, goalRows, instrumentRows] = await Promise.all([
+    db.select().from(accounts).where(eq(accounts.userId, userId)),
+    db.select().from(goals).where(eq(goals.userId, userId)),
+    db.select().from(savingsInstruments).where(eq(savingsInstruments.userId, userId)),
+  ]);
+  return {
+    accounts: new Map(accountRows.map((row) => [row.id, row])),
+    goals: new Map(goalRows.map((row) => [row.id, row])),
+    instruments: new Map(instrumentRows.map((row) => [row.id, row])),
+  };
+}
+
+function buildEffectStatements(
+  statements: BatchStatement[],
+  transactionId: string,
+  userId: string,
+  timestamp: string,
+  changes: TransactionChange[],
+  snapshots: Awaited<ReturnType<typeof getSnapshots>>,
+  goalActions: Map<string, SQL>,
+) {
+  const accountDeltas = new Map<string, number>();
+  const goalDeltas = new Map<string, number>();
+  const instrumentDeltas = new Map<string, number>();
+  const goalSpendApplied = new Map<string, boolean>();
+
+  for (const { row, direction } of changes) {
+    const sourceDelta = direction === 1 ? balanceDelta(row.type, row.amount) : -balanceDelta(row.type, row.amount);
+    accountDeltas.set(row.accountId, addMoney(accountDeltas.get(row.accountId) ?? 0, sourceDelta));
+    if ((row.type === "transfer" || row.type === "savings") && row.transferToAccountId) {
+      accountDeltas.set(row.transferToAccountId, addMoney(accountDeltas.get(row.transferToAccountId) ?? 0, -sourceDelta));
+    }
+    if (row.goalId) {
+      const goalDelta = direction === 1 ? goalAllocationDelta(row.type, row.amount) : -goalAllocationDelta(row.type, row.amount);
+      goalDeltas.set(row.goalId, addMoney(goalDeltas.get(row.goalId) ?? 0, goalDelta));
+      if (row.type === "goal_spend") goalSpendApplied.set(row.goalId, direction === 1);
+    }
+    if (row.savingsInstrumentId) {
+      instrumentDeltas.set(row.savingsInstrumentId, addMoney(instrumentDeltas.get(row.savingsInstrumentId) ?? 0, instrumentDelta(row, direction)));
     }
   }
-  if (row.savingsInstrumentId && row.type === "savings") {
-    const instrumentDelta = direction === 1 ? row.amount : -row.amount;
-    await tx.update(savingsInstruments).set({ currentBalance: sql`round(${savingsInstruments.currentBalance} + ${instrumentDelta}, 2)` }).where(eq(savingsInstruments.id, row.savingsInstrumentId));
+
+  for (const [accountId, delta] of accountDeltas) {
+    if (delta === 0) continue;
+    const account = snapshots.accounts.get(accountId);
+    if (!account) throw new Error("Account not found");
+    const where = and(
+      eq(accounts.id, accountId),
+      eq(accounts.userId, userId),
+      sql`round(${accounts.currentBalance}, 2) = round(${normalizeMoney(account.currentBalance)}, 2)`,
+      or(eq(accounts.allowNegativeBalance, true), sql`round(${accounts.currentBalance} + ${delta}, 2) >= 0`),
+    );
+    statements.push(db.update(accounts).set({ currentBalance: sql`round(${accounts.currentBalance} + ${delta}, 2)` }).where(where));
+    addAtomicGuard(statements, transactionId, userId, sql`changes() = 1`, timestamp);
+  }
+
+  for (const [goalId, delta] of goalDeltas) {
+    const goal = snapshots.goals.get(goalId);
+    if (!goal) throw new Error("Goal not found");
+    const finalAllocation = sql`round(${goals.allocatedAmount} + ${delta}, 2)`;
+    const status = goalSpendApplied.get(goalId)
+      ? sql`CASE WHEN ${finalAllocation} <= 0 THEN 'archived' WHEN ${finalAllocation} >= ${goals.targetAmount} THEN 'completed' ELSE 'active' END`
+      : sql`CASE WHEN ${finalAllocation} >= ${goals.targetAmount} THEN 'completed' ELSE 'active' END`;
+    const conditions = [
+      eq(goals.id, goalId),
+      eq(goals.userId, userId),
+      sql`round(${goals.allocatedAmount}, 2) = round(${normalizeMoney(goal.allocatedAmount)}, 2)`,
+      sql`${finalAllocation} >= 0`,
+    ];
+    const action = goalActions.get(goalId);
+    if (action) conditions.push(action);
+    statements.push(db.update(goals).set({ allocatedAmount: finalAllocation, status: status as never }).where(and(...conditions)));
+    addAtomicGuard(statements, transactionId, userId, sql`changes() = 1`, timestamp);
+  }
+
+  for (const [goalId, condition] of goalActions) {
+    if (goalDeltas.has(goalId)) continue;
+    const goal = snapshots.goals.get(goalId);
+    if (!goal) throw new Error("Goal not found");
+    addAtomicGuard(statements, transactionId, userId, and(eq(goals.id, goalId), eq(goals.userId, userId), condition!), timestamp);
+  }
+
+  for (const [instrumentId, delta] of instrumentDeltas) {
+    if (delta === 0) continue;
+    const instrument = snapshots.instruments.get(instrumentId);
+    if (!instrument) throw new Error("Savings instrument not found");
+    statements.push(db.update(savingsInstruments).set({ currentBalance: sql`round(${savingsInstruments.currentBalance} + ${delta}, 2)` }).where(and(
+      eq(savingsInstruments.id, instrumentId),
+      eq(savingsInstruments.userId, userId),
+      sql`round(${savingsInstruments.currentBalance}, 2) = round(${normalizeMoney(instrument.currentBalance)}, 2)`,
+    )));
+    addAtomicGuard(statements, transactionId, userId, sql`changes() = 1`, timestamp);
   }
 }
 
-async function history(tx: DatabaseExecutor, transactionId: string, userId: string, changeType: "created" | "updated" | "deleted", oldValues?: unknown, newValues?: unknown) {
-  await tx.insert(transactionHistory).values({ id: randomUUID(), transactionId, changedBy: userId, changeType, oldValues: oldValues ? JSON.stringify(oldValues) : null, newValues: newValues ? JSON.stringify(newValues) : null, changedAt: new Date().toISOString() });
+async function getBalanceAdjustmentCategory(userId: string) {
+  const [existing] = await db.select().from(categories).where(and(
+    eq(categories.userId, userId),
+    eq(categories.name, BALANCE_ADJUSTMENT_CATEGORY),
+    eq(categories.type, "expense"),
+  )).limit(1);
+  return existing;
 }
 
-async function getOrCreateBalanceAdjustmentCategory(tx: DatabaseExecutor, userId: string) {
-  const [existing] = await tx
-    .select()
-    .from(categories)
-    .where(and(
-      eq(categories.userId, userId),
-      eq(categories.name, BALANCE_ADJUSTMENT_CATEGORY),
-      eq(categories.type, "expense"),
-    ))
-    .limit(1);
-  if (existing) return existing;
-
-  const [created] = await tx.insert(categories).values({
+async function commitCreatedTransaction(userId: string, row: TransactionRow, changes: TransactionChange[], goalActions = new Map<string, SQL>(), categoryToCreate?: typeof categories.$inferInsert) {
+  const snapshots = await getSnapshots(userId);
+  const timestamp = row.updatedAt;
+  const statements: BatchStatement[] = [];
+  if (categoryToCreate) statements.push(db.insert(categories).values(categoryToCreate));
+  statements.push(db.insert(transactions).values(row));
+  addAtomicGuard(statements, row.id, userId, sql`changes() = 1`, timestamp);
+  buildEffectStatements(statements, row.id, userId, timestamp, changes, snapshots, goalActions);
+  statements.push(db.insert(transactionHistory).values({
     id: randomUUID(),
-    userId,
-    name: BALANCE_ADJUSTMENT_CATEGORY,
-    type: "expense",
-    icon: "Cash",
-    color: "#e3eee9",
-  }).returning();
-  if (!created) throw new Error("Unable to create the balance adjustment category");
-  return created;
+    transactionId: row.id,
+    changedBy: userId,
+    changeType: "created",
+    oldValues: null,
+    newValues: JSON.stringify(serializeTransaction(row)),
+    changedAt: timestamp,
+  }));
+  await executeFinancialBatch(statements);
+  return row;
 }
 
-export async function createBalanceAdjustment(
-  tx: DatabaseExecutor,
-  userId: string,
-  accountId: string,
-  nextBalance: number,
-) {
-  const [account] = await tx
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.id, accountId), eq(accounts.userId, userId)))
-    .limit(1);
+export async function createBalanceAdjustment(userId: string, accountId: string, nextBalance: number) {
+  const [account] = await db.select().from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, userId))).limit(1);
   if (!account) throw new Error("Account not found");
-
   const normalizedNextBalance = normalizeMoney(nextBalance);
   const amount = subtractMoney(normalizedNextBalance, account.currentBalance);
   if (amount === 0) return null;
-
-  await assertProjectedAccountBalances(tx, userId, [{
-    accountId,
-    type: "adjust_balance",
-    amount,
-    direction: 1,
-  }]);
-
-  const category = await getOrCreateBalanceAdjustmentCategory(tx, userId);
-  const timestamp = new Date().toISOString();
-  const [created] = await tx.insert(transactions).values({
-    id: randomUUID(),
-    userId,
-    accountId,
-    type: "adjust_balance",
-    amount,
-    categoryId: category.id,
-    splits: "[]",
-    title: BALANCE_ADJUSTMENT_CATEGORY,
-    merchantName: null,
-    notes: `Balance changed from ${normalizeMoney(account.currentBalance)} to ${normalizedNextBalance}.`,
-    tags: "[]",
-    isRecurring: false,
-    recurringTemplateId: null,
-    receiptImageUrl: null,
-    goalId: null,
-    savingsInstrumentId: null,
-    transferToAccountId: null,
-    date: timestamp.slice(0, 10),
-    transactionAt: timestamp,
-    syncStatus: "synced",
-    clientGeneratedId: null,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }).returning();
-  if (!created) throw new Error("Unable to create the balance adjustment transaction");
-
-  await applyEffect(tx, created, 1);
-  await history(tx, created.id, userId, "created", undefined, serializeTransaction(created));
-  return created;
+  const row = {
+    id: randomUUID(), userId, accountId, type: "adjust_balance" as const, amount,
+    categoryId: null, splits: "[]", title: BALANCE_ADJUSTMENT_CATEGORY, merchantName: null,
+    notes: `Balance changed from ${normalizeMoney(account.currentBalance)} to ${normalizedNextBalance}.`, tags: "[]",
+    isRecurring: false, recurringTemplateId: null, receiptImageUrl: null, goalId: null,
+    savingsInstrumentId: null, transferToAccountId: null, date: new Date().toISOString().slice(0, 10),
+    transactionAt: new Date().toISOString(), syncStatus: "synced" as const, clientGeneratedId: null,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  } as TransactionRow;
+  const category = await getBalanceAdjustmentCategory(userId);
+  const categoryId = category?.id ?? randomUUID();
+  row.categoryId = categoryId;
+  await assertProjectedAccountBalances(db, userId, [{ accountId, type: row.type, amount, direction: 1 }]);
+  return commitCreatedTransaction(userId, row, [{ row, direction: 1 }], new Map(), category ? undefined : {
+    id: categoryId, userId, name: BALANCE_ADJUSTMENT_CATEGORY, type: "expense", icon: "Cash", color: "#e3eee9",
+  });
 }
 
 export async function createTransaction(userId: string, input: TransactionInput) {
@@ -290,23 +396,35 @@ export async function createTransaction(userId: string, input: TransactionInput)
   }
   await assertReferences(db, userId, normalizedInput);
   await assertGoalActionForCreate(db, userId, normalizedInput);
-  await assertProjectedGoalAllocations(db, userId, [{ goalId: normalizedInput.goalId, type: normalizedInput.type, amount: normalizedInput.amount, direction: 1 }]);
-  await assertProjectedAccountBalances(db, userId, [{ accountId: normalizedInput.accountId, type: normalizedInput.type, amount: normalizedInput.amount, transferToAccountId: normalizedInput.transferToAccountId, direction: 1 }]);
   const timestamp = new Date().toISOString();
   const row = {
     id: randomUUID(), userId, accountId: normalizedInput.accountId, type: normalizedInput.type, amount: normalizedInput.amount,
-    categoryId: normalizedInput.splits?.length ? null : normalizedInput.categoryId ?? null, splits: JSON.stringify(normalizedInput.splits ?? []), title: normalizedInput.title, merchantName: normalizedInput.merchantName ?? null, notes: normalizedInput.notes ?? null, tags: JSON.stringify(normalizedInput.tags ?? []),
-    isRecurring: normalizedInput.isRecurring ?? false, recurringTemplateId: normalizedInput.recurringTemplateId ?? null,
-    receiptImageUrl: normalizedInput.receiptImageUrl ?? null, goalId: normalizedInput.goalId ?? null,
-    savingsInstrumentId: normalizedInput.savingsInstrumentId ?? null, transferToAccountId: normalizedInput.transferToAccountId ?? null,
-    date: normalizedInput.date, transactionAt: normalizedInput.transactionAt ?? `${normalizedInput.date}T12:00:00.000Z`, syncStatus: "synced" as const, clientGeneratedId: normalizedInput.clientGeneratedId ?? null,
-    createdAt: timestamp, updatedAt: timestamp,
-  };
-  const [created] = await db.insert(transactions).values(row).returning();
-  if (!created) throw new Error("Unable to create transaction");
-  await applyEffect(db, created, 1);
-  await history(db, created.id, userId, "created", undefined, serializeTransaction(created));
-  return created;
+    categoryId: normalizedInput.splits?.length ? null : normalizedInput.categoryId ?? null, splits: JSON.stringify(normalizedInput.splits ?? []),
+    title: normalizedInput.title, merchantName: normalizedInput.merchantName ?? null, notes: normalizedInput.notes ?? null,
+    tags: JSON.stringify(normalizedInput.tags ?? []), isRecurring: normalizedInput.isRecurring ?? false,
+    recurringTemplateId: normalizedInput.recurringTemplateId ?? null, receiptImageUrl: normalizedInput.receiptImageUrl ?? null,
+    goalId: normalizedInput.goalId ?? null, savingsInstrumentId: normalizedInput.savingsInstrumentId ?? null,
+    transferToAccountId: normalizedInput.transferToAccountId ?? null, date: normalizedInput.date,
+    transactionAt: normalizeTransactionAt(normalizedInput.transactionAt, timestamp), syncStatus: "synced" as const,
+    clientGeneratedId: normalizedInput.clientGeneratedId ?? null, createdAt: timestamp, updatedAt: timestamp,
+  } as TransactionRow;
+  const changes = [{ row, direction: 1 as const }];
+  await assertProjectedGoalAllocations(db, userId, changes);
+  await assertProjectedAccountBalances(db, userId, accountChanges(changes));
+  const goalActions = new Map<string, SQL>();
+  const action = goalActionCondition(normalizedInput);
+  if (normalizedInput.goalId && action) goalActions.set(normalizedInput.goalId, action);
+  return commitCreatedTransaction(userId, row, changes, goalActions);
+}
+
+function transactionCas(old: TransactionRow, userId: string) {
+  return and(
+    eq(transactions.id, old.id), eq(transactions.userId, userId), eq(transactions.updatedAt, old.updatedAt),
+    eq(transactions.accountId, old.accountId), eq(transactions.type, old.type), eq(transactions.amount, old.amount),
+    sql`${transactions.goalId} IS ${old.goalId}`,
+    sql`${transactions.savingsInstrumentId} IS ${old.savingsInstrumentId}`,
+    sql`${transactions.transferToAccountId} IS ${old.transferToAccountId}`,
+  );
 }
 
 export async function updateTransaction(userId: string, id: string, input: TransactionInput) {
@@ -317,20 +435,40 @@ export async function updateTransaction(userId: string, id: string, input: Trans
   if (old.loanPaymentEventId) throw new Error("Edit this transaction from its loan payment");
   await assertReferences(db, userId, normalizedInput);
   await assertGoalActionForUpdate(db, userId, old, normalizedInput);
-  await assertProjectedGoalAllocations(db, userId, [
-    { goalId: old.goalId, type: old.type, amount: old.amount, direction: -1 },
-    { goalId: normalizedInput.goalId, type: normalizedInput.type, amount: normalizedInput.amount, direction: 1 },
-  ]);
-  await assertProjectedAccountBalances(db, userId, [
-    { accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 },
-    { accountId: normalizedInput.accountId, type: normalizedInput.type, amount: normalizedInput.amount, transferToAccountId: normalizedInput.transferToAccountId, direction: 1 },
-  ]);
-  await applyEffect(db, old, -1);
-  const updatedAt = new Date().toISOString();
-  const [next] = await db.update(transactions).set({ accountId: normalizedInput.accountId, type: normalizedInput.type, amount: normalizedInput.amount, categoryId: normalizedInput.splits?.length ? null : normalizedInput.categoryId ?? null, splits: JSON.stringify(normalizedInput.splits ?? []), title: normalizedInput.title, merchantName: normalizedInput.merchantName ?? null, notes: normalizedInput.notes ?? null, tags: JSON.stringify(normalizedInput.tags ?? []), isRecurring: normalizedInput.isRecurring ?? false, recurringTemplateId: normalizedInput.recurringTemplateId ?? null, receiptImageUrl: normalizedInput.receiptImageUrl ?? null, goalId: normalizedInput.goalId ?? null, savingsInstrumentId: normalizedInput.savingsInstrumentId ?? null, transferToAccountId: normalizedInput.transferToAccountId ?? null, date: normalizedInput.date, transactionAt: normalizedInput.transactionAt ?? `${normalizedInput.date}T12:00:00.000Z`, updatedAt }).where(eq(transactions.id, id)).returning();
-  if (!next) throw new Error("Unable to update transaction");
-  await applyEffect(db, next, 1);
-  await history(db, id, userId, "updated", serializeTransaction(old), serializeTransaction(next));
+  const next = {
+    ...old, accountId: normalizedInput.accountId, type: normalizedInput.type, amount: normalizedInput.amount,
+    categoryId: normalizedInput.splits?.length ? null : normalizedInput.categoryId ?? null, splits: JSON.stringify(normalizedInput.splits ?? []),
+    title: normalizedInput.title, merchantName: normalizedInput.merchantName ?? null, notes: normalizedInput.notes ?? null,
+    tags: JSON.stringify(normalizedInput.tags ?? []), isRecurring: normalizedInput.isRecurring ?? false,
+    recurringTemplateId: normalizedInput.recurringTemplateId ?? null, receiptImageUrl: normalizedInput.receiptImageUrl ?? null,
+    goalId: normalizedInput.goalId ?? null, savingsInstrumentId: normalizedInput.savingsInstrumentId ?? null,
+    transferToAccountId: normalizedInput.transferToAccountId ?? null, date: normalizedInput.date,
+    transactionAt: normalizeTransactionAt(normalizedInput.transactionAt ?? old.transactionAt, new Date().toISOString()),
+    updatedAt: new Date().toISOString(),
+  };
+  const changes = [{ row: old, direction: -1 as const }, { row: next, direction: 1 as const }];
+  await assertProjectedGoalAllocations(db, userId, changes);
+  await assertProjectedAccountBalances(db, userId, accountChanges(changes));
+  const snapshots = await getSnapshots(userId);
+  const timestamp = next.updatedAt;
+  const statements: BatchStatement[] = [];
+  const goalActions = new Map<string, SQL>();
+  const action = goalActionCondition(normalizedInput, old);
+  if (normalizedInput.goalId && action) goalActions.set(normalizedInput.goalId, action);
+  buildEffectStatements(statements, id, userId, timestamp, changes, snapshots, goalActions);
+  statements.push(db.update(transactions).set({
+    accountId: next.accountId, type: next.type, amount: next.amount, categoryId: next.categoryId, splits: next.splits,
+    title: next.title, merchantName: next.merchantName, notes: next.notes, tags: next.tags, isRecurring: next.isRecurring,
+    recurringTemplateId: next.recurringTemplateId, receiptImageUrl: next.receiptImageUrl, goalId: next.goalId,
+    savingsInstrumentId: next.savingsInstrumentId, transferToAccountId: next.transferToAccountId, date: next.date,
+    transactionAt: next.transactionAt, updatedAt: next.updatedAt,
+  }).where(transactionCas(old, userId)));
+  addAtomicGuard(statements, id, userId, sql`changes() = 1`, timestamp);
+  statements.push(db.insert(transactionHistory).values({
+    id: randomUUID(), transactionId: id, changedBy: userId, changeType: "updated",
+    oldValues: JSON.stringify(serializeTransaction(old)), newValues: JSON.stringify(serializeTransaction(next)), changedAt: timestamp,
+  }));
+  await executeFinancialBatch(statements);
   return next;
 }
 
@@ -338,10 +476,19 @@ export async function deleteTransaction(userId: string, id: string) {
   const [old] = await db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1);
   if (!old) throw new Error("Transaction not found");
   if (old.loanPaymentEventId) throw new Error("Reverse this transaction from its loan payment");
-  await assertProjectedGoalAllocations(db, userId, [{ goalId: old.goalId, type: old.type, amount: old.amount, direction: -1 }]);
-  await assertProjectedAccountBalances(db, userId, [{ accountId: old.accountId, type: old.type, amount: old.amount, transferToAccountId: old.transferToAccountId, direction: -1 }]);
-  await applyEffect(db, old, -1);
-  await history(db, id, userId, "deleted", serializeTransaction(old));
-  await db.delete(transactions).where(eq(transactions.id, id));
+  const changes = [{ row: old, direction: -1 as const }];
+  await assertProjectedGoalAllocations(db, userId, changes);
+  await assertProjectedAccountBalances(db, userId, accountChanges(changes));
+  const snapshots = await getSnapshots(userId);
+  const timestamp = new Date().toISOString();
+  const statements: BatchStatement[] = [];
+  buildEffectStatements(statements, id, userId, timestamp, changes, snapshots, new Map());
+  statements.push(db.insert(transactionHistory).values({
+    id: randomUUID(), transactionId: id, changedBy: userId, changeType: "deleted",
+    oldValues: JSON.stringify(serializeTransaction(old)), newValues: null, changedAt: timestamp,
+  }));
+  statements.push(db.delete(transactions).where(transactionCas(old, userId)));
+  addAtomicGuard(statements, id, userId, sql`changes() = 1`, timestamp);
+  await executeFinancialBatch(statements);
   return old;
 }

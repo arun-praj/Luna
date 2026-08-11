@@ -46,6 +46,15 @@ const CATEGORY_SUGGESTIONS: CategoryChoice[] = [
   ["Loans", "Wallet", "#fbe8dc"], ["Work", "Work", "#ece6f3"], ["Car", "Travel", "#e3eff6"],
   ["Family", "Home", "#f8e9e6"], ["Travel", "Flights", "#e3eff6"], ["Fitness & Sports", "Fitness", "#e5f3eb"],
   ["Pet", "Pets", "#f3e8d4"], ["Entertainment & Movies", "Movies", "#ece6f3"],
+  ["Electronics", "Electronics", "#e3eff6"], ["Gadgets", "Gadgets", "#ece6f3"],
+  ["Electricity", "Electricity", "#f7f0c9"], ["Maintenance", "Maintenance", "#f3e8d4"],
+  ["Kitchen", "Kitchen", "#f8e9e6"], ["Television", "Television", "#e3eff6"],
+  ["Camping", "Camping", "#e3eee9"], ["Hiking", "Hiking", "#e3eff6"],
+  ["Trekking", "Trekking", "#e5f3eb"], ["Battery", "Battery", "#f7f0c9"],
+  ["Cutlery", "Cutlery", "#f3e8d4"], ["Lighting", "Lighting", "#f7f0c9"],
+  ["Headphones", "Headphones", "#ece6f3"], ["School", "School", "#e3eff6"],
+  ["Degree", "Degree", "#ece6f3"], ["Temperature", "Temperature", "#f8e9e6"],
+  ["Building", "Building", "#e3eee9"], ["Office", "Office", "#e3eff6"],
 ].map(([name, icon, color, type]) => ({ name, icon, color, type: type === "income" ? "income" : "expense" })) as CategoryChoice[];
 
 function Icon({ name }: { name: string }) {

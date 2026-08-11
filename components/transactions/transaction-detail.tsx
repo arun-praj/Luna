@@ -40,8 +40,11 @@ import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
 import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { BudgetStatusBadge } from "@/components/shadcn-space/badge/badge-09";
-import { getCategoryIcon } from "@/lib/category-appearance";
-import { getCategoryForeground } from "@/lib/category-appearance";
+import {
+  categoryIconOptions,
+  getCategoryForeground,
+  getCategoryIcon,
+} from "@/lib/category-appearance";
 import { getSavingsIconSource } from "@/lib/savings-appearance";
 import {
   getAccountBackgroundColor,
@@ -97,15 +100,6 @@ const transactionTypes = [
 }>;
 
 const tagOptions = ["Recurring", "Personal", "Work", "Reimbursable"];
-const categoryIconOptions = [
-  "Home", "Food", "Shopping", "Travel", "Health", "Gifts", "Work", "Wallet",
-  "Plants", "Online Shopping", "Shopping Cart", "Groceries", "Coffee", "Fitness",
-  "Education", "Flights", "Pets", "Movies", "Cash", "Insurance", "Car", "Transport",
-  "Vehicles", "Salary", "Freelancing", "Investments", "FD", "Loans", "Family",
-  "Entertainment", "Music", "Restaurants", "Clothing", "Bills", "Utilities", "Rent",
-  "Phone", "Internet", "Subscriptions", "Fuel", "Medicine", "Bank", "Savings", "CreditCard",
-  "Vacation", "Repairs", "Events", "Charity", "Hobbies", "Receipts", "Books",
-];
 
 type CategoryOption = {
   id: string;
@@ -1895,16 +1889,16 @@ export function TransactionDetail({
                         </div>
                         <div className="mt-2 max-h-[180px] overflow-y-auto overscroll-contain rounded-[10px] pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-surface-subtle [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-foreground/25">
                           <div className="grid grid-cols-4 gap-1.5 min-[380px]:grid-cols-5">
-                          {categoryIconOptions.slice(0, showMoreCategoryIcons ? categoryIconOptions.length : 8).map((iconName) => {
-                            const Icon = getCategoryIcon(iconName);
-                            const selected = newCategoryIcon === iconName;
+                          {categoryIconOptions.slice(0, showMoreCategoryIcons ? categoryIconOptions.length : 8).map((option) => {
+                            const Icon = option.icon;
+                            const selected = newCategoryIcon === option.label;
                             return (
                               <button
                                 type="button"
-                                key={iconName}
-                                aria-label={iconName}
+                                key={option.label}
+                                aria-label={option.label}
                                 aria-pressed={selected}
-                                onClick={() => setNewCategoryIcon(iconName)}
+                                onClick={() => setNewCategoryIcon(option.label)}
                                 className={`flex min-h-11 items-center justify-center rounded-[9px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-primary"}`}
                               >
                                 <Icon aria-hidden="true" className="size-5" strokeWidth={1.8} />
