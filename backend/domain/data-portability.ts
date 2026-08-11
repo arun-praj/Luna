@@ -5,6 +5,9 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import {
   accounts,
+  budgetAllocations,
+  budgetPeriods,
+  budgetTemplates,
   categories,
   dataExports,
   dataImports,
@@ -80,7 +83,7 @@ function remapSplits(value: unknown, categoryIds: Map<string, string>, sharedCat
 }
 
 export async function createPortableExport(userId: string, exportedAt: string) {
-  const [userAccounts, userCategories, tags, types, instruments, userGoals, userLoans, budgets, templates, userTransactions] = await Promise.all([
+  const [userAccounts, userCategories, tags, types, instruments, userGoals, userLoans, budgets, userBudgetTemplates, userBudgetPeriods, userBudgetAllocations, templates, userTransactions] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.userId, userId)),
     db.select().from(categories).where(eq(categories.userId, userId)),
     db.select().from(userTags).where(eq(userTags.userId, userId)),
@@ -89,6 +92,9 @@ export async function createPortableExport(userId: string, exportedAt: string) {
     db.select().from(goals).where(eq(goals.userId, userId)),
     db.select().from(loans).where(eq(loans.userId, userId)),
     db.select().from(spendingBudgets).where(eq(spendingBudgets.userId, userId)),
+    db.select().from(budgetTemplates).where(eq(budgetTemplates.userId, userId)),
+    db.select().from(budgetPeriods).where(eq(budgetPeriods.userId, userId)),
+    db.select({ allocation: budgetAllocations }).from(budgetAllocations).innerJoin(budgetPeriods, eq(budgetAllocations.periodId, budgetPeriods.id)).where(eq(budgetPeriods.userId, userId)).then((rows) => rows.map(({ allocation }) => allocation)),
     db.select().from(recurringTemplates).where(eq(recurringTemplates.userId, userId)),
     db.select().from(transactions).where(eq(transactions.userId, userId)),
   ]);
@@ -118,6 +124,9 @@ export async function createPortableExport(userId: string, exportedAt: string) {
       loanInstallments: installments,
       loanPaymentEvents: payments,
       budgets,
+      budgetTemplates: userBudgetTemplates,
+      budgetPeriods: userBudgetPeriods,
+      budgetAllocations: userBudgetAllocations,
       recurringTemplates: templates,
       transactions: userTransactions,
       recurringOccurrences: occurrences,
@@ -141,12 +150,15 @@ export async function importPortableData(userId: string, payload: unknown) {
   const rateRows = rows(data.loanRatePeriods, "loan rates");
   const installmentRows = rows(data.loanInstallments, "loan installments");
   const paymentRows = rows(data.loanPaymentEvents, "loan payments");
-  const budgetRows = rows(data.budgets, "budgets");
+  const budgetRows = rows(data.budgets ?? [], "budgets");
+  const budgetTemplateRows = rows(data.budgetTemplates ?? [], "budget templates");
+  const budgetPeriodRows = rows(data.budgetPeriods ?? [], "budget periods");
+  const budgetAllocationRows = rows(data.budgetAllocations ?? [], "budget allocations");
   const templateRows = rows(data.recurringTemplates, "recurring templates");
   const transactionRows = rows(data.transactions, "transactions");
   const occurrenceRows = rows(data.recurringOccurrences, "recurring occurrences");
   const historyRows = rows(data.transactionHistory, "transaction history");
-  const allRows = [accountRows, categoryRows, tagRows, typeRows, instrumentRows, goalRows, loanRows, rateRows, installmentRows, paymentRows, budgetRows, templateRows, transactionRows, occurrenceRows, historyRows];
+  const allRows = [accountRows, categoryRows, tagRows, typeRows, instrumentRows, goalRows, loanRows, rateRows, installmentRows, paymentRows, budgetRows, budgetTemplateRows, budgetPeriodRows, budgetAllocationRows, templateRows, transactionRows, occurrenceRows, historyRows];
   const itemCount = allRows.reduce((total, list) => total + list.length, 0);
   if (itemCount > 250_000) throw new Error("This backup contains too many records");
 
@@ -158,21 +170,26 @@ export async function importPortableData(userId: string, payload: unknown) {
   const loanIds = mapIds(loanRows, "loan");
   const installmentIds = mapIds(installmentRows, "loan installment");
   const paymentIds = mapIds(paymentRows, "loan payment");
+  const budgetTemplateIds = mapIds(budgetTemplateRows, "budget template");
+  const budgetPeriodIds = mapIds(budgetPeriodRows, "budget period");
+  const skippedBudgetTemplateIds = new Set<string>();
   const templateIds = mapIds(templateRows, "recurring template");
   const transactionIds = mapIds(transactionRows, "transaction");
   const statements: BatchStatement[] = [];
-  const [existingTagRows, sharedCategoryRows, sharedTypeRows, existingBudgetRows] = await Promise.all([
+  const [existingTagRows, sharedCategoryRows, sharedTypeRows, existingBudgetRows, existingBudgetTemplateRows] = await Promise.all([
     db.select({ name: userTags.name }).from(userTags).where(eq(userTags.userId, userId)),
     db.select({ id: categories.id }).from(categories).where(isNull(categories.userId)),
     db.select({ id: savingsInstrumentTypes.id }).from(savingsInstrumentTypes).where(isNull(savingsInstrumentTypes.userId)),
     db.select({ categoryId: spendingBudgets.categoryId, period: spendingBudgets.period }).from(spendingBudgets).where(eq(spendingBudgets.userId, userId)),
+    db.select({ categoryId: budgetTemplates.categoryId, period: budgetTemplates.recurrence }).from(budgetTemplates).where(eq(budgetTemplates.userId, userId)),
   ]);
   const existingTags = new Set(existingTagRows.map((tag) => tag.name.toLocaleLowerCase()));
   const sharedCategoryIds = new Set(sharedCategoryRows.map((category) => category.id));
   const sharedTypeIds = new Set(sharedTypeRows.map((type) => type.id));
   const existingBudgetScopes = new Set(existingBudgetRows.map((budget) => `${budget.period}:${budget.categoryId ?? "overall"}`));
+  for (const budget of existingBudgetTemplateRows) existingBudgetScopes.add(`${budget.period}:${budget.categoryId ?? "overall"}`);
 
-  for (const row of accountRows) statements.push(db.insert(accounts).values({ ...copy(row, ["name", "type", "currency", "currentBalance", "displayOrder", "backgroundColor", "icon", "includeInTotalBalance", "allowNegativeBalance"]), id: mapped(row.id, accountIds), userId, isDefault: false } as typeof accounts.$inferInsert));
+  for (const row of accountRows) statements.push(db.insert(accounts).values({ ...copy(row, ["name", "type", "currency", "openingBalance", "currentBalance", "displayOrder", "backgroundColor", "icon", "includeInTotalBalance", "allowNegativeBalance"]), id: mapped(row.id, accountIds), userId, isDefault: false } as typeof accounts.$inferInsert));
   for (const row of categoryRows) statements.push(db.insert(categories).values({ ...copy(row, ["name", "type", "icon", "color"]), id: mapped(row.id, categoryIds), userId } as typeof categories.$inferInsert));
   for (const row of tagRows) { const name = typeof row.name === "string" ? row.name.trim() : ""; if (name && !existingTags.has(name.toLocaleLowerCase())) { existingTags.add(name.toLocaleLowerCase()); statements.push(db.insert(userTags).values({ id: randomUUID(), userId, name, createdAt: typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString() })); } }
   for (const row of typeRows) statements.push(db.insert(savingsInstrumentTypes).values({ ...copy(row, ["name", "isDefault"]), id: mapped(row.id, typeIds), userId } as typeof savingsInstrumentTypes.$inferInsert));
@@ -182,6 +199,19 @@ export async function importPortableData(userId: string, payload: unknown) {
   for (const row of rateRows) statements.push(db.insert(loanRatePeriods).values({ ...copy(row, ["annualRate", "effectiveDate", "createdAt"]), id: randomUUID(), loanId: mapped(row.loanId, loanIds) } as typeof loanRatePeriods.$inferInsert));
   for (const row of installmentRows) statements.push(db.insert(loanInstallments).values({ ...copy(row, ["sequence", "dueDate", "expectedPrincipal", "expectedInterest", "expectedFees", "paidPrincipal", "paidInterest", "paidFees", "status"]), id: mapped(row.id, installmentIds), loanId: mapped(row.loanId, loanIds) } as typeof loanInstallments.$inferInsert));
   for (const row of paymentRows) statements.push(db.insert(loanPaymentEvents).values({ ...copy(row, ["kind", "principal", "interest", "fees", "date", "createdAt"]), id: mapped(row.id, paymentIds), userId, loanId: mapped(row.loanId, loanIds), accountId: mapped(row.accountId, accountIds), installmentId: mapped(row.installmentId, installmentIds), clientGeneratedId: null, reversedEventId: mapped(row.reversedEventId, paymentIds) } as typeof loanPaymentEvents.$inferInsert));
+  for (const row of budgetTemplateRows) {
+    const categoryId = mappedShared(row.categoryId, categoryIds, sharedCategoryIds);
+    const period = typeof row.recurrence === "string" ? row.recurrence : "monthly";
+    const scope = `${period}:${categoryId ?? "overall"}`;
+    if (existingBudgetScopes.has(scope)) { skippedBudgetTemplateIds.add(row.id as string); continue; }
+    existingBudgetScopes.add(scope);
+    statements.push(db.insert(budgetTemplates).values({ ...copy(row, ["name", "recurrence", "defaultAmount", "rolloverRule", "createdAt", "updatedAt"]), id: mapped(row.id, budgetTemplateIds), userId, categoryId, clientGeneratedId: null } as typeof budgetTemplates.$inferInsert));
+  }
+  for (const row of budgetPeriodRows) statements.push(db.insert(budgetPeriods).values({ ...copy(row, ["recurrence", "periodStart", "periodEnd", "totalLimit", "status", "createdAt", "updatedAt"]), id: mapped(row.id, budgetPeriodIds), userId } as typeof budgetPeriods.$inferInsert));
+  for (const row of budgetAllocationRows) {
+    if (typeof row.templateId === "string" && skippedBudgetTemplateIds.has(row.templateId)) continue;
+    statements.push(db.insert(budgetAllocations).values({ ...copy(row, ["originalAmount", "adjustedAmount", "rolloverAmount", "createdAt", "updatedAt"]), id: randomUUID(), periodId: mapped(row.periodId, budgetPeriodIds), templateId: mapped(row.templateId, budgetTemplateIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds) } as typeof budgetAllocations.$inferInsert));
+  }
   for (const row of budgetRows) { const categoryId = mappedShared(row.categoryId, categoryIds, sharedCategoryIds); const period = typeof row.period === "string" ? row.period : "monthly"; const scope = `${period}:${categoryId ?? "overall"}`; if (existingBudgetScopes.has(scope)) continue; existingBudgetScopes.add(scope); statements.push(db.insert(spendingBudgets).values({ ...copy(row, ["name", "limitAmount", "period", "createdAt", "updatedAt"]), id: randomUUID(), userId, categoryId, clientGeneratedId: null, createdAt: typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString(), updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : new Date().toISOString() } as typeof spendingBudgets.$inferInsert)); }
   for (const row of templateRows) statements.push(db.insert(recurringTemplates).values({ ...copy(row, ["type", "amount", "title", "notes", "frequency", "nextDueDate", "endDate", "approvalRequired", "isActive"]), id: mapped(row.id, templateIds), userId, accountId: mapped(row.accountId, accountIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds), transferToAccountId: mapped(row.transferToAccountId, accountIds), savingsInstrumentId: mapped(row.savingsInstrumentId, instrumentIds), goalId: mapped(row.goalId, goalIds) } as typeof recurringTemplates.$inferInsert));
   for (const row of transactionRows) statements.push(db.insert(transactions).values({ ...copy(row, ["type", "amount", "title", "merchantName", "notes", "tags", "isRecurring", "receiptImageUrl", "loanComponent", "date", "transactionAt", "createdAt", "updatedAt"]), id: mapped(row.id, transactionIds), userId, accountId: mapped(row.accountId, accountIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds), splits: remapSplits(row.splits, categoryIds, sharedCategoryIds), recurringTemplateId: mapped(row.recurringTemplateId, templateIds), goalId: mapped(row.goalId, goalIds), savingsInstrumentId: mapped(row.savingsInstrumentId, instrumentIds), transferToAccountId: mapped(row.transferToAccountId, accountIds), loanId: mapped(row.loanId, loanIds), loanPaymentEventId: mapped(row.loanPaymentEventId, paymentIds), syncStatus: "synced", clientGeneratedId: null } as typeof transactions.$inferInsert));

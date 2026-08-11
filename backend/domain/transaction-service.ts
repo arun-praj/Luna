@@ -317,7 +317,8 @@ function buildEffectStatements(
     if (goalDeltas.has(goalId)) continue;
     const goal = snapshots.goals.get(goalId);
     if (!goal) throw new Error("Goal not found");
-    addAtomicGuard(statements, transactionId, userId, and(eq(goals.id, goalId), eq(goals.userId, userId), condition!), timestamp);
+    const actionCondition = and(eq(goals.id, goalId), eq(goals.userId, userId), condition!) ?? sql`0`;
+    addAtomicGuard(statements, transactionId, userId, actionCondition, timestamp);
   }
 
   for (const [instrumentId, delta] of instrumentDeltas) {
@@ -369,14 +370,15 @@ export async function createBalanceAdjustment(userId: string, accountId: string,
   const normalizedNextBalance = normalizeMoney(nextBalance);
   const amount = subtractMoney(normalizedNextBalance, account.currentBalance);
   if (amount === 0) return null;
+  const timestamp = new Date().toISOString();
   const row = {
     id: randomUUID(), userId, accountId, type: "adjust_balance" as const, amount,
     categoryId: null, splits: "[]", title: BALANCE_ADJUSTMENT_CATEGORY, merchantName: null,
     notes: `Balance changed from ${normalizeMoney(account.currentBalance)} to ${normalizedNextBalance}.`, tags: "[]",
     isRecurring: false, recurringTemplateId: null, receiptImageUrl: null, goalId: null,
-    savingsInstrumentId: null, transferToAccountId: null, date: new Date().toISOString().slice(0, 10),
-    transactionAt: new Date().toISOString(), syncStatus: "synced" as const, clientGeneratedId: null,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    savingsInstrumentId: null, transferToAccountId: null, date: timestamp.slice(0, 10),
+    transactionAt: timestamp, syncStatus: "synced" as const, clientGeneratedId: null,
+    createdAt: timestamp, updatedAt: timestamp,
   } as TransactionRow;
   const category = await getBalanceAdjustmentCategory(userId);
   const categoryId = category?.id ?? randomUUID();

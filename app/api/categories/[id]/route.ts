@@ -25,6 +25,11 @@ export async function PATCH(request: Request, { params }: Context) {
 
 export async function DELETE(request: Request, { params }: Context) {
   const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401);
-  const deleted = await db.delete(categories).where(and(eq(categories.id, id), eq(categories.userId, userId))).returning({ id: categories.id });
-  return deleted.length ? NextResponse.json({ success: true }) : errorResponse("Category not found", 404);
+  try {
+    const deleted = await db.delete(categories).where(and(eq(categories.id, id), eq(categories.userId, userId))).returning({ id: categories.id });
+    return deleted.length ? NextResponse.json({ success: true }) : errorResponse("Category not found", 404);
+  } catch (error) {
+    if (error instanceof Error && /foreign key|constraint/i.test(error.message)) return errorResponse("This category is used by a budget. Move or delete that budget before deleting the category.", 409);
+    throw error;
+  }
 }

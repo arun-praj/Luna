@@ -10,14 +10,14 @@ import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { MoneyEditor } from "@/components/money/money-editor";
 import { ListDataSkeleton } from "@/components/ui/data-skeleton";
 import { authenticatedFetch } from "@/lib/auth-client";
-import type { Budget, BudgetPeriod } from "@/lib/budgets";
+import type { Budget, BudgetPeriod, BudgetRolloverRule } from "@/lib/budgets";
 import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
 import { formatCurrencyAmount } from "@/lib/currency";
 import { useOfflineSnapshot } from "@/lib/offline/use-offline-snapshot";
 import { queueOfflineBudgetCreate, queueOfflineBudgetDelete, queueOfflineBudgetUpdate } from "@/lib/offline/sync";
 
 type Category = { id: string; name: string; type: "expense" | "income"; icon: string | null; color: string | null };
-type EditorDraft = { budget: Budget | null; scope: "overall" | "category"; categoryId: string | null; period: BudgetPeriod; amount: string };
+type EditorDraft = { budget: Budget | null; scope: "overall" | "category"; categoryId: string | null; period: BudgetPeriod; amount: string; rolloverRule: BudgetRolloverRule };
 const PERIODS: Array<{ value: BudgetPeriod; label: string }> = [{ value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "yearly", label: "Yearly" }];
 
 function tone(percentage: number) {
@@ -46,7 +46,7 @@ function BudgetCard({ budget, currency, onEdit }: { budget: Budget; currency: st
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-subtle"><div className={`h-full rounded-full ${colors.bar}`} style={{ width: `${Math.min(100, Math.max(0, budget.percentage))}%` }} /></div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
-            <div><p className="text-muted-foreground">Limit</p><p className="mt-0.5 font-semibold tabular-nums">{currency} {formatCurrencyAmount(budget.limitAmount)}</p></div>
+            <div><p className="text-muted-foreground">Plan</p><p className="mt-0.5 font-semibold tabular-nums">{currency} {formatCurrencyAmount(budget.limitAmount)}</p></div>
             <div><p className="text-muted-foreground">Spent</p><p className="mt-0.5 font-semibold tabular-nums">{currency} {formatCurrencyAmount(budget.spent)}</p></div>
             <div className="text-right"><p className="text-muted-foreground">{over ? "Over" : "Remaining"}</p><p className={`mt-0.5 font-semibold tabular-nums ${over ? "text-expense" : ""}`}>{currency} {formatCurrencyAmount(Math.abs(budget.remaining))}</p></div>
           </div>
@@ -159,18 +159,18 @@ export function BudgetManager() {
     const frame = window.requestAnimationFrame(() => {
       if (budgetId) {
         const existing = budgets.find((budget) => budget.id === budgetId);
-        if (existing) { appliedQuery.current = queryKey; setEditor({ budget: existing, scope: existing.categoryId ? "category" : "overall", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount) }); }
+        if (existing) { appliedQuery.current = queryKey; setEditor({ budget: existing, scope: existing.categoryId ? "category" : "overall", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount), rolloverRule: existing.rolloverRule ?? "none" }); }
       } else if (categoryId) {
         const existing = budgets.find((budget) => budget.categoryId === categoryId);
         appliedQuery.current = queryKey;
-        setEditor(existing ? { budget: existing, scope: "category", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount) } : { budget: null, scope: "category", categoryId, period, amount: "0" });
+        setEditor(existing ? { budget: existing, scope: "category", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount), rolloverRule: existing.rolloverRule ?? "none" } : { budget: null, scope: "category", categoryId, period, amount: "0", rolloverRule: "none" });
       }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [budgets, editor, loading, period, searchParams]);
 
   function openEditor(budget: Budget | null = null) {
-    setEditor({ budget, scope: budget?.categoryId ? "category" : "overall", categoryId: budget?.categoryId ?? null, period: budget?.period ?? period, amount: String(budget?.limitAmount ?? 0) });
+    setEditor({ budget, scope: budget?.categoryId ? "category" : "overall", categoryId: budget?.categoryId ?? null, period: budget?.period ?? period, amount: String(budget?.limitAmount ?? 0), rolloverRule: budget?.rolloverRule ?? "none" });
     setError("");
   }
 
@@ -180,7 +180,7 @@ export function BudgetManager() {
     if (!(limitAmount > 0)) { setError("Enter a budget limit greater than zero."); return; }
     setSaving(true); setError("");
     if (editor.scope === "category" && !editor.categoryId) { setError("Choose an expense category for this budget."); return; }
-    const input = { categoryId: editor.scope === "category" ? editor.categoryId : null, limitAmount, period: editor.period };
+    const input = { categoryId: editor.scope === "category" ? editor.categoryId : null, limitAmount, period: editor.period, rolloverRule: editor.rolloverRule };
     let queuedOffline = false;
     try {
       if (!navigator.onLine) throw new Error("offline");
@@ -188,7 +188,7 @@ export function BudgetManager() {
       const result = await response.json().catch(() => null) as { existingBudgetId?: string; error?: string } | null;
       if (response.status === 409 && result?.existingBudgetId) {
         const existing = budgets.find((budget) => budget.id === result.existingBudgetId);
-        if (existing) setEditor({ budget: existing, scope: existing.categoryId ? "category" : "overall", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount) });
+        if (existing) setEditor({ budget: existing, scope: existing.categoryId ? "category" : "overall", categoryId: existing.categoryId, period: existing.period, amount: String(existing.limitAmount), rolloverRule: existing.rolloverRule ?? "none" });
         setError("That budget already exists. You can edit it here."); setSaving(false); return;
       }
       if (!response.ok) throw new Error(result?.error ?? "Unable to save budget.");
@@ -224,6 +224,20 @@ export function BudgetManager() {
     setEditor(null); setSaving(false); if (!queuedOffline) await load(period);
   }
 
+  async function copyPrevious() {
+    setSaving(true); setError("");
+    try {
+      const response = await authenticatedFetch("/api/budgets/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period }) });
+      const result = await response.json().catch(() => null) as { copied?: number; error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? "Unable to copy the previous period.");
+      await load(period);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to copy the previous period.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const overall = budgets.find((budget) => !budget.categoryId) ?? null;
   const categoryBudgets = budgets.filter((budget) => budget.categoryId);
   return (
@@ -234,12 +248,14 @@ export function BudgetManager() {
         <button type="button" onClick={() => openEditor()} aria-label="Add budget" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] bg-primary text-primary-foreground"><Plus className="size-5" /></button>
       </StickyPageHeader>
       <div role="tablist" aria-label="Budget period" className="mt-5 grid grid-cols-3 gap-1 rounded-[13px] bg-surface-subtle p-1">{PERIODS.map((item) => <button key={item.value} role="tab" aria-selected={period === item.value} onClick={() => setPeriod(item.value)} className={`min-h-10 rounded-[10px] text-sm font-semibold ${period === item.value ? "bg-card text-primary shadow-sm" : "text-muted-foreground"}`}>{item.label}</button>)}</div>
+      <div className="mt-3 flex items-center justify-between gap-3 px-1"><p className="text-xs text-muted-foreground">Each period keeps its own plan and adjustments.</p><button type="button" onClick={() => void copyPrevious()} disabled={saving} className="shrink-0 text-xs font-semibold text-primary disabled:opacity-50">Copy previous</button></div>
       {error ? <p role="alert" className="mt-4 rounded-[12px] border border-expense/20 bg-expense-soft px-3 py-2.5 text-sm text-expense">{error}</p> : null}
       {loading ? <div className="mt-6"><ListDataSkeleton rows={3} /></div> : !budgets.length ? <section className="mt-6 rounded-[18px] border border-dashed border-border bg-card px-5 py-10 text-center"><Gauge className="mx-auto size-8 text-primary" /><h2 className="mt-4 text-base font-semibold">Set a comfortable spending limit</h2><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">Start with an overall budget, or focus on one expense category.</p><button onClick={() => openEditor()} className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-[10px] bg-primary px-4 text-sm font-semibold text-primary-foreground"><Plus className="size-4" />Create budget</button></section> : <div className="mt-6 space-y-6">{overall ? <section><p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Overall spending</p><BudgetCard budget={overall} currency={currency} onEdit={() => openEditor(overall)} /></section> : <button onClick={() => openEditor()} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-[13px] border border-dashed border-primary/35 bg-primary-soft/40 text-sm font-semibold text-primary"><Plus className="size-4" />Set overall budget</button>}<section><div className="mb-2 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Categories</p><h2 className="mt-1 text-lg font-semibold">Category budgets</h2></div><span className="text-xs font-semibold text-muted-foreground">{categoryBudgets.length}</span></div>{categoryBudgets.length ? <div className="space-y-3">{categoryBudgets.map((budget) => <BudgetCard key={budget.id} budget={budget} currency={currency} onEdit={() => openEditor(budget)} />)}</div> : <div className="rounded-[14px] border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">No category budgets for this period.</div>}</section></div>}
-      <MoneyEditor open={Boolean(editor)} value={editor?.amount ?? "0"} instanceKey={editor?.budget?.id ?? "new-budget"} onCancel={() => { setCategoryPickerOpen(false); setEditor(null); }} onSet={(value) => void save(value)} title={editor?.budget ? "Edit budget" : "Set budget"} currency={currency} confirmPlacement="bottom" confirmLabel={saving ? "Saving…" : "Save budget"} confirmDisabled={(value) => saving || !(Number(value) > 0) || (editor?.scope === "category" && !editor.categoryId)} previousLabel="Limit" topContent={editor ? <div className="space-y-3">
+      <MoneyEditor open={Boolean(editor)} value={editor?.amount ?? "0"} instanceKey={editor?.budget?.id ?? "new-budget"} onCancel={() => { setCategoryPickerOpen(false); setEditor(null); }} onSet={(value) => void save(value)} title={editor?.budget ? "Edit budget plan" : "Set budget plan"} currency={currency} confirmPlacement="bottom" confirmLabel={saving ? "Saving…" : "Save budget"} confirmDisabled={(value) => saving || !(Number(value) > 0) || (editor?.scope === "category" && !editor.categoryId)} previousLabel="Plan" topContent={editor ? <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setEditor((current) => current ? { ...current, scope: "overall", categoryId: null } : current)} className={`min-h-11 rounded-[11px] border px-3 text-sm font-semibold ${editor.scope === "overall" ? "border-primary bg-primary-soft text-primary" : "border-border bg-card"}`}><WalletCards className="mr-2 inline size-4" />Overall</button><button type="button" onClick={() => { setEditor((current) => current ? { ...current, scope: "category" } : current); setCategorySearch(""); setCategoryPickerOpen(true); }} className={`min-h-11 rounded-[11px] border px-3 text-sm font-semibold ${editor.scope === "category" ? "border-primary bg-primary-soft text-primary" : "border-border bg-card"}`}><Tags className="mr-2 inline size-4" />Category</button></div>
         {editor.scope === "category" ? <button type="button" onClick={() => { setCategorySearch(""); setCategoryPickerOpen(true); }} className="flex min-h-12 w-full items-center gap-3 rounded-[12px] border border-border bg-card px-3 text-left transition-colors hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"><span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-primary-soft text-primary"><Tags aria-hidden="true" className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-[11px] font-medium text-muted-foreground">Expense category</span><span className={`block truncate text-sm font-semibold ${editor.categoryId ? "text-foreground" : "text-primary"}`}>{expenseCategories.find((category) => category.id === editor.categoryId)?.name ?? "Choose category"}</span></span><ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /></button> : null}
-        <div className="grid grid-cols-3 gap-2">{PERIODS.map((item) => <button type="button" key={item.value} onClick={() => setEditor((current) => current ? { ...current, period: item.value } : current)} className={`min-h-9 rounded-[10px] border text-xs font-semibold ${editor.period === item.value ? "border-primary bg-primary-soft text-primary" : "border-border bg-card"}`}>{item.label}</button>)}</div>
+        <div className="grid grid-cols-3 gap-2">{PERIODS.map((item) => <button type="button" key={item.value} disabled={Boolean(editor.budget && editor.budget.period !== item.value)} onClick={() => setEditor((current) => current ? { ...current, period: item.value } : current)} className={`min-h-9 rounded-[10px] border text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${editor.period === item.value ? "border-primary bg-primary-soft text-primary" : "border-border bg-card"}`}>{item.label}</button>)}</div>
+        <label className="block"><span className="text-[11px] font-medium text-muted-foreground">Rollover rule</span><select value={editor.rolloverRule} onChange={(event) => setEditor((current) => current ? { ...current, rolloverRule: event.target.value as BudgetRolloverRule } : current)} className="mt-1 h-10 w-full rounded-[10px] border border-border bg-card px-3 text-sm font-semibold"><option value="none">Reset every period</option><option value="cap">Carry forward up to the plan</option><option value="uncapped">Carry forward all unused amount</option></select></label>
         {editor.budget ? <button type="button" onClick={() => void remove()} disabled={saving} className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold text-expense"><Trash2 className="size-4" />Delete budget</button> : <p className="flex items-center gap-2 text-[11px] text-muted-foreground"><CalendarRange className="size-4" />Calendar periods reset automatically.</p>}
       </div> : null} />
       {categoryPickerOpen ? <CategoryPicker categories={expenseCategories} selectedId={editor?.categoryId ?? null} search={categorySearch} onSearchChange={setCategorySearch} onClose={() => setCategoryPickerOpen(false)} onSelect={(category) => { setEditor((current) => current ? { ...current, scope: "category", categoryId: category.id } : current); setCategoryPickerOpen(false); setCategorySearch(""); }} /> : null}

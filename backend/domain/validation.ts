@@ -62,6 +62,7 @@ export const budgetInput = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   limitAmount: positiveMoneyInput,
   period: z.enum(["weekly", "monthly", "yearly"]),
+  rolloverRule: z.enum(["none", "cap", "uncapped"]).optional(),
   clientGeneratedId: z.string().uuid().optional(),
   updatedAt: z.string().datetime().optional(),
 });

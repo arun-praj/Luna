@@ -69,7 +69,7 @@ export async function createLoan(userId: string, input: LoanInput) {
   if (cashAccount && input.direction === "lent" && !cashAccount.allowNegativeBalance && cashAccount.currentBalance < input.principal) throw new Error(`${cashAccount.name} cannot go below zero`);
   const signedBalance = input.direction === "borrowed" ? -input.principal : input.principal;
   const statements: BatchStatement[] = [
-    db.insert(accounts).values({ id: accountId, userId, name: input.name, type: "loan", currency: input.currency, currentBalance: signedBalance, includeInTotalBalance: false, allowNegativeBalance: input.direction === "borrowed", icon: "Loan", backgroundColor: "#e6eef6" }),
+    db.insert(accounts).values({ id: accountId, userId, name: input.name, type: "loan", currency: input.currency, openingBalance: signedBalance, currentBalance: signedBalance, includeInTotalBalance: false, allowNegativeBalance: input.direction === "borrowed", icon: "Loan", backgroundColor: "#e6eef6" }),
     db.insert(loans).values({ id: loanId, userId, accountId, name: input.name, counterparty: input.counterparty ?? null, direction: input.direction, currency: input.currency, originalPrincipal: input.principal, interestMethod: input.interestMethod, paymentFrequency: input.paymentFrequency ?? null, scheduledPayment: input.scheduledPayment ?? null, termCount: input.termCount ?? null, startDate: input.startDate, firstDueDate: input.firstDueDate ?? null, nextDueDate: input.firstDueDate ?? null, notes: input.notes ?? null, createdAt: now, updatedAt: now }),
   ];
   if (input.annualRate != null) statements.push(db.insert(loanRatePeriods).values({ id: randomUUID(), loanId, annualRate: input.annualRate, effectiveDate: input.startDate, createdAt: now }));

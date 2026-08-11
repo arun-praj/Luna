@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { db } from "@/backend/db/client";
-import { accounts, categories, goals, homeAlerts, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, transactionHistory, transactions, userTags, users, webauthnCredentials } from "@/backend/db/schema";
+import { accounts, budgetPeriods, budgetTemplates, categories, goals, homeAlerts, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, transactionHistory, transactions, userTags, users, webauthnCredentials } from "@/backend/db/schema";
 
 type DatabaseLike = Pick<typeof db, "delete">;
 
@@ -14,6 +14,8 @@ export async function deleteUserData(executor: DatabaseLike, userId: string) {
   await executor.delete(recurringOccurrences).where(eq(recurringOccurrences.userId, userId));
   await executor.delete(savingsInstruments).where(eq(savingsInstruments.userId, userId));
   await executor.delete(savingsInstrumentTypes).where(eq(savingsInstrumentTypes.userId, userId));
+  await executor.delete(budgetPeriods).where(eq(budgetPeriods.userId, userId));
+  await executor.delete(budgetTemplates).where(eq(budgetTemplates.userId, userId));
   await executor.delete(spendingBudgets).where(eq(spendingBudgets.userId, userId));
   await executor.delete(homeAlerts).where(eq(homeAlerts.userId, userId));
   await executor.delete(goals).where(eq(goals.userId, userId));

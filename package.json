@@ -8,7 +8,7 @@
     "start": "vinext start --hostname 0.0.0.0",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test backend/domain/home-alert-rules.test.ts backend/domain/budget-service.test.ts",
+    "test": "node --experimental-strip-types --test backend/domain/home-alert-rules.test.ts backend/domain/budget-service.test.ts backend/domain/account-consistency.test.ts",
     "db:generate": "drizzle-kit generate --config backend/db/drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config backend/db/drizzle.config.ts",
     "db:generate:d1": "drizzle-kit generate --config backend/db/drizzle.sqlite.config.ts",

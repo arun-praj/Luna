@@ -54,6 +54,9 @@ The offline write path currently covers transactions. Accounts, categories, savi
 - `users.monthly_report_enabled` stores the opt-in for automated monthly PDF reports.
 - `report_deliveries` prevents duplicate monthly emails for the same user and period.
 - `goals.account_id` designates the account that holds a goal's funds. Goal-linked `savings` transactions record the spendable source in `account_id`, the goal account in `transfer_to_account_id`, and a signed amount; `goal_spend` references the goal account but does not change account balances. The transaction service applies and reverses both account sides and the goal allocation together.
+- Financial mutations are committed through one D1 `batch()` call. Transaction, account, goal, savings-instrument, and audit-history writes use compare-and-set guards inside that batch so concurrent changes roll back the entire mutation rather than leaving partial effects.
+- Budgets use `budget_templates` for recurring defaults, `budget_periods` for dated historical periods, and `budget_allocations` for per-period plans. Category references on the new budget tables use `ON DELETE RESTRICT`; the legacy `spending_budgets` table remains only as a migration/import compatibility source.
+- `GET /api/admin/consistency/accounts` requires the `CRON_SECRET` bearer token and recalculates each account as `opening_balance + transaction ledger delta`, returning material mismatches for operational repair.
 
 Generate and apply D1 migrations with:
 

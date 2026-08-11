@@ -7,13 +7,15 @@ import { z } from "zod";
 import { db } from "@/backend/db/client";
 import {
   accounts,
+  budgetAllocations,
+  budgetPeriods,
+  categories,
   goals,
   homeAlerts,
   loanInstallments,
   loans,
   recurringOccurrences,
   recurringTemplates,
-  spendingBudgets,
   transactions,
   users,
 } from "@/backend/db/schema";
@@ -22,7 +24,6 @@ import { addMoney, normalizeMoney } from "@/lib/money";
 import {
   addDays,
   budgetAlertThreshold,
-  budgetPeriodStart,
   daysUntil,
   previousPaymentAge,
   recurringFrequencyWindows,
@@ -109,7 +110,11 @@ async function buildCandidates(userId: string, now: Date): Promise<Candidate[]> 
     db.select().from(loanInstallments),
     db.select().from(recurringTemplates).where(eq(recurringTemplates.userId, userId)),
     db.select().from(recurringOccurrences).where(eq(recurringOccurrences.userId, userId)),
-    db.select().from(spendingBudgets).where(eq(spendingBudgets.userId, userId)),
+    db.select({ allocation: budgetAllocations, budgetPeriod: budgetPeriods, category: categories })
+      .from(budgetAllocations)
+      .innerJoin(budgetPeriods, eq(budgetAllocations.periodId, budgetPeriods.id))
+      .leftJoin(categories, eq(budgetAllocations.categoryId, categories.id))
+      .where(and(eq(budgetPeriods.userId, userId), eq(budgetPeriods.status, "open"))),
     db.select().from(transactions).where(and(eq(transactions.userId, userId), gte(transactions.date, addDays(today, -366)), lte(transactions.date, today))),
   ]);
   const currency = user[0]?.currency ?? "NPR";
@@ -219,37 +224,38 @@ async function buildCandidates(userId: string, now: Date): Promise<Candidate[]> 
     });
   }
 
-  for (const budget of budgetRows) {
-    const periodStart = budgetPeriodStart(budget.period, today);
+  for (const { allocation, budgetPeriod, category } of budgetRows) {
+    const periodStart = budgetPeriod.periodStart;
+    const limitAmount = normalizeMoney(allocation.adjustedAmount + allocation.rolloverAmount);
     const spent = recentTransactions.reduce((total, transaction) => {
       if (transaction.type !== "expense" || transaction.date < periodStart) return total;
-      if (!budget.categoryId) return addMoney(total, transaction.amount);
-      if (transaction.categoryId === budget.categoryId) return addMoney(total, transaction.amount);
+      if (!allocation.categoryId) return addMoney(total, transaction.amount);
+      if (transaction.categoryId === allocation.categoryId) return addMoney(total, transaction.amount);
       try {
         const splits = JSON.parse(transaction.splits) as Array<{ categoryId: string; amount: number }>;
-        return splits.filter((split) => split.categoryId === budget.categoryId).reduce((sum, split) => addMoney(sum, split.amount), total);
+        return splits.filter((split) => split.categoryId === allocation.categoryId).reduce((sum, split) => addMoney(sum, split.amount), total);
       } catch {
         return total;
       }
     }, 0);
-    const percentage = budget.limitAmount > 0 ? Math.round((spent / budget.limitAmount) * 100) : 0;
+    const percentage = limitAmount > 0 ? Math.round((spent / limitAmount) * 100) : 0;
     const threshold = budgetAlertThreshold(percentage);
     if (threshold === null) continue;
     candidates.push({
       kind: "budget",
-      sourceId: budget.id,
+      sourceId: allocation.id,
       occurrenceKey: `period:${periodStart}:threshold:${threshold}`,
       showAt: dateAtStart(periodStart),
-      expiresAt: dateAtStart(addDays(periodStart, budget.period === "weekly" ? 7 : budget.period === "monthly" ? 31 : 366)),
+      expiresAt: dateAtStart(budgetPeriod.periodEnd),
       hardUrgency: percentage >= 100 ? 2 : 1,
       deterministicRank: percentage >= 100 ? 850 : 700,
       payload: {
-        href: `/budgets?period=${budget.period}&budget=${budget.id}`,
+        href: `/budgets?period=${budgetPeriod.recurrence}&budget=${allocation.id}`,
         feature: "Budget",
         kind: "budget",
         label: percentage >= 100 ? "Budget limit reached" : "Budget nearly full",
-        value: `${currency} ${formatCurrencyAmount(spent)} / ${formatCurrencyAmount(budget.limitAmount)}`,
-        detail: `${budget.name} · ${percentage}% used`,
+        value: `${currency} ${formatCurrencyAmount(spent)} / ${formatCurrencyAmount(limitAmount)}`,
+        detail: `${category?.name ? `${category.name} budget` : "Overall budget"} · ${percentage}% used`,
         tone: percentage >= 100 ? "warning" : "primary",
         icon: "budget",
         progress: Math.min(100, percentage),

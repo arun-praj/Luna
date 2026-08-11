@@ -152,13 +152,33 @@ interface Goal {
 ## Spending Budgets (spending caps — distinct from Goals)
 
 ```typescript
-interface SpendingBudget {
+interface BudgetTemplate {
   id: UUID
   userId: UUID
   categoryId?: UUID              // null = overall budget across all categories
-  name: string                   // "Food Budget"
-  limitAmount: number
-  period: "weekly" | "monthly" | "yearly"
+  recurrence: "weekly" | "monthly" | "yearly"
+  defaultAmount: number
+  rolloverRule: "none" | "cap" | "uncapped"
+}
+
+interface BudgetPeriod {
+  id: UUID
+  userId: UUID
+  recurrence: "weekly" | "monthly" | "yearly"
+  periodStart: ISODate
+  periodEnd: ISODate
+  totalLimit: number
+  status: "open" | "closed" | "archived"
+}
+
+interface BudgetAllocation {
+  id: UUID
+  periodId: UUID
+  templateId?: UUID
+  categoryId?: UUID
+  originalAmount: number
+  adjustedAmount: number
+  rolloverAmount: number
 }
 ```
 
@@ -306,7 +326,9 @@ function syncPendingTransactions(localQueue: Transaction[]):
 ## Derived / App-Layer Calculations
 
 - **Net worth** = `sum(accounts.currentBalance) + sum(savingsInstruments.currentBalance)`
-- **Remaining on a SpendingBudget** = `limitAmount - sum(expenses in categoryId for current period)`
+- **Budget allocation limit** = `adjustedAmount + rolloverAmount`.
+- **Remaining on a BudgetAllocation** = allocation limit minus expenses in its period and category.
+- Templates define recurring defaults; periods and allocations preserve historical plans, edits, copy-forward, and rollover independently.
 - **Goal allocation vs balance**: currently modeled as a real balance deduction (a `savings`-type transaction with `goalId` set). If "earmarked but still spendable" money is needed instead, that requires a separate reserved/committed balance concept, not a real deduction — flag if this is wanted.
 
 ---

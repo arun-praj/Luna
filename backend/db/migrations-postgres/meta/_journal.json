@@ -155,6 +155,20 @@
       "when": 1786284000000,
       "tag": "0021_budget_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786421331400,
+      "tag": "0022_early_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786422312017,
+      "tag": "0023_lowly_morg",
+      "breakpoints": true
     }
   ]
 }

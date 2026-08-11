@@ -91,6 +91,7 @@ export type OfflineBudgetInput = {
   categoryId: string | null;
   limitAmount: number;
   period: BudgetPeriod;
+  rolloverRule?: "none" | "cap" | "uncapped";
 };
 
 function toOfflineBudget(userId: string, budget: Budget, cachedAt = new Date().toISOString()): OfflineBudget {

@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   if ((openingBalance ?? 0) < 0 && !allowNegativeBalance) return errorResponse("Negative balances are disabled. Enable Allow negative balance to use a negative opening balance.", 400);
   const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
   const id = randomUUID();
-  const insertAccount = db.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
+  const insertAccount = db.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", openingBalance: openingBalance ?? 0, currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
   if (input.isDefault) {
     await db.batch([
       db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId)),

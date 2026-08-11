@@ -1,11 +1,14 @@
 import { addMoney, normalizeMoney, subtractMoney } from "./money.ts";
 
 export type BudgetPeriod = "weekly" | "monthly" | "yearly";
+export type BudgetRolloverRule = "none" | "cap" | "uncapped";
 export type BudgetCategory = { id: string; name: string; icon: string | null; color: string | null };
 export type BudgetProgress = { spent: number; remaining: number; percentage: number; periodStart: string; periodEnd: string };
 export type Budget = BudgetProgress & {
   id: string; userId: string; categoryId: string | null; name: string; limitAmount: number;
   period: BudgetPeriod; clientGeneratedId: string | null; createdAt: string; updatedAt: string;
+  periodId?: string; periodStatus?: "open" | "closed" | "archived";
+  originalAmount?: number; adjustedAmount?: number; rolloverAmount?: number; templateId?: string | null; rolloverRule?: BudgetRolloverRule;
   category: BudgetCategory | null;
 };
 

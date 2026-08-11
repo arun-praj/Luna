@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   for (const [index, account] of parsed.data.accounts.entries()) {
     await db.insert(accounts).values({
       id: randomUUID(), userId, name: account.name, type: account.type, currency: user?.currency ?? "NPR",
-      currentBalance: 0, isDefault: index === 0, displayOrder: index, backgroundColor: account.color,
+      openingBalance: 0, currentBalance: 0, isDefault: index === 0, displayOrder: index, backgroundColor: account.color,
       icon: null, includeInTotalBalance: true,
     });
   }

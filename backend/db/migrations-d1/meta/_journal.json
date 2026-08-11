@@ -134,6 +134,20 @@
       "when": 1786284000000,
       "tag": "0018_budget_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786421330534,
+      "tag": "0019_stiff_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1786422311234,
+      "tag": "0020_foamy_captain_cross",
+      "breakpoints": true
     }
   ]
 }

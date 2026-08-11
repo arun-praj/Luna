@@ -467,7 +467,7 @@ export const spendingBudgets = sqliteTable(
   {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
+    categoryId: text("category_id").references(() => categories.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     limitAmount: real("limit_amount").notNull(),
     period: text("period", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
@@ -480,6 +480,67 @@ export const spendingBudgets = sqliteTable(
     uniqueIndex("spending_budgets_client_unique").on(table.clientGeneratedId),
     uniqueIndex("spending_budgets_overall_period_unique").on(table.userId, table.period).where(sql`${table.categoryId} IS NULL`),
     uniqueIndex("spending_budgets_category_period_unique").on(table.userId, table.period, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+  ],
+);
+
+export const budgetTemplates = sqliteTable(
+  "budget_templates",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    categoryId: text("category_id").references(() => categories.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    recurrence: text("recurrence", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
+    defaultAmount: real("default_amount").notNull(),
+    rolloverRule: text("rollover_rule", { enum: ["none", "cap", "uncapped"] }).notNull().default("none"),
+    clientGeneratedId: text("client_generated_id"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    index("budget_templates_user_idx").on(table.userId),
+    uniqueIndex("budget_templates_client_unique").on(table.clientGeneratedId),
+    uniqueIndex("budget_templates_category_scope_unique").on(table.userId, table.recurrence, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+    uniqueIndex("budget_templates_overall_scope_unique").on(table.userId, table.recurrence).where(sql`${table.categoryId} IS NULL`),
+  ],
+);
+
+export const budgetPeriods = sqliteTable(
+  "budget_periods",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    recurrence: text("recurrence", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
+    periodStart: text("period_start").notNull(),
+    periodEnd: text("period_end").notNull(),
+    totalLimit: real("total_limit").notNull().default(0),
+    status: text("status", { enum: ["open", "closed", "archived"] }).notNull().default("open"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    index("budget_periods_user_idx").on(table.userId, table.periodStart),
+    uniqueIndex("budget_periods_identity_unique").on(table.userId, table.recurrence, table.periodStart),
+  ],
+);
+
+export const budgetAllocations = sqliteTable(
+  "budget_allocations",
+  {
+    id: text("id").primaryKey(),
+    periodId: text("period_id").notNull().references(() => budgetPeriods.id, { onDelete: "cascade" }),
+    templateId: text("template_id").references(() => budgetTemplates.id, { onDelete: "set null" }),
+    categoryId: text("category_id").references(() => categories.id, { onDelete: "restrict" }),
+    originalAmount: real("original_amount").notNull(),
+    adjustedAmount: real("adjusted_amount").notNull(),
+    rolloverAmount: real("rollover_amount").notNull().default(0),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    index("budget_allocations_period_idx").on(table.periodId),
+    uniqueIndex("budget_allocations_category_unique").on(table.periodId, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+    uniqueIndex("budget_allocations_overall_unique").on(table.periodId).where(sql`${table.categoryId} IS NULL`),
   ],
 );
 
@@ -651,6 +712,9 @@ export const schema = {
   loanInstallments,
   loanPaymentEvents,
   spendingBudgets,
+  budgetTemplates,
+  budgetPeriods,
+  budgetAllocations,
   recurringTemplates,
   recurringOccurrences,
   transactions,

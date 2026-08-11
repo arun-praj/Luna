@@ -143,6 +143,7 @@ export type OfflineBudgetMutation = {
   categoryId: string | null;
   limitAmount: number;
   period: BudgetPeriod;
+  rolloverRule?: "none" | "cap" | "uncapped";
   clientGeneratedId: string;
   status: OfflineSyncStatus;
   error: string | null;
