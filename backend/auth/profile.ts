@@ -10,6 +10,7 @@ export type PublicUserProfile = {
   hideTotalBalance: boolean;
   monthlyReportEnabled: boolean;
   onboardingCompleted: boolean;
+  budgetOnboardingCompleted: boolean;
   tutorialStartedAt: string | null;
   tutorialCompletedAt: string | null;
   otpEnabled: boolean;
@@ -30,6 +31,7 @@ export function toPublicUserProfile(user: User): PublicUserProfile {
     hideTotalBalance: user.hideTotalBalance,
     monthlyReportEnabled: user.monthlyReportEnabled,
     onboardingCompleted: user.onboardingCompleted,
+    budgetOnboardingCompleted: user.budgetOnboardingCompleted,
     tutorialStartedAt: user.tutorialStartedAt ?? null,
     tutorialCompletedAt: user.tutorialCompletedAt ?? null,
     otpEnabled: user.otpEnabled,

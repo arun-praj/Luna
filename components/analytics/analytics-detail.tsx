@@ -270,12 +270,18 @@ export function AnalyticsDetail({ type, expanded = false }: { type: AnalyticsTyp
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [period, setPeriod] = useState<AppliedPeriod>(() => {
     const now = new Date();
+    if (type === "income" || type === "savings") {
+      return { mode: "custom", label: "This year", from: new Date(now.getFullYear(), 0, 1), to: now };
+    }
     return { mode: "month", label: "This month", from: new Date(now.getFullYear(), now.getMonth(), 1), to: now };
   });
   const meta = pageMeta[type];
   const TypeIcon = meta.icon;
   const rangeLabel = period.label;
   const periodLabel = period.label.startsWith("Last ") ? period.label.slice(5) : period.label;
+  const annualDefaultRange = type === "income" || type === "savings"
+    ? period.from && period.to ? { from: period.from, to: period.to } : undefined
+    : undefined;
 
   useEffect(() => {
     let active = true;
@@ -359,7 +365,7 @@ export function AnalyticsDetail({ type, expanded = false }: { type: AnalyticsTyp
   return (
     <main className="page-route-enter min-h-screen bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-10 sm:px-5">
-        <StickyPageHeader className="-mx-4 !z-30 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5 sm:pt-7"><Link href={expanded ? "/analytics/expenses" : "/"} aria-label={expanded ? "Back to expenses analytics" : "Back to overview"} className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card/90 text-foreground hover:bg-surface-subtle"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">Analytics</p><h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">{meta.label}</h1></div><GuideIcon href={`/analytics/guide?returnTo=${encodeURIComponent(`/analytics/${type}`)}`} label="Analytics" /><DatePicker initialMode="month" initialLabel={period.label} triggerLabel="Filter" onApply={(nextPeriod) => setPeriod(normalizePeriod(nextPeriod))} /></StickyPageHeader>
+        <StickyPageHeader className="-mx-4 !z-30 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5 sm:pt-7"><Link href={expanded ? "/analytics/expenses" : "/"} aria-label={expanded ? "Back to expenses analytics" : "Back to overview"} className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card/90 text-foreground hover:bg-surface-subtle"><ArrowLeft aria-hidden="true" className="size-5" /></Link><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">Analytics</p><h1 className="truncate text-[25px] font-semibold tracking-[-0.04em]">{meta.label}</h1></div><GuideIcon href={`/analytics/guide?returnTo=${encodeURIComponent(`/analytics/${type}`)}`} label="Analytics" /><DatePicker initialMode={type === "income" || type === "savings" ? "custom" : "month"} initialLabel={period.label} initialCustomRange={annualDefaultRange} initialQuickPeriodLabel={type === "income" || type === "savings" ? "This year" : undefined} triggerLabel="Filter" onApply={(nextPeriod) => setPeriod(normalizePeriod(nextPeriod))} /></StickyPageHeader>
         <section className="mt-7"><div className="min-w-0"><p className="text-sm font-medium text-muted-foreground">{rangeLabel}</p><h2 className="mt-3 text-[30px] font-semibold tracking-[-0.05em]">{meta.description}</h2></div></section>
         {error ? <p role="alert" className="mt-5 rounded-[12px] border border-expense/25 bg-expense-soft px-4 py-3 text-sm font-medium text-expense">{error}</p> : null}
         {isLoading ? <div className="mt-6 space-y-3"><ListDataSkeleton rows={4} /></div> : <>

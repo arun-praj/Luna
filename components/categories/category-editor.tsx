@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check,
-  Palette,
   Trash2,
   X,
 } from "lucide-react";
@@ -16,6 +15,7 @@ import { getReturnTo } from "@/lib/navigation";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CategoryIconPicker } from "@/components/categories/category-icon-picker";
 import { categoryIconOptions } from "@/lib/category-appearance";
 
 const iconOptions = categoryIconOptions;
@@ -122,6 +122,12 @@ const colorOptions = [
   },
 ];
 
+function colorIndexFor(color?: string | null, index?: number) {
+  if (typeof index === "number" && index >= 0 && index < colorOptions.length) return index;
+  const matchingIndex = color ? colorOptions.findIndex((option) => option.hex === color) : -1;
+  return matchingIndex >= 0 ? matchingIndex : 0;
+}
+
 export type CategoryEditorData = {
   id: string;
   name: string;
@@ -146,10 +152,7 @@ export function CategoryEditor({
   const [name, setName] = useState(category?.name ?? "");
   const [type, setType] = useState<"expense" | "income">(category?.type ?? "expense");
   const [selectedIcon, setSelectedIcon] = useState(category?.iconIndex ?? (category?.icon ? Math.max(0, iconOptions.findIndex((option) => option.label === category.icon)) : 0));
-  const [selectedColor, setSelectedColor] = useState<number | "custom">(
-    category?.colorIndex ?? (category?.color ? Math.max(0, colorOptions.findIndex((option) => option.hex === category.color)) : 0),
-  );
-  const [customColor, setCustomColor] = useState(category?.color && !colorOptions.some((option) => option.hex === category.color) ? category.color : "#356b68");
+  const [selectedColor, setSelectedColor] = useState(() => colorIndexFor(category?.color, category?.colorIndex));
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const iconPickerTransition = useAnimatedVisibility(iconPickerOpen);
   const [isLoading, setIsLoading] = useState(Boolean(categoryId && !category));
@@ -166,9 +169,9 @@ export function CategoryEditor({
     return () => window.cancelAnimationFrame(frame);
   }, []);
   const PreviewIcon = iconOptions[selectedIcon].icon;
-  const selectedColorOption = selectedColor === "custom" ? null : colorOptions[selectedColor];
+  const selectedColorOption = colorOptions[selectedColor];
 
-  const draftSnapshot = JSON.stringify({ name, type, selectedIcon, selectedColor, customColor });
+  const draftSnapshot = JSON.stringify({ name, type, selectedIcon, selectedColor });
   const { requestDiscard, discardDialog } = useUnsavedChangesGuard(initialDraft !== null && draftSnapshot !== initialDraft);
 
   useEffect(() => {
@@ -187,16 +190,14 @@ export function CategoryEditor({
       setName(loaded.name);
       setType(loaded.type ?? "expense");
       setSelectedIcon(loaded.icon ? Math.max(0, iconOptions.findIndex((option) => option.label === loaded.icon)) : 0);
-      const colorIndex = loaded.color ? colorOptions.findIndex((option) => option.hex === loaded.color) : 0;
-      setSelectedColor(colorIndex >= 0 ? colorIndex : "custom");
-      if (loaded.color && colorIndex < 0) setCustomColor(loaded.color);
+      setSelectedColor(colorIndexFor(loaded.color, loaded.colorIndex));
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load category.")).finally(() => setIsLoading(false));
   }, [category, categoryId]);
 
   async function saveCategory() {
     if (!name.trim()) return;
     setIsSaving(true); setError("");
-    const color = selectedColor === "custom" ? customColor : colorOptions[selectedColor].hex;
+    const color = colorOptions[selectedColor].hex;
     const payload = { name: name.trim(), type, icon: iconOptions[selectedIcon].label, color };
     const response = await authenticatedFetch(isNew ? "/api/categories" : `/api/categories/${loadedCategory?.id ?? categoryId}`, { method: isNew ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
     if (response?.ok) navigateWithRouteExit(() => router.push(backHref));
@@ -260,7 +261,7 @@ export function CategoryEditor({
                   ? `${selectedColorOption.backgroundClassName} ${selectedColorOption.foregroundClassName} ${selectedColorOption.borderClassName}`
                   : "border-transparent text-white"
               }`}
-              style={selectedColor === "custom" ? { backgroundColor: customColor } : undefined}
+              style={{ backgroundColor: selectedColorOption.hex }}
             >
               <PreviewIcon aria-hidden="true" className="size-8" strokeWidth={1.7} />
             </div>
@@ -354,25 +355,9 @@ export function CategoryEditor({
                       </button>
                     );
                   })}
-                  <label className={`relative flex size-11 shrink-0 snap-start cursor-pointer items-center justify-center overflow-hidden rounded-full border border-dashed bg-background text-muted-foreground transition-colors hover:bg-surface-subtle focus-within:outline-none focus-within:ring-2 focus-within:ring-primary/35 focus-within:ring-offset-2 ${selectedColor === "custom" ? "border-primary" : "border-border-strong"}`}>
-                    {selectedColor === "custom" ? (
-                      <span className="absolute inset-1 rounded-full" style={{ backgroundColor: customColor }} />
-                    ) : null}
-                    <Palette aria-hidden="true" className="relative z-10 size-4" />
-                    <span className="sr-only">Choose a custom color</span>
-                    <input
-                      type="color"
-                      value={customColor}
-                      onChange={(event) => {
-                        setCustomColor(event.target.value);
-                        setSelectedColor("custom");
-                      }}
-                      className="absolute inset-0 size-full cursor-pointer opacity-0"
-                    />
-                  </label>
                 </div>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Swipe to see more colors</p>
+              <p className="mt-1 text-xs text-muted-foreground">Choose a soft color for this category.</p>
             </fieldset>
           </div>
         </section> : null}
@@ -439,40 +424,15 @@ export function CategoryEditor({
               Pick the symbol that will make this category easiest to recognize.
             </p>
 
-            <div className="mt-4 grid grid-cols-3 gap-2.5 min-[360px]:grid-cols-4">
-              {iconOptions.map((option, index) => {
-                const Icon = option.icon;
-                const isSelected = selectedIcon === index;
-
-                return (
-                  <button
-                    type="button"
-                    key={option.label}
-                    aria-label={option.label}
-                    aria-pressed={isSelected}
-                    onClick={() => {
-                      setSelectedIcon(index);
-                      setIconPickerOpen(false);
-                    }}
-                    className={`relative flex min-h-[76px] flex-col items-center justify-center gap-2 rounded-[12px] border px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
-                      isSelected
-                        ? "border-primary bg-primary-soft text-primary"
-                        : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:bg-surface-subtle hover:text-foreground"
-                    }`}
-                  >
-                    <Icon aria-hidden="true" className="size-5" strokeWidth={1.8} />
-                    <span className="max-w-full truncate text-[10px] font-medium">
-                      {option.label}
-                    </span>
-                    {isSelected ? (
-                      <span className="absolute right-1.5 top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        <Check aria-hidden="true" className="size-2.5" strokeWidth={2.5} />
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
+            <CategoryIconPicker
+              selected={iconOptions[selectedIcon]?.label}
+              autoFocus
+              onSelect={(label) => {
+                const index = iconOptions.findIndex((option) => option.label === label);
+                if (index >= 0) setSelectedIcon(index);
+                setIconPickerOpen(false);
+              }}
+            />
           </div>
         </div>
       ) : null}

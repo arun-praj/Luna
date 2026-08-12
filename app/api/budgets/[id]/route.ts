@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
-import { BudgetConflictError, deleteBudget, listBudgets, updateBudget } from "@/backend/domain/budget-service";
+import { BudgetConflictError, BudgetDeleteConflictError, deleteBudget, getBudgetDetails, listBudgets, updateBudget } from "@/backend/domain/budget-service";
 import { budgetInput } from "@/backend/domain/validation";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
+
+export async function GET(request: Request, { params }: Context) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  const { id } = await params;
+  const detail = await getBudgetDetails(userId, id);
+  return detail ? NextResponse.json(detail) : errorResponse("Budget not found", 404);
+}
 
 export async function PATCH(request: Request, { params }: Context) {
   const userId = await requireAccessToken(request);
@@ -32,7 +40,13 @@ export async function DELETE(request: Request, { params }: Context) {
   const userId = await requireAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
   const { id } = await params;
-  await deleteBudget(userId, id);
-  scheduleHomeAlertRepair(userId);
-  return NextResponse.json({ success: true });
+  try {
+    const deleted = await deleteBudget(userId, id);
+    if (!deleted) return errorResponse("Budget not found", 404);
+    scheduleHomeAlertRepair(userId);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof BudgetDeleteConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
+    return errorResponse(error instanceof Error ? error.message : "Unable to delete budget", 400);
+  }
 }

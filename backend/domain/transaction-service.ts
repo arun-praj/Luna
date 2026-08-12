@@ -77,19 +77,30 @@ async function executeFinancialBatch(statements: BatchStatement[]) {
  * rollback primitive, so a failed compare-and-set is converted into a
  * deliberately rolled-back unique-key violation inside the same batch.
  */
-function addAtomicGuard(statements: BatchStatement[], transactionId: string, userId: string, condition: SQL, timestamp: string) {
+function addAtomicGuard(statements: BatchStatement[], transactionId: string, userId: string, condition: SQL, timestamp: string, source: "transaction" | "goal" = "transaction") {
   const guardId = randomUUID();
-  const guardInsert = sql`
-    INSERT INTO transaction_history (id, transaction_id, changed_by, change_type, changed_at)
-    SELECT ${guardId}, ${transactionId}, ${userId}, 'created', ${timestamp}
-    WHERE NOT (${condition})
-  `;
-  const guardRollback = sql`
-    INSERT INTO transaction_history (id, transaction_id, changed_by, change_type, changed_at)
-    SELECT ${guardId}, ${transactionId}, ${userId}, 'created', ${timestamp}
-    WHERE EXISTS (SELECT 1 FROM transaction_history WHERE id = ${guardId})
-  `;
-  statements.push(db.run(guardInsert), db.run(guardRollback));
+  const guardValues = {
+    id: sql<string>`${guardId}`.as("id"),
+    transactionId: sql<string>`${transactionId}`.as("transaction_id"),
+    changedBy: sql<string>`${userId}`.as("changed_by"),
+    changeType: sql<"created">`'created'`.as("change_type"),
+    oldValues: sql<string | null>`NULL`.as("old_values"),
+    newValues: sql<string | null>`NULL`.as("new_values"),
+    changedAt: sql<string>`${timestamp}`.as("changed_at"),
+  };
+  const guardInsert = source === "goal"
+    ? db.insert(transactionHistory).select(db.select(guardValues).from(goals).where(and(eq(goals.userId, userId), sql`NOT (${condition})`)))
+    : db.insert(transactionHistory).select(db.select(guardValues).from(transactions).where(and(eq(transactions.id, transactionId), eq(transactions.userId, userId), sql`NOT (${condition})`)));
+  const guardRollback = db.insert(transactionHistory).select(db.select({
+    id: transactionHistory.id,
+    transactionId: transactionHistory.transactionId,
+    changedBy: transactionHistory.changedBy,
+    changeType: transactionHistory.changeType,
+    oldValues: transactionHistory.oldValues,
+    newValues: transactionHistory.newValues,
+    changedAt: transactionHistory.changedAt,
+  }).from(transactionHistory).where(eq(transactionHistory.id, guardId)));
+  statements.push(guardInsert, guardRollback);
 }
 
 function assertPositiveAmount(input: TransactionInput) {
@@ -318,7 +329,7 @@ function buildEffectStatements(
     const goal = snapshots.goals.get(goalId);
     if (!goal) throw new Error("Goal not found");
     const actionCondition = and(eq(goals.id, goalId), eq(goals.userId, userId), condition!) ?? sql`0`;
-    addAtomicGuard(statements, transactionId, userId, actionCondition, timestamp);
+    addAtomicGuard(statements, transactionId, userId, actionCondition, timestamp, "goal");
   }
 
   for (const [instrumentId, delta] of instrumentDeltas) {

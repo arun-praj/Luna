@@ -148,6 +148,20 @@
       "when": 1786422311234,
       "tag": "0020_foamy_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1786427443052,
+      "tag": "0021_right_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1786462898005,
+      "tag": "0022_stormy_nova",
+      "breakpoints": true
     }
   ]
 }

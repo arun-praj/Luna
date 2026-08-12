@@ -2,7 +2,7 @@
 
 import { Fragment, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
 import { ArrowDownLeft, ArrowLeftRight, ArrowRight, Check, ChevronRight, Clock3, HandCoins, SkipForward, Tags, Target, WalletCards, X } from "lucide-react";
 
 import { authenticatedFetch, getAccessTokenSubject, notifyTransactionsChanged } from "@/lib/auth-client";
@@ -53,6 +53,12 @@ type SwipeOffset = { x: number; y: number; rotate: number };
 type SwipeExit = { x: number; y: number; rotate: number };
 
 const ALERTS_CACHE_PREFIX = "luna.home-alerts.cache:";
+const ALERT_DISMISS_EXIT_MS = 420;
+const homeAlertIcons = { budget: Tags, goal: Target, loan: HandCoins, recurring: ArrowLeftRight } as const;
+
+function mapHomeAlerts(alerts: ApiHomeAlert[]) {
+  return alerts.map((alert) => ({ ...alert, icon: homeAlertIcons[alert.kind] ?? HandCoins }));
+}
 
 function readCachedHomeAlerts() {
   if (typeof window === "undefined") return [];
@@ -81,12 +87,14 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
   const [displayCurrency, setDisplayCurrency] = useState("NPR");
   const [hideTotalBalance, setHideTotalBalance] = useState(false);
   const [balanceRevealed, setBalanceRevealed] = useState(false);
+  const [revealSecondsRemaining, setRevealSecondsRemaining] = useState(0);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [serverInsights, setServerInsights] = useState<HomeInsight[]>([]);
   const serverInsightsRef = useRef<HomeInsight[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const revealTimer = useRef<number | null>(null);
+  const revealCountdownTimer = useRef<number | null>(null);
   const dismissTimers = useRef<Record<string, number>>({});
   const impressedInsightIds = useRef(new Set<string>());
   const [exitingInsightIds, setExitingInsightIds] = useState<string[]>([]);
@@ -120,14 +128,12 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
           if (loansResponse.ok) setLoans(((await loansResponse.json()) as { loans?: Loan[] }).loans ?? []);
           if (alertsResponse.ok) {
             const result = (await alertsResponse.json()) as { alerts?: ApiHomeAlert[] };
-            const iconMap = { budget: Tags, goal: Target, loan: HandCoins, recurring: ArrowLeftRight };
-            const nextAlerts = (result.alerts ?? []).map((alert) => ({ ...alert, icon: iconMap[alert.kind] ?? HandCoins }));
+            const nextAlerts = mapHomeAlerts(result.alerts ?? []);
             applyServerInsights(nextAlerts);
             writeCachedHomeAlerts(nextAlerts);
           } else {
             const cached = readCachedHomeAlerts();
-            const iconMap = { budget: Tags, goal: Target, loan: HandCoins, recurring: ArrowLeftRight };
-            applyServerInsights(cached.slice(0, 3).map((alert) => ({ ...alert, icon: iconMap[alert.kind] ?? HandCoins })));
+            applyServerInsights(mapHomeAlerts(cached.slice(0, 3)));
           }
           if (profile?.user?.currency) setDisplayCurrency(profile.user.currency);
           setHideTotalBalance(profile?.user?.hideTotalBalance === true);
@@ -136,9 +142,8 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
       })
       .catch(() => {
         if (!active) return;
-        const iconMap = { budget: Tags, goal: Target, loan: HandCoins, recurring: ArrowLeftRight };
         const cached = readCachedHomeAlerts();
-        applyServerInsights(cached.slice(0, 3).map((alert) => ({ ...alert, icon: iconMap[alert.kind] ?? HandCoins })));
+        applyServerInsights(mapHomeAlerts(cached.slice(0, 3)));
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -153,9 +158,24 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
       })
       .catch(() => undefined);
 
+    const refreshAlerts = () => {
+      void authenticatedFetch("/api/home-alerts")
+        .then(async (response) => {
+          if (!active || !response.ok) return;
+          const result = (await response.json()) as { alerts?: ApiHomeAlert[] };
+          const nextAlerts = mapHomeAlerts(result.alerts ?? []);
+          applyServerInsights(nextAlerts);
+          writeCachedHomeAlerts(nextAlerts);
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("cocomelon:transactions-changed", refreshAlerts);
+
     return () => {
       active = false;
+      window.removeEventListener("cocomelon:transactions-changed", refreshAlerts);
       if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+      if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
       Object.values(dismissTimerMap).forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
@@ -163,9 +183,18 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
   function revealBalance() {
     if (!hideTotalBalance) return;
     if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
+    const startedAt = Date.now();
     setBalanceRevealed(true);
+    setRevealSecondsRemaining(5);
+    revealCountdownTimer.current = window.setInterval(() => {
+      setRevealSecondsRemaining(Math.max(0, Math.ceil((5000 - (Date.now() - startedAt)) / 1000)));
+    }, 100);
     revealTimer.current = window.setTimeout(() => {
       setBalanceRevealed(false);
+      setRevealSecondsRemaining(0);
+      if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
+      revealCountdownTimer.current = null;
       revealTimer.current = null;
     }, 5000);
   }
@@ -174,7 +203,10 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
     if (!hideTotalBalance) return;
     if (balanceRevealed) {
       if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+      if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
       revealTimer.current = null;
+      revealCountdownTimer.current = null;
+      setRevealSecondsRemaining(0);
       setBalanceRevealed(false);
       return;
     }
@@ -222,7 +254,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
         return next;
       });
       delete dismissTimers.current[id];
-    }, 280);
+    }, ALERT_DISMISS_EXIT_MS);
   }
 
   function beginSwipe(id: string, event: ReactPointerEvent<HTMLElement>) {
@@ -348,6 +380,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
                   amount={formatCurrencyAmount(primaryBalance)}
                   hideTotalBalance={hideTotalBalance}
                   balanceRevealed={balanceRevealed}
+                  revealSecondsRemaining={revealSecondsRemaining}
                   onToggleVisibility={toggleBalanceVisibility}
                   href="/accounts"
                   className={`hover:text-primary ${primaryBalance < 0 ? "text-expense" : "text-income"}`}
@@ -361,8 +394,9 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
 
       <MonthlyOverviewCards compact />
 
-      {!isLoading && visibleInsights.length ? (
-        <section aria-label="Money reminders" className="mt-4 space-y-2">
+      <AnimatePresence initial={false}>
+        {!isLoading && visibleInsights.length ? (
+          <motion.section key="money-reminders" aria-label="Money reminders" initial={{ opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: "auto", marginTop: 16 }} exit={{ opacity: 0, height: 0, marginTop: 0 }} transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }} className="relative overflow-visible">
           <AnimatePresence initial={false}>
             {groupedInsights.map((insight, index) => {
               const Icon = insight.icon;
@@ -378,13 +412,19 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               const swipeOffset = swipeOffsets[insight.id] ?? { x: 0, y: 0, rotate: 0 };
               const isDragging = Boolean(swipeOffsets[insight.id]);
               const stackOffset = Math.min(index, 3);
-              if (index > 0) {
+              const isTopExiting = groupedInsights[0]?.id !== insight.id && exitingInsightIds.includes(groupedInsights[0]?.id ?? "");
+              const isPromoted = index === 1 && isTopExiting;
+              const stackPositionClass = index === 0
+                ? isExiting ? "absolute inset-x-0 top-0 z-30" : "relative z-30"
+                : isPromoted ? "relative z-20" : "relative";
+              const stackOverlapClass = index > 0 && !isPromoted ? "-mt-4 pointer-events-none" : "";
+              if (index > 0 && !isPromoted) {
                 return <motion.div key={insight.id} layout aria-hidden="true" className={`relative -mt-4 h-3 overflow-hidden rounded-b-[16px] border ${style.card}`} style={{ zIndex: 30 - stackOffset }} />;
               }
               if (insight.kind === "goal") {
                 return (
                   <Fragment key={insight.id}>
-                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: 0 }} animate={{ opacity: isExiting ? 0 : 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "spring" : isDragging ? "tween" : "spring", stiffness: isExiting ? 180 : 420, damping: isExiting ? 22 : 32, mass: 0.85, duration: isExiting ? undefined : 0.24, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`relative touch-pan-y overflow-hidden rounded-[16px] border border-primary/20 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${index > 0 ? "-mt-10 pointer-events-none" : ""}`}>
+                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-primary/20 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
                       <div className="p-3">
                       <div className="flex items-start gap-3">
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-primary-soft text-primary"><Icon aria-hidden="true" className="size-[19px]" /></span>
@@ -411,7 +451,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               if (insight.kind === "recurring") {
                 return (
                   <Fragment key={insight.id}>
-                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: 0 }} animate={{ opacity: isExiting ? 0 : 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "spring" : isDragging ? "tween" : "spring", stiffness: isExiting ? 180 : 420, damping: isExiting ? 22 : 32, mass: 0.85, duration: isExiting ? undefined : 0.24, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`relative touch-pan-y overflow-hidden rounded-[16px] border border-border/80 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${index > 0 ? "-mt-10 pointer-events-none" : ""}`}>
+                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-border/80 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
                       <div className="p-3">
                       <div className="flex items-start gap-3">
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-info text-primary-foreground"><ArrowLeftRight aria-hidden="true" className="size-[19px]" /></span>
@@ -436,7 +476,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               }
               return (
                 <Fragment key={insight.id}>
-                  <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: 0 }} animate={{ opacity: isExiting ? 0 : 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "spring" : isDragging ? "tween" : "spring", stiffness: isExiting ? 180 : 420, damping: isExiting ? 22 : 32, mass: 0.85, duration: isExiting ? undefined : 0.24, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`relative touch-pan-y overflow-hidden rounded-[14px] border transition-colors hover:brightness-[0.985] ${style.card} ${index > 0 ? "-mt-10 pointer-events-none" : ""}`}>
+                  <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[14px] border transition-colors hover:brightness-[0.985] ${style.card} ${stackPositionClass} ${stackOverlapClass}`}>
                     <Link href={insight.href} className="block min-w-0 p-3 pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
                       <span className="flex min-w-0 items-start gap-3">
                         <span className={`flex size-9 shrink-0 items-center justify-center rounded-[9px] ${style.soft} ${style.text}`}><Icon aria-hidden="true" className="size-[17px]" /></span>
@@ -461,8 +501,9 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               );
             })}
           </AnimatePresence>
-        </section>
-      ) : null}
+          </motion.section>
+        ) : null}
+      </AnimatePresence>
 
       {!hasVisibleInsights ? <nav aria-label="Balance details" className="mt-3 flex w-full flex-nowrap gap-x-3 overflow-x-auto overscroll-x-contain pb-1 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"><Link href="/accounts" className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md pr-1 text-xs font-medium text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><WalletCards aria-hidden="true" className="size-3 text-primary" />Accounts<ChevronRight aria-hidden="true" className="size-3" /></Link></nav> : null}
     </motion.section>

@@ -243,14 +243,20 @@ export function AccountEditor({
   useEffect(() => {
     if (!accountId || account) return;
     void authenticatedFetch(`/api/accounts/${accountId}`).then(async (response) => {
-      if (!response.ok) throw new Error("Account not found.");
+      if (!response.ok) {
+        if (response.status === 404) {
+          router.replace("/accounts");
+          return;
+        }
+        throw new Error("Account not found.");
+      }
       const result = await response.json() as { account: AccountEditorData };
       const loaded = result.account;
       setLoadedAccount(loaded); setName(loaded.name); setType(loaded.type); setCurrency(loaded.currency ?? "NPR"); setBalance(String(loaded.currentBalance ?? 0)); setIncludeInTotal(loaded.includeInTotalBalance ?? true); setAllowNegativeBalance(loaded.allowNegativeBalance ?? false);
       const imageIndex = loaded.icon ? imageOptions.findIndex((option) => option.name === loaded.icon) : -1; setSelectedImage(imageIndex >= 0 ? imageIndex : loaded.icon?.startsWith("/api/uploads/account-images/") ? "custom" : 0); if (loaded.icon?.startsWith("/api/uploads/account-images/")) { setCustomImage(loaded.icon); setImageStatus("success"); }
       const normalizedColor = getAccountBackgroundColor(loaded.backgroundColor, loaded.type); const colorIndex = normalizedColor ? colorOptions.findIndex((option) => option.cardClassName.includes(normalizedColor)) : -1; if (colorIndex >= 0) setSelectedColor(colorIndex); else if (loaded.backgroundColor) { setCustomColor(loaded.backgroundColor); setSelectedColor("custom"); }
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load account.")).finally(() => setIsLoading(false));
-  }, [account, accountId]);
+  }, [account, accountId, router]);
 
   async function deleteAccount() {
     const id = loadedAccount?.id ?? accountId;
@@ -259,7 +265,7 @@ export function AccountEditor({
     const response = await authenticatedFetch(`/api/accounts/${id}`, { method: "DELETE" }).catch(() => null);
     if (response?.ok) {
       setDeleteOpen(false);
-      navigateWithRouteExit(() => router.push(backHref));
+      navigateWithRouteExit(() => router.replace("/accounts"));
     } else { const result = await response?.json().catch(() => null) as { error?: string } | null; setError(result?.error ?? "Could not delete account."); }
     setIsDeleting(false);
   }

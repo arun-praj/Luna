@@ -42,7 +42,7 @@ This file is the implementation contract for the backend and offline PWA. Change
 
 ## Current scope
 
-The offline write path currently covers transactions. Accounts, categories, savings instruments, and the profile are cached read-only for composing and rendering offline transactions. Their offline editing can be added later using the same outbox and idempotency rules.
+The offline write path covers transactions and the core budget allocation mutation. Budget recommendations, 50/30/20 setup, bucket assignments, transfers, and review calculations are server-backed operations; the cached budget snapshot remains available for offline reading. Accounts, categories, savings instruments, and the profile are cached read-only for composing and rendering offline transactions.
 
 ## Database paths
 
@@ -55,7 +55,10 @@ The offline write path currently covers transactions. Accounts, categories, savi
 - `report_deliveries` prevents duplicate monthly emails for the same user and period.
 - `goals.account_id` designates the account that holds a goal's funds. Goal-linked `savings` transactions record the spendable source in `account_id`, the goal account in `transfer_to_account_id`, and a signed amount; `goal_spend` references the goal account but does not change account balances. The transaction service applies and reverses both account sides and the goal allocation together.
 - Financial mutations are committed through one D1 `batch()` call. Transaction, account, goal, savings-instrument, and audit-history writes use compare-and-set guards inside that batch so concurrent changes roll back the entire mutation rather than leaving partial effects.
-- Budgets use `budget_templates` for recurring defaults, `budget_periods` for dated historical periods, and `budget_allocations` for per-period plans. Category references on the new budget tables use `ON DELETE RESTRICT`; the legacy `spending_budgets` table remains only as a migration/import compatibility source.
+- Budgets use `budget_templates` for recurring defaults, `budget_periods` for dated historical periods, and `budget_allocations` for per-period plans. Expense allocations consume the manually entered overall spending plan; `unallocated` is the overall plan less category allocations. Savings targets are separate allocations and positive `savings` transactions count toward their actuals.
+- Budget recommendations use the median of up to six completed periods and are previewed before application. The optional 50/30/20 setup stores per-category `needs`/`wants` assignments in `budget_category_buckets` and creates an 80% expense plan plus a 20% savings target.
+- Rollover rules are stored on templates and materialized into each allocation. Transfers between expense categories are recorded in `budget_moves`, committed atomically with the allocation changes, and can be reversed by creating an auditable inverse move.
+- Allocation and move references on the new budget tables use `ON DELETE RESTRICT`; category bucket mappings intentionally cascade with category deletion. The legacy `spending_budgets` table remains only as a migration/import compatibility source. Budget templates, allocations, buckets, and moves are included in portability exports/imports.
 - `GET /api/admin/consistency/accounts` requires the `CRON_SECRET` bearer token and recalculates each account as `opening_balance + transaction ledger delta`, returning material mismatches for operational repair.
 
 Generate and apply D1 migrations with:

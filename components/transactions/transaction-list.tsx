@@ -307,11 +307,39 @@ export function TransactionList({ limit, searchable = false, period, includeAler
               );
               const categoryColor = transaction.categoryColor ?? primarySplit?.categoryColor ?? "#dcece7";
               const isGoalWithdrawal = transaction.type === "savings" && Boolean(transaction.goalId) && transaction.amount < 0;
-              const secondary = transaction.destinationAccountName
+              const hasDestinationAccount = Boolean(transaction.destinationAccountName);
+              const destinationAccountName = transaction.destinationAccountName ?? "Unknown account";
+              const secondary = hasDestinationAccount
                 ? isGoalWithdrawal
-                  ? `${compactAccountName(transaction.destinationAccountName)} → ${compactAccountName(transaction.accountName)}`
-                  : `${compactAccountName(transaction.accountName)} → ${compactAccountName(transaction.destinationAccountName)}`
+                  ? `${compactAccountName(destinationAccountName)} → ${compactAccountName(transaction.accountName)}`
+                  : `${compactAccountName(transaction.accountName)} → ${compactAccountName(destinationAccountName)}`
                 : compactAccountName(transaction.accountName);
+              const sourceAccount = isGoalWithdrawal && hasDestinationAccount
+                ? {
+                    name: destinationAccountName,
+                    icon: transaction.destinationAccountIcon,
+                    type: transaction.destinationAccountType,
+                    color: transaction.destinationAccountColor,
+                  }
+                : {
+                    name: transaction.accountName,
+                    icon: transaction.accountIcon,
+                    type: transaction.accountType,
+                    color: transaction.accountColor,
+                  };
+              const destinationAccount = isGoalWithdrawal
+                ? {
+                    name: transaction.accountName,
+                    icon: transaction.accountIcon,
+                    type: transaction.accountType,
+                    color: transaction.accountColor,
+                  }
+                : {
+                    name: destinationAccountName,
+                    icon: transaction.destinationAccountIcon,
+                    type: transaction.destinationAccountType,
+                    color: transaction.destinationAccountColor,
+                  };
               return (
                 <div
                   role="link"
@@ -422,23 +450,45 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                             router.push(`/accounts/${transaction.accountId}`);
                           }
                         }}
-                        className="flex max-w-32 shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold text-foreground"
+                        className="flex max-w-[min(11rem,45vw)] shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold text-foreground"
                         style={{
                           backgroundColor: `${accountColor}88`,
                           borderColor: `${accountColor}cc`,
                           color: accountForeground,
                         }}
                       >
-                        <span className="flex size-4 shrink-0 overflow-hidden rounded-full">
-                          <AccountAvatar
-                            icon={transaction.accountIcon}
-                            name={transaction.accountName}
-                            type={transaction.accountType}
-                            backgroundColor={accountColor}
-                            size={16}
-                          />
-                        </span>
-                        <span className="truncate">{secondary}</span>
+                        {hasDestinationAccount ? (
+                          <span className="flex min-w-0 items-center gap-1">
+                            <AccountAvatar
+                              icon={sourceAccount.icon}
+                              name={sourceAccount.name}
+                              type={sourceAccount.type}
+                              backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
+                              size={16}
+                            />
+                            <span className="min-w-0 truncate">{compactAccountName(sourceAccount.name)}</span>
+                            <span aria-hidden="true" className="shrink-0 text-[9px] text-muted-foreground">→</span>
+                            <AccountAvatar
+                              icon={destinationAccount.icon}
+                              name={destinationAccount.name}
+                              type={destinationAccount.type}
+                              backgroundColor={getAccountBackgroundColor(destinationAccount.color, destinationAccount.type)}
+                              size={16}
+                            />
+                            <span className="min-w-0 truncate">{compactAccountName(destinationAccount.name)}</span>
+                          </span>
+                        ) : (
+                          <>
+                            <AccountAvatar
+                              icon={sourceAccount.icon}
+                              name={sourceAccount.name}
+                              type={sourceAccount.type}
+                              backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
+                              size={16}
+                            />
+                            <span className="truncate">{secondary}</span>
+                          </>
+                        )}
                       </span>
                         );
                       })()}

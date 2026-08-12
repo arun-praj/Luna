@@ -1,27 +1,31 @@
 import handler from "vinext/server/app-router-entry";
 import { runScheduledNotifications } from "@/backend/notifications/scheduler";
-import { runScheduledReports } from "@/backend/reports/scheduler";
+import { runScheduledReports, runScheduledReportTests } from "@/backend/reports/scheduler";
 import { runScheduledRecurringTransactions } from "@/backend/domain/recurring-service";
 import { runScheduledHomeAlerts } from "@/backend/domain/home-alert-service";
+import { pruneExpiredRateLimitRows } from "@/backend/auth/rate-limit";
 
-const CONTENT_SECURITY_POLICY = [
+function contentSecurityPolicy(nonce: string) {
+  return [
   "default-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
-].join('; ');
+  ].join('; ');
+}
 
-function withSecurityHeaders(response: Response) {
+function withSecurityHeaders(response: Response, requestId: string, csp: string) {
   const headers = new Headers(response.headers);
-  headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  headers.set("Content-Security-Policy", csp);
+  headers.set("X-Request-ID", requestId);
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
@@ -36,26 +40,56 @@ function withSecurityHeaders(response: Response) {
 
 const lunaWorker = {
   async fetch(request: Request, env: CloudflareEnv, ctx: ExecutionContext) {
-    return withSecurityHeaders(await handler.fetch(request, env, ctx));
+    const incomingRequestId = request.headers.get("x-request-id");
+    const requestId = incomingRequestId && /^[A-Za-z0-9._-]{1,100}$/.test(incomingRequestId)
+      ? incomingRequestId
+      : crypto.randomUUID();
+    const nonce = btoa(crypto.randomUUID());
+    const csp = contentSecurityPolicy(nonce);
+    const forwardedHeaders = new Headers(request.headers);
+    forwardedHeaders.set("Content-Security-Policy", csp);
+    forwardedHeaders.set("x-nonce", nonce);
+    forwardedHeaders.set("x-request-id", requestId);
+
+    try {
+      const response = await handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx);
+      return withSecurityHeaders(response, requestId, csp);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "request_error",
+        requestId,
+        method: request.method,
+        pathname: new URL(request.url).pathname,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return withSecurityHeaders(
+        Response.json({ error: "Internal server error", requestId }, { status: 500 }),
+        requestId,
+        csp,
+      );
+    }
   },
   async scheduled(controller: ScheduledController) {
     const results = await Promise.allSettled([
       runScheduledNotifications(new Date(controller.scheduledTime)),
       runScheduledReports(new Date(controller.scheduledTime)),
+      runScheduledReportTests(new Date(controller.scheduledTime)),
       runScheduledRecurringTransactions(new Date(controller.scheduledTime)),
       runScheduledHomeAlerts(new Date(controller.scheduledTime)),
+      pruneExpiredRateLimitRows(),
     ]);
     const failures = results.filter(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failures.length > 0) {
-      console.error("Luna scheduled jobs failed", {
+      console.error(JSON.stringify({
+        event: "scheduled_jobs_failed",
         cron: controller.cron,
         scheduledTime: controller.scheduledTime,
         failures: failures.map(({ reason }) =>
           reason instanceof Error ? reason.message : String(reason),
         ),
-      });
+      }));
       // Let the scheduled invocation fail so Cloudflare can retry transient
       // D1, push-service, or SMTP failures. Use noRetry only for a deliberate
       // permanent failure, not for every unexpected exception.

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { authRateLimits } from "@/backend/db/schema";
 
@@ -40,25 +40,38 @@ export async function checkRateLimit(
     updatedAt: timestamp,
   }).onConflictDoNothing();
 
-  const [current] = await db.select().from(authRateLimits).where(eq(authRateLimits.key, key)).limit(1);
-  if (!current) return { allowed: true, retryAfterSeconds: 0 };
+  const windowCutoff = new Date(now - options.windowMs).toISOString();
+  const [updated] = await db
+    .update(authRateLimits)
+    .set({
+      windowStartedAt: sql`CASE WHEN ${authRateLimits.windowStartedAt} < ${windowCutoff} THEN ${timestamp} ELSE ${authRateLimits.windowStartedAt} END`,
+      attempts: sql`CASE WHEN ${authRateLimits.windowStartedAt} < ${windowCutoff} THEN 1 ELSE ${authRateLimits.attempts} + 1 END`,
+      updatedAt: timestamp,
+    })
+    .where(eq(authRateLimits.key, key))
+    .returning({
+      windowStartedAt: authRateLimits.windowStartedAt,
+      attempts: authRateLimits.attempts,
+    });
 
-  const windowStartedAt = Date.parse(current.windowStartedAt);
-  const windowExpired = !Number.isFinite(windowStartedAt) || now - windowStartedAt >= options.windowMs;
-  if (windowExpired) {
-    await db.update(authRateLimits).set({ windowStartedAt: timestamp, attempts: 1, updatedAt: timestamp }).where(eq(authRateLimits.key, key));
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
+  if (!updated) return { allowed: true, retryAfterSeconds: 0 };
 
-  if (current.attempts >= options.limit) {
-    return {
-      allowed: false,
-      retryAfterSeconds: Math.max(1, Math.ceil((windowStartedAt + options.windowMs - now) / 1000)),
-    };
-  }
+  const windowStartedAt = Date.parse(updated.windowStartedAt);
+  const retryAfterSeconds = Number.isFinite(windowStartedAt)
+    ? Math.max(1, Math.ceil((windowStartedAt + options.windowMs - now) / 1000))
+    : Math.max(1, Math.ceil(options.windowMs / 1000));
+  return {
+    allowed: updated.attempts <= options.limit,
+    retryAfterSeconds: updated.attempts > options.limit ? retryAfterSeconds : 0,
+  };
+}
 
-  await db.update(authRateLimits).set({ attempts: current.attempts + 1, updatedAt: timestamp }).where(eq(authRateLimits.key, key));
-  return { allowed: true, retryAfterSeconds: 0 };
+/** Remove stale counters from completed rate-limit windows. */
+export async function pruneExpiredRateLimitRows(now = Date.now()) {
+  const retentionMs = 24 * 60 * 60 * 1000;
+  await db.delete(authRateLimits).where(
+    sql`${authRateLimits.updatedAt} < ${new Date(now - retentionMs).toISOString()}`,
+  );
 }
 
 /**

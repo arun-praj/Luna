@@ -1,6 +1,9 @@
 "use client";
 
-const ACCESS_TOKEN_KEY = "budget_access_token";
+// Access tokens are intentionally process-local. A reload restores the session
+// through the HttpOnly refresh cookie instead of exposing a bearer token to
+// JavaScript-readable storage.
+const LEGACY_ACCESS_TOKEN_KEY = "budget_access_token";
 const REFRESH_WINDOW_SECONDS = 60;
 const API_CACHE_TTL_MS = 120_000;
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
@@ -8,6 +11,7 @@ const REFRESH_REQUEST_TIMEOUT_MS = 10_000;
 const API_CACHE_STORAGE_KEY = "cocomelon.api-cache";
 export const ONLINE_DATA_CHANGED_EVENT = "cocomelon:online-data-changed";
 let refreshPromise: Promise<string | null> | null = null;
+let accessToken: string | null = null;
 
 class RefreshUnavailableError extends Error {}
 
@@ -37,7 +41,7 @@ export function notifyAuthExpired() {
 }
 
 export function getAccessToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  return accessToken;
 }
 
 export function getAccessTokenSubject() {
@@ -54,7 +58,7 @@ export function getAccessTokenSubject() {
 }
 
 export function setAccessToken(token: string) {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
+  accessToken = token;
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
 }
 
@@ -112,7 +116,10 @@ export function notifyOnlineDataChanged() {
 }
 
 export function clearAccessToken() {
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  accessToken = null;
+  // Remove tokens written by older builds during the migration. New builds
+  // never persist access tokens in browser storage.
+  window.localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
   // Do not leave the previous user's offline snapshot addressable after
   // logout or token expiry on a shared device.
   window.localStorage.removeItem("cocomelon.offline-active-user");
@@ -137,7 +144,7 @@ function clearLunaDeviceCache() {
       if (
         key.startsWith("cocomelon.") ||
         key.startsWith("budget_notification_settings:") ||
-        key === ACCESS_TOKEN_KEY
+        key === LEGACY_ACCESS_TOKEN_KEY
       ) {
         storage.removeItem(key);
       }
@@ -169,7 +176,7 @@ async function performRefresh() {
     try {
       refresh = await fetch("/api/auth/refresh", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "include",
         cache: "no-store",
         signal: controller.signal,
       });
@@ -226,7 +233,7 @@ async function refreshAccessToken() {
 
 export async function refreshSessionIfNeeded() {
   const token = getAccessToken();
-  if (!token || !tokenExpiresSoon(token)) return token;
+  if (token && !tokenExpiresSoon(token)) return token;
   try {
     const refreshedToken = await refreshAccessToken();
     if (!refreshedToken && !getAccessToken()) notifyAuthExpired();

@@ -240,7 +240,7 @@ export default function CategoriesPage() {
                     </span>
                     <span className="mt-3 block min-w-0">
                       <span className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[13px] font-semibold min-[520px]:text-[15px]">
+                        <span className="min-w-0 break-words whitespace-normal text-[13px] font-semibold leading-5 min-[520px]:text-[15px]">
                           {category.name}
                         </span>
                       </span>

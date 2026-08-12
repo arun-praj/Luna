@@ -23,5 +23,7 @@ jobs:
           NPM_CONFIG_LEGACY_PEER_DEPS: "true"
       - run: npm run lint
       - run: npm run typecheck
+      - name: Record transitive nanoid dependency tree
+        run: npm ls nanoid --all
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run build

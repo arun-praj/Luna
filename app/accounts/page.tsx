@@ -153,6 +153,7 @@ function SummaryAmount({
   preferredCurrency,
   hideTotalBalance = false,
   balanceRevealed = false,
+  revealSecondsRemaining = 0,
   onToggleVisibility,
 }: {
   entries: Array<[string, number]>;
@@ -160,6 +161,7 @@ function SummaryAmount({
   preferredCurrency: string;
   hideTotalBalance?: boolean;
   balanceRevealed?: boolean;
+  revealSecondsRemaining?: number;
   onToggleVisibility?: () => void;
 }) {
   if (isLoading) return <Skeleton className="inline-block h-7 w-24 align-middle" />;
@@ -174,6 +176,7 @@ function SummaryAmount({
             amount={formatCurrencyAmount(primary[1])}
             hideTotalBalance={hideTotalBalance}
             balanceRevealed={balanceRevealed}
+            revealSecondsRemaining={revealSecondsRemaining}
             onToggleVisibility={onToggleVisibility ?? (() => undefined)}
             className={amountColor}
           />
@@ -323,6 +326,7 @@ export default function AccountsPage() {
   const [displayCurrency, setDisplayCurrency] = useState("NPR");
   const [hideTotalBalance, setHideTotalBalance] = useState(false);
   const [balanceRevealed, setBalanceRevealed] = useState(false);
+  const [balanceRevealSecondsRemaining, setBalanceRevealSecondsRemaining] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reorderOpen, setReorderOpen] = useState(false);
@@ -331,6 +335,7 @@ export default function AccountsPage() {
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [openSwipeAccountId, setOpenSwipeAccountId] = useState<string | null>(null);
   const balanceRevealTimer = useRef<number | null>(null);
+  const balanceRevealCountdownTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -378,15 +383,25 @@ export default function AccountsPage() {
     return () => {
       active = false;
       if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
+      if (balanceRevealCountdownTimer.current !== null) window.clearInterval(balanceRevealCountdownTimer.current);
     };
   }, []);
 
   function revealTotalBalance() {
     if (!hideTotalBalance) return;
     if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
+    if (balanceRevealCountdownTimer.current !== null) window.clearInterval(balanceRevealCountdownTimer.current);
+    const startedAt = Date.now();
     setBalanceRevealed(true);
+    setBalanceRevealSecondsRemaining(5);
+    balanceRevealCountdownTimer.current = window.setInterval(() => {
+      setBalanceRevealSecondsRemaining(Math.max(0, Math.ceil((5000 - (Date.now() - startedAt)) / 1000)));
+    }, 100);
     balanceRevealTimer.current = window.setTimeout(() => {
       setBalanceRevealed(false);
+      setBalanceRevealSecondsRemaining(0);
+      if (balanceRevealCountdownTimer.current !== null) window.clearInterval(balanceRevealCountdownTimer.current);
+      balanceRevealCountdownTimer.current = null;
       balanceRevealTimer.current = null;
     }, 5000);
   }
@@ -395,7 +410,10 @@ export default function AccountsPage() {
     if (!hideTotalBalance) return;
     if (balanceRevealed) {
       if (balanceRevealTimer.current !== null) window.clearTimeout(balanceRevealTimer.current);
+      if (balanceRevealCountdownTimer.current !== null) window.clearInterval(balanceRevealCountdownTimer.current);
       balanceRevealTimer.current = null;
+      balanceRevealCountdownTimer.current = null;
+      setBalanceRevealSecondsRemaining(0);
       setBalanceRevealed(false);
       return;
     }
@@ -508,6 +526,7 @@ export default function AccountsPage() {
                 preferredCurrency={displayCurrency}
                 hideTotalBalance={hideTotalBalance}
                 balanceRevealed={balanceRevealed}
+                revealSecondsRemaining={balanceRevealSecondsRemaining}
                 onToggleVisibility={toggleBalanceVisibility}
               />
             </p>

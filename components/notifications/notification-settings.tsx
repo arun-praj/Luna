@@ -48,6 +48,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   const [isFrequencyOpen, setIsFrequencyOpen] = useState(false);
   const [isSavingThreshold, setIsSavingThreshold] = useState(false);
   const [isSavingMonthlyReport, setIsSavingMonthlyReport] = useState(false);
+  const [isSchedulingReportTest, setIsSchedulingReportTest] = useState(false);
   const [isCurrentDeviceSubscribed, setIsCurrentDeviceSubscribed] = useState(false);
   const [isTestingNotification, setIsTestingNotification] = useState(false);
   const [message, setMessage] = useState("");
@@ -150,6 +151,20 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
     setIsSavingMonthlyReport(false);
   }
 
+  async function scheduleReportTest() {
+    setIsSchedulingReportTest(true);
+    setMessage("");
+    try {
+      const response = await authenticatedFetch("/api/reports/test", { method: "POST" });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      setMessage(response.ok ? "Test report scheduled. It should arrive in about 30–90 seconds." : result?.error ?? "Could not schedule the report test");
+    } catch {
+      setMessage("Could not reach the report delivery service.");
+    } finally {
+      setIsSchedulingReportTest(false);
+    }
+  }
+
   function scheduleThresholdSave(value: number | null) {
     if (thresholdSaveTimer.current !== null) {
       window.clearTimeout(thresholdSaveTimer.current);
@@ -231,7 +246,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
         <div className="divide-y divide-border border-t-2 border-primary/15 bg-surface-subtle/55">
         <div className="flex items-center gap-3 px-4 py-4">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary"><Mail aria-hidden="true" className="size-4" /></span>
-          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Monthly report by email</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">Receive the previous month&apos;s PDF on the first day of each month.</p></div>
+          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Monthly report by email</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">Receive the previous month&apos;s PDF on the first day of each month.</p>{monthlyReportEnabled ? <button type="button" onClick={() => void scheduleReportTest()} disabled={isSchedulingReportTest} className="mt-2 min-h-8 rounded-md border border-primary/25 bg-card px-2.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary-soft disabled:cursor-wait disabled:opacity-60">{isSchedulingReportTest ? "Scheduling…" : "Send test email"}</button> : null}</div>
           <button type="button" role="switch" aria-checked={monthlyReportEnabled} aria-label="Monthly report by email" disabled={isSavingMonthlyReport} onClick={() => void updateMonthlyReport(!monthlyReportEnabled)} className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60 ${monthlyReportEnabled ? "bg-primary" : "bg-border-strong"}`}>
             <span className={`absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${monthlyReportEnabled ? "left-6" : "left-1"}`} />
           </button>

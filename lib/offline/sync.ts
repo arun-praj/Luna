@@ -23,7 +23,7 @@ import type {
   OfflineTransaction,
   OfflineTransactionInput,
 } from "@/lib/offline/types";
-import { budgetPeriodBounds, withBudgetProgress, type Budget, type BudgetPeriod } from "@/lib/budgets";
+import { budgetPeriodBounds, withBudgetProgress, type Budget, type BudgetAllocationKind, type BudgetPeriod } from "@/lib/budgets";
 import { normalizeMoney } from "@/lib/money";
 
 const SYNC_REQUEST_TIMEOUT_MS = 12_000;
@@ -89,6 +89,7 @@ type BudgetResponse = { budgets: Budget[] };
 
 export type OfflineBudgetInput = {
   categoryId: string | null;
+  kind?: BudgetAllocationKind;
   limitAmount: number;
   period: BudgetPeriod;
   rolloverRule?: "none" | "cap" | "uncapped";
@@ -460,7 +461,8 @@ export async function queueOfflineBudgetCreate(input: OfflineBudgetInput) {
   const userId = getActiveOfflineUserId();
   if (!userId) throw new Error("Open Luna online once before creating an offline budget.");
   const database = await getOfflineDatabase();
-  const existing = await database.budgets.findOne({ selector: { userId, period: input.period, categoryId: input.categoryId, deleted: false } }).exec();
+  const kind = input.kind ?? "expense";
+  const existing = await database.budgets.findOne({ selector: { userId, period: input.period, categoryId: input.categoryId, kind, deleted: false } }).exec();
   if (existing) return { budget: existing.toJSON(), existing: true };
   const id = window.crypto.randomUUID();
   const mutationId = window.crypto.randomUUID();
@@ -475,6 +477,7 @@ export async function queueOfflineBudgetCreate(input: OfflineBudgetInput) {
     serverId: null,
     userId,
     categoryId: input.categoryId,
+    kind,
     name: category ? `${category.name} budget` : "Overall budget",
     period: input.period,
     clientGeneratedId: mutationId,
@@ -489,7 +492,7 @@ export async function queueOfflineBudgetCreate(input: OfflineBudgetInput) {
     deleted: false,
     cachedAt: timestamp,
   };
-  const mutation: OfflineBudgetMutation = { id: mutationId, userId, budgetId: id, operation: "create", ...input, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp };
+  const mutation: OfflineBudgetMutation = { id: mutationId, userId, budgetId: id, operation: "create", ...input, kind, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp };
   await Promise.all([database.budgets.insert(budget), database.budgetMutations.insert(mutation)]);
   notifyOfflineDataChanged();
   return { budget, existing: false };
@@ -502,21 +505,22 @@ export async function queueOfflineBudgetUpdate(budgetId: string, input: OfflineB
   const document = await database.budgets.findOne({ selector: { userId, id: budgetId } }).exec();
   if (!document) throw new Error("Budget is not available offline.");
   const current = document.toJSON();
+  const kind = input.kind ?? current.kind ?? "expense";
   const categoryDocument = input.categoryId ? await database.categories.findOne({ selector: { userId, serverId: input.categoryId } }).exec() : null;
   const category = categoryDocument?.toJSON() ?? null;
   const timestamp = new Date().toISOString();
   const bounds = budgetPeriodBounds(input.period, timestamp.slice(0, 10));
   const progress = withBudgetProgress(input.limitAmount, current.spent);
   await document.incrementalPatch({
-    categoryId: input.categoryId, name: category ? `${category.name} budget` : "Overall budget", category: category ? { id: category.serverId, name: category.name, icon: category.icon, color: category.color } : null,
+    categoryId: kind === "savings" ? null : input.categoryId, kind, name: kind === "savings" ? "Savings target" : category ? `${category.name} budget` : "Overall budget", category: category ? { id: category.serverId, name: category.name, icon: category.icon, color: category.color } : null,
     period: input.period, ...progress, periodStart: bounds.start, periodEnd: bounds.end, updatedAt: timestamp, syncStatus: "pending", syncError: null,
   });
   const pendingCreate = await database.budgetMutations.findOne({ selector: { userId, budgetId, operation: "create" } }).exec();
   if (pendingCreate) {
-    await pendingCreate.incrementalPatch({ ...input, status: "pending", error: null, updatedAt: timestamp });
+    await pendingCreate.incrementalPatch({ ...input, kind, categoryId: kind === "savings" ? null : input.categoryId, status: "pending", error: null, updatedAt: timestamp });
   } else {
     const mutationId = window.crypto.randomUUID();
-    await database.budgetMutations.insert({ id: mutationId, userId, budgetId, operation: "update", ...input, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
+    await database.budgetMutations.insert({ id: mutationId, userId, budgetId, operation: "update", ...input, kind, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
   }
   notifyOfflineDataChanged();
   return document.toJSON();
@@ -536,7 +540,7 @@ export async function queueOfflineBudgetDelete(budgetId: string) {
     const timestamp = new Date().toISOString();
     const mutationId = window.crypto.randomUUID();
     await document.incrementalPatch({ deleted: true, syncStatus: "pending", syncError: null, updatedAt: timestamp });
-    await database.budgetMutations.insert({ id: mutationId, userId, budgetId: current.serverId ?? current.id, operation: "delete", categoryId: current.categoryId, limitAmount: current.limitAmount, period: current.period, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
+    await database.budgetMutations.insert({ id: mutationId, userId, budgetId: current.serverId ?? current.id, operation: "delete", kind: current.kind ?? "expense", categoryId: current.categoryId, limitAmount: current.limitAmount, period: current.period, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
   }
   notifyOfflineDataChanged();
 }
@@ -552,7 +556,7 @@ export async function syncPendingBudgets() {
     const item = document.toJSON();
     return item.operation === "delete"
       ? { operation: item.operation, mutationId: item.id, budgetId: item.budgetId }
-      : { operation: item.operation, mutationId: item.id, budgetId: item.budgetId, input: { categoryId: item.categoryId, limitAmount: item.limitAmount, period: item.period, clientGeneratedId: item.clientGeneratedId, updatedAt: item.updatedAt } };
+      : { operation: item.operation, mutationId: item.id, budgetId: item.budgetId, input: { categoryId: item.categoryId, kind: item.kind, limitAmount: item.limitAmount, period: item.period, clientGeneratedId: item.clientGeneratedId, updatedAt: item.updatedAt } };
   });
   const response = await syncFetch("/api/budgets/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mutations }) });
   const result = await response.json().catch(() => null) as { results?: Array<{ mutationId: string; status: "synced" | "failed"; budgetId?: string; error?: string }>; budgets?: Budget[]; error?: string } | null;

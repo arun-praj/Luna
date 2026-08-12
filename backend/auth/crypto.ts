@@ -3,8 +3,10 @@ import "server-only";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function encryptionKey() {
-  const configured = process.env.AUTH_ENCRYPTION_KEY || process.env.AUTH_JWT_SECRET;
-  if (!configured) throw new Error("AUTH_ENCRYPTION_KEY or AUTH_JWT_SECRET must be configured");
+  const configured = process.env.AUTH_ENCRYPTION_KEY;
+  if (!configured || configured.length < 32) {
+    throw new Error("AUTH_ENCRYPTION_KEY must be configured with at least 32 characters");
+  }
   return createHash("sha256").update(configured).digest();
 }
 

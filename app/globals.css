@@ -397,6 +397,7 @@ body:has([aria-modal="true"]) {
   --color-income: var(--income);
   --color-income-soft: var(--income-soft);
   --color-expense: var(--expense);
+  --color-expense-strong: var(--expense-strong);
   --color-expense-soft: var(--expense-soft);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
@@ -471,6 +472,7 @@ body:has([aria-modal="true"]) {
   --income: #2f7d5a;
   --income-soft: #e5f3eb;
   --expense: #b35d55;
+  --expense-strong: #8f3f39;
   --expense-soft: #f8e9e6;
   --warning: #a56a20;
   --warning-soft: #faeedb;

@@ -85,17 +85,24 @@ export function useActivityAlerts(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    void authenticatedFetch("/api/home-alerts?view=activity")
-      .then(async (response) => {
-        if (!response.ok) return;
-        const result = await response.json() as { alerts?: ActivityAlert[] };
-        if (!active) return;
-        const next = result.alerts ?? [];
-        setAlerts(next);
-        writeCachedActivityAlerts(next);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
+    const refresh = () => {
+      void authenticatedFetch("/api/home-alerts?view=activity")
+        .then(async (response) => {
+          if (!response.ok) return;
+          const result = await response.json() as { alerts?: ActivityAlert[] };
+          if (!active) return;
+          const next = result.alerts ?? [];
+          setAlerts(next);
+          writeCachedActivityAlerts(next);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener("cocomelon:transactions-changed", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("cocomelon:transactions-changed", refresh);
+    };
   }, [enabled]);
 
   return enabled ? alerts : [];

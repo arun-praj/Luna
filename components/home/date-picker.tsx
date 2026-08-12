@@ -90,6 +90,8 @@ function CompactDivider() {
 export function DatePicker({
   initialMode = "day",
   initialLabel,
+  initialCustomRange,
+  initialQuickPeriodLabel,
   triggerLabel,
   triggerAriaLabel,
   triggerIcon,
@@ -100,6 +102,8 @@ export function DatePicker({
 }: {
   initialMode?: FilterMode;
   initialLabel?: string;
+  initialCustomRange?: DateRange;
+  initialQuickPeriodLabel?: string | null;
   triggerLabel?: string;
   triggerAriaLabel?: string;
   triggerIcon?: LucideIcon;
@@ -123,15 +127,15 @@ export function DatePicker({
     year: CURRENT_DATE.getFullYear(),
   });
   const [customRange, setCustomRange] = React.useState<DateRange>({
-    from: undefined,
-    to: undefined,
+    from: initialCustomRange?.from,
+    to: initialCustomRange?.to,
   });
   const [calendarOpen, setCalendarOpen] = React.useState(false);
   const [calendarMonth, setCalendarMonth] = React.useState(CURRENT_DATE);
   const monthScrollerRef = React.useRef<HTMLDivElement>(null);
   const [amount, setAmount] = React.useState(4);
   const [unit, setUnit] = React.useState<PeriodUnit>("weeks");
-  const [quickPeriodLabel, setQuickPeriodLabel] = React.useState<string | null>(null);
+  const [quickPeriodLabel, setQuickPeriodLabel] = React.useState<string | null>(initialQuickPeriodLabel ?? null);
   const TriggerIcon = triggerIcon ?? CalendarDays;
 
   const setOpenState = (nextOpen: boolean) => {

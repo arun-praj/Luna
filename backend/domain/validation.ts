@@ -4,6 +4,7 @@ import { z } from "zod";
 export const moneyInput = z.number().finite().transform(normalizeMoney);
 const nonNegativeMoneyInput = z.number().finite().nonnegative().transform(normalizeMoney);
 export const positiveMoneyInput = z.number().finite().positive().transform(normalizeMoney);
+const referenceId = z.string().trim().min(1).max(200);
 
 export const accountType = z.enum(["checking", "cash", "credit_card", "general", "savings", "investment", "loan", "other"]);
 export const transactionType = z.enum(["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"]);
@@ -59,12 +60,68 @@ export const goalCreateInput = goalInput.extend({ accountId: z.string().uuid() }
 
 export const budgetInput = z.object({
   categoryId: z.string().uuid().nullable().optional(),
+  kind: z.enum(["expense", "savings"]).optional(),
   name: z.string().trim().min(1).max(100).optional(),
   limitAmount: positiveMoneyInput,
   period: z.enum(["weekly", "monthly", "yearly"]),
   rolloverRule: z.enum(["none", "cap", "uncapped"]).optional(),
   clientGeneratedId: z.string().uuid().optional(),
   updatedAt: z.string().datetime().optional(),
+});
+
+export const budgetMoveInput = z.object({
+  fromAllocationId: z.string().uuid(),
+  toAllocationId: z.string().uuid(),
+  amount: positiveMoneyInput,
+});
+
+export const budgetBucketInput = z.object({
+  categoryId: z.string().uuid(),
+  bucket: z.enum(["needs", "wants"]).nullable(),
+});
+
+export const budgetTemplateInput = z.object({
+  totalAmount: positiveMoneyInput,
+  assignments: z.array(budgetBucketInput).max(200).default([]),
+});
+
+export const budgetIncomeSourceInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  amount: positiveMoneyInput,
+  interval: z.enum(["weekly", "biweekly", "twice_monthly", "monthly", "quarterly", "yearly"]),
+  categoryId: z.string().uuid().nullable().optional(),
+});
+
+export const budgetIncomeSourcesInput = z.object({
+  incomeSources: z.array(budgetIncomeSourceInput).min(1).max(20),
+});
+
+export const budgetOnboardingInput = z.object({
+  incomeSources: z.array(budgetIncomeSourceInput).min(1).max(20),
+  allocations: z.array(z.object({
+    categoryId: z.string().uuid().nullable().optional(),
+    kind: z.enum(["expense", "savings"]).default("expense"),
+    amount: positiveMoneyInput,
+  })).min(1).max(200),
+}).superRefine((value, context) => {
+  const categoryIds = new Set<string>();
+  let hasExpense = false;
+  for (const [index, allocation] of value.allocations.entries()) {
+    if (allocation.kind === "expense") {
+      hasExpense = true;
+      if (!allocation.categoryId) context.addIssue({ code: "custom", path: ["allocations", index, "categoryId"], message: "Choose an expense category" });
+      else if (categoryIds.has(allocation.categoryId)) context.addIssue({ code: "custom", path: ["allocations", index, "categoryId"], message: "Each category can only be allocated once" });
+      else categoryIds.add(allocation.categoryId);
+    } else if (allocation.categoryId) {
+      context.addIssue({ code: "custom", path: ["allocations", index, "categoryId"], message: "Savings targets cannot use an expense category" });
+    }
+  }
+  if (!hasExpense) context.addIssue({ code: "custom", path: ["allocations"], message: "Add at least one category allocation" });
+  const incomeCategoryIds = new Set<string>();
+  for (const [index, source] of value.incomeSources.entries()) {
+    if (source.categoryId && incomeCategoryIds.has(source.categoryId)) context.addIssue({ code: "custom", path: ["incomeSources", index, "categoryId"], message: "Each income category can only be mapped once" });
+    if (source.categoryId) incomeCategoryIds.add(source.categoryId);
+  }
 });
 
 export const recurringTemplateInput = z.object({
@@ -91,7 +148,7 @@ export const transactionSplitInput = z.object({
 });
 
 export const transactionInput = z.object({
-  accountId: z.string().uuid(),
+  accountId: referenceId,
   type: transactionType,
   amount: moneyInput,
   categoryId: z.string().uuid().nullable().optional(),
@@ -105,7 +162,7 @@ export const transactionInput = z.object({
   receiptImageUrl: z.string().url().max(2000).nullable().optional(),
   goalId: z.string().uuid().nullable().optional(),
   savingsInstrumentId: z.string().uuid().nullable().optional(),
-  transferToAccountId: z.string().uuid().nullable().optional(),
+  transferToAccountId: referenceId.nullable().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   transactionAt: z.string().datetime({ offset: true }).optional(),
   clientGeneratedId: z.string().uuid().optional(),

@@ -30,6 +30,9 @@ export const users = sqliteTable(
     onboardingCompleted: integer("onboarding_completed", { mode: "boolean" })
       .notNull()
       .default(false),
+    budgetOnboardingCompleted: integer("budget_onboarding_completed", { mode: "boolean" })
+      .notNull()
+      .default(false),
     tutorialStartedAt: optionalIsoTimestamp("tutorial_started_at"),
     tutorialCompletedAt: optionalIsoTimestamp("tutorial_completed_at"),
     otpEnabled: integer("otp_enabled", { mode: "boolean" })
@@ -248,10 +251,10 @@ export const reportDeliveries = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    reportType: text("report_type", { enum: ["monthly"] }).notNull(),
+    reportType: text("report_type", { enum: ["monthly", "monthly_test"] }).notNull(),
     periodStart: text("period_start").notNull(),
     periodEnd: text("period_end").notNull(),
-    status: text("status", { enum: ["processing", "sent", "failed"] }).notNull(),
+    status: text("status", { enum: ["processing", "sending", "sent", "failed"] }).notNull(),
     error: text("error"),
     sentAt: optionalIsoTimestamp("sent_at"),
     createdAt: isoTimestamp("created_at"),
@@ -329,6 +332,24 @@ export const categories = sqliteTable(
     color: text("color"),
   },
   (table) => [index("categories_user_idx").on(table.userId)],
+);
+
+export const budgetIncomeSources = sqliteTable(
+  "budget_income_sources",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    amount: real("amount").notNull(),
+    interval: text("interval", { enum: ["weekly", "biweekly", "twice_monthly", "monthly", "quarterly", "yearly"] }).notNull(),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    index("budget_income_sources_user_idx").on(table.userId),
+    uniqueIndex("budget_income_sources_user_category_unique").on(table.userId, table.categoryId),
+  ],
 );
 
 export const userTags = sqliteTable(
@@ -489,6 +510,7 @@ export const budgetTemplates = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: ["expense", "savings"] }).notNull().default("expense"),
     name: text("name").notNull(),
     recurrence: text("recurrence", { enum: ["weekly", "monthly", "yearly"] }).notNull(),
     defaultAmount: real("default_amount").notNull(),
@@ -500,8 +522,8 @@ export const budgetTemplates = sqliteTable(
   (table) => [
     index("budget_templates_user_idx").on(table.userId),
     uniqueIndex("budget_templates_client_unique").on(table.clientGeneratedId),
-    uniqueIndex("budget_templates_category_scope_unique").on(table.userId, table.recurrence, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
-    uniqueIndex("budget_templates_overall_scope_unique").on(table.userId, table.recurrence).where(sql`${table.categoryId} IS NULL`),
+    uniqueIndex("budget_templates_category_scope_unique").on(table.userId, table.recurrence, table.kind, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+    uniqueIndex("budget_templates_overall_scope_unique").on(table.userId, table.recurrence, table.kind).where(sql`${table.categoryId} IS NULL`),
   ],
 );
 
@@ -531,6 +553,7 @@ export const budgetAllocations = sqliteTable(
     periodId: text("period_id").notNull().references(() => budgetPeriods.id, { onDelete: "cascade" }),
     templateId: text("template_id").references(() => budgetTemplates.id, { onDelete: "set null" }),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: ["expense", "savings"] }).notNull().default("expense"),
     originalAmount: real("original_amount").notNull(),
     adjustedAmount: real("adjusted_amount").notNull(),
     rolloverAmount: real("rollover_amount").notNull().default(0),
@@ -539,8 +562,43 @@ export const budgetAllocations = sqliteTable(
   },
   (table) => [
     index("budget_allocations_period_idx").on(table.periodId),
-    uniqueIndex("budget_allocations_category_unique").on(table.periodId, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
-    uniqueIndex("budget_allocations_overall_unique").on(table.periodId).where(sql`${table.categoryId} IS NULL`),
+    uniqueIndex("budget_allocations_category_unique").on(table.periodId, table.kind, table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+    uniqueIndex("budget_allocations_overall_unique").on(table.periodId, table.kind).where(sql`${table.categoryId} IS NULL`),
+  ],
+);
+
+export const budgetCategoryBuckets = sqliteTable(
+  "budget_category_buckets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    categoryId: text("category_id").notNull().references(() => categories.id, { onDelete: "cascade" }),
+    bucket: text("bucket", { enum: ["needs", "wants"] }).notNull(),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    uniqueIndex("budget_category_buckets_user_category_unique").on(table.userId, table.categoryId),
+    index("budget_category_buckets_user_idx").on(table.userId),
+  ],
+);
+
+export const budgetMoves = sqliteTable(
+  "budget_moves",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    periodId: text("period_id").notNull().references(() => budgetPeriods.id, { onDelete: "cascade" }),
+    fromAllocationId: text("from_allocation_id").notNull().references(() => budgetAllocations.id, { onDelete: "restrict" }),
+    toAllocationId: text("to_allocation_id").notNull().references(() => budgetAllocations.id, { onDelete: "restrict" }),
+    amount: real("amount").notNull(),
+    reversalOfId: text("reversal_of_id"),
+    reversedAt: optionalIsoTimestamp("reversed_at"),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [
+    index("budget_moves_user_period_idx").on(table.userId, table.periodId, table.createdAt),
+    index("budget_moves_reversal_idx").on(table.reversalOfId),
   ],
 );
 
@@ -703,6 +761,7 @@ export const schema = {
   reportCache,
   reportGenerationLimits,
   categories,
+  budgetIncomeSources,
   userTags,
   savingsInstrumentTypes,
   savingsInstruments,
@@ -715,6 +774,8 @@ export const schema = {
   budgetTemplates,
   budgetPeriods,
   budgetAllocations,
+  budgetCategoryBuckets,
+  budgetMoves,
   recurringTemplates,
   recurringOccurrences,
   transactions,

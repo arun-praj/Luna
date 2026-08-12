@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, lte } from "drizzle-orm";
 
 import { isSmtpConfigured, sendReportEmail } from "@/backend/auth/email";
 import { db } from "@/backend/db/client";
@@ -52,5 +52,50 @@ export async function runScheduledReports(now = new Date()) {
       console.error("Luna monthly report delivery failed", { userId: recipient.id, message });
     }
   }
+  return { sent, skipped: false };
+}
+
+export async function runScheduledReportTests(now = new Date()) {
+  if (!isSmtpConfigured()) return { sent: 0, skipped: true };
+
+  const due = await db
+    .select({ id: reportDeliveries.id, userId: reportDeliveries.userId, email: users.email })
+    .from(reportDeliveries)
+    .innerJoin(users, eq(users.id, reportDeliveries.userId))
+    .where(and(
+      eq(reportDeliveries.reportType, "monthly_test"),
+      eq(reportDeliveries.status, "processing"),
+      lte(reportDeliveries.createdAt, now.toISOString()),
+    ))
+    .limit(20);
+  let sent = 0;
+
+  for (const delivery of due) {
+    const [claimed] = await db
+      .update(reportDeliveries)
+      .set({ status: "sending", error: null })
+      .where(and(eq(reportDeliveries.id, delivery.id), eq(reportDeliveries.status, "processing")))
+      .returning({ id: reportDeliveries.id });
+    if (!claimed) continue;
+
+    try {
+      const bounds = getPreviousMonthBounds(now);
+      const report = await buildReport(delivery.userId, "monthly", now, bounds);
+      await writeReportCache(delivery.userId, report);
+      await sendReportEmail({
+        to: delivery.email,
+        periodLabel: report.period.label,
+        summary: `${report.totals.spending.toLocaleString()} spent, ${report.totals.earning.toLocaleString()} earned, and ${report.totals.savings.toLocaleString()} saved.`,
+        reportPdf: await buildReportPdf(report),
+      });
+      await db.update(reportDeliveries).set({ status: "sent", error: null, sentAt: new Date().toISOString() }).where(eq(reportDeliveries.id, delivery.id));
+      sent += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "REPORT_TEST_DELIVERY_FAILED";
+      await db.update(reportDeliveries).set({ status: "failed", error: message }).where(eq(reportDeliveries.id, delivery.id));
+      console.error("Luna report test delivery failed", { userId: delivery.userId, message });
+    }
+  }
+
   return { sent, skipped: false };
 }

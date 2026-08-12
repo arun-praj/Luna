@@ -169,6 +169,20 @@
       "when": 1786422312017,
       "tag": "0023_lowly_morg",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786427446692,
+      "tag": "0024_bumpy_bloodstorm",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786462899876,
+      "tag": "0025_cooing_justin_hammer",
+      "breakpoints": true
     }
   ]
 }

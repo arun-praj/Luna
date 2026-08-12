@@ -212,7 +212,7 @@ const budgetCategoryProperties = {
 
 const budgetSchema: RxJsonSchema<OfflineBudget> = {
   title: "offline budget",
-  version: 0,
+  version: 2,
   primaryKey: "localId",
   type: "object",
   additionalProperties: false,
@@ -222,6 +222,7 @@ const budgetSchema: RxJsonSchema<OfflineBudget> = {
     serverId: { ...nullableString, maxLength: 100 },
     userId: { type: "string", maxLength: 100 },
     categoryId: { ...nullableString, maxLength: 100 },
+    kind: { type: "string", enum: ["expense", "savings"], maxLength: 10 },
     name: { type: "string", maxLength: 180 },
     limitAmount: { type: "number" },
     period: { type: "string", enum: ["weekly", "monthly", "yearly"], maxLength: 10 },
@@ -246,24 +247,24 @@ const budgetSchema: RxJsonSchema<OfflineBudget> = {
     deleted: { type: "boolean" },
     cachedAt: { type: "string", maxLength: 40 },
   },
-  required: ["localId", "id", "serverId", "userId", "categoryId", "name", "limitAmount", "period", "clientGeneratedId", "createdAt", "updatedAt", "spent", "remaining", "percentage", "periodStart", "periodEnd", "category", "syncStatus", "syncError", "deleted", "cachedAt"],
+  required: ["localId", "id", "serverId", "userId", "categoryId", "kind", "name", "limitAmount", "period", "clientGeneratedId", "createdAt", "updatedAt", "spent", "remaining", "percentage", "periodStart", "periodEnd", "category", "syncStatus", "syncError", "deleted", "cachedAt"],
   indexes: [["userId", "period"], ["userId", "syncStatus"]],
 };
 
 const budgetMutationSchema: RxJsonSchema<OfflineBudgetMutation> = {
   title: "offline budget mutation",
-  version: 0,
+  version: 2,
   primaryKey: "id",
   type: "object",
   additionalProperties: false,
   properties: {
     id: { type: "string", maxLength: 100 }, userId: { type: "string", maxLength: 100 }, budgetId: { type: "string", maxLength: 100 },
-    operation: { type: "string", enum: ["create", "update", "delete"], maxLength: 10 }, categoryId: { ...nullableString, maxLength: 100 },
+    operation: { type: "string", enum: ["create", "update", "delete"], maxLength: 10 }, kind: { type: "string", enum: ["expense", "savings"], maxLength: 10 }, categoryId: { ...nullableString, maxLength: 100 },
     limitAmount: { type: "number" }, period: { type: "string", enum: ["weekly", "monthly", "yearly"], maxLength: 10 }, rolloverRule: { type: "string", enum: ["none", "cap", "uncapped"], maxLength: 10 },
     clientGeneratedId: { type: "string", maxLength: 100 }, status: { type: "string", enum: ["synced", "pending", "failed"], maxLength: 10 },
     error: nullableString, createdAt: { type: "string", maxLength: 40 }, updatedAt: { type: "string", maxLength: 40 },
   },
-  required: ["id", "userId", "budgetId", "operation", "categoryId", "limitAmount", "period", "clientGeneratedId", "status", "error", "createdAt", "updatedAt"],
+  required: ["id", "userId", "budgetId", "operation", "kind", "categoryId", "limitAmount", "period", "clientGeneratedId", "status", "error", "createdAt", "updatedAt"],
   indexes: [["userId", "status"]],
 };
 
@@ -327,8 +328,20 @@ export function getOfflineDatabase() {
             }),
           },
         },
-        budgets: { schema: budgetSchema },
-        budgetMutations: { schema: budgetMutationSchema },
+        budgets: {
+          schema: budgetSchema,
+          migrationStrategies: {
+            0: (document: OfflineBudget & { kind?: "expense" | "savings" }) => ({ ...document, rolloverRule: document.rolloverRule ?? "none", kind: document.kind ?? "expense" }),
+            1: (document: OfflineBudget & { kind?: "expense" | "savings" }) => ({ ...document, rolloverRule: document.rolloverRule ?? "none", kind: document.kind ?? "expense" }),
+          },
+        },
+        budgetMutations: {
+          schema: budgetMutationSchema,
+          migrationStrategies: {
+            0: (document: OfflineBudgetMutation & { kind?: "expense" | "savings" }) => ({ ...document, rolloverRule: document.rolloverRule ?? "none", kind: document.kind ?? "expense" }),
+            1: (document: OfflineBudgetMutation & { kind?: "expense" | "savings" }) => ({ ...document, rolloverRule: document.rolloverRule ?? "none", kind: document.kind ?? "expense" }),
+          },
+        },
       });
       return db;
     })().catch((error) => {

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { accounts, categories, transactions } from "@/backend/db/schema";
+import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { deleteTransaction, serializeTransaction, updateTransaction } from "@/backend/domain/transaction-service";
 import { transactionInput } from "@/backend/domain/validation";
 
@@ -40,5 +41,5 @@ export async function GET(request: Request, { params }: Context) {
     })),
   } });
 }
-export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const parsed = transactionInput.safeParse(await request.json().catch(() => null)); if (!parsed.success) { const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title"); return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400); } try { return NextResponse.json({ transaction: serializeTransaction(await updateTransaction(userId, id, parsed.data)) }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to update transaction", 400); } }
-export async function DELETE(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); try { await deleteTransaction(userId, id); return NextResponse.json({ success: true }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to delete transaction", 400); } }
+export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const parsed = transactionInput.safeParse(await request.json().catch(() => null)); if (!parsed.success) { const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title"); return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400); } try { const transaction = await updateTransaction(userId, id, parsed.data); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to update transaction", 400); } }
+export async function DELETE(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); try { await deleteTransaction(userId, id); scheduleHomeAlertRepair(userId); return NextResponse.json({ success: true }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to delete transaction", 400); } }

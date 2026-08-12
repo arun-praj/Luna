@@ -6,16 +6,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
-  ArrowDownLeft,
   ArrowLeftRight,
-  ArrowUpRight,
   AlertCircle,
   Banknote,
   CalendarDays,
   Check,
   ChevronDown,
   ChevronRight,
-  Landmark,
   Layers3,
   LoaderCircle,
   Menu,
@@ -40,12 +37,8 @@ import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { formatMoney, MoneyEditor } from "@/components/money/money-editor";
 import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { BudgetStatusBadge } from "@/components/shadcn-space/badge/badge-09";
-import {
-  categoryIconOptions,
-  getCategoryForeground,
-  getCategoryIcon,
-} from "@/lib/category-appearance";
-import { getSavingsIconSource } from "@/lib/savings-appearance";
+import { getCategoryForeground, getCategoryIcon } from "@/lib/category-appearance";
+import { CategoryIconPicker } from "@/components/categories/category-icon-picker";
 import {
   getAccountBackgroundColor,
   getAccountForeground,
@@ -53,176 +46,39 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { useUnsavedChangesGuard } from "@/components/ui/unsaved-changes-dialog";
-import type { Budget, BudgetPeriod } from "@/lib/budgets";
-
-type TransactionKind = Transaction["kind"] | "";
-
-const transactionTypes = [
-  {
-    value: "expense",
-    label: "Expense",
-    description: "Money leaving an account",
-    icon: ArrowUpRight,
-    iconClassName: "bg-expense-soft text-expense",
-    foregroundClassName: "text-expense",
-  },
-  {
-    value: "income",
-    label: "Income",
-    description: "Money added to an account",
-    icon: ArrowDownLeft,
-    iconClassName: "bg-income-soft text-income",
-    foregroundClassName: "text-income",
-  },
-  {
-    value: "transfer",
-    label: "Transfer",
-    description: "Move money between accounts",
-    icon: ArrowLeftRight,
-    iconClassName: "bg-info-soft text-info",
-    foregroundClassName: "text-info",
-  },
-  {
-    value: "savings",
-    label: "Savings",
-    description: "Set money aside",
-    icon: Landmark,
-    iconClassName: "bg-income-soft text-income",
-    foregroundClassName: "text-income",
-  },
-] satisfies Array<{
-  value: Transaction["kind"];
-  label: string;
-  description: string;
-  icon: typeof ArrowUpRight;
-  iconClassName: string;
-  foregroundClassName: string;
-}>;
-
-const tagOptions = ["Recurring", "Personal", "Work", "Reimbursable"];
-
-type CategoryOption = {
-  id: string;
-  name: string;
-  type: "expense" | "income";
-  icon: string | null;
-  color: string | null;
-};
-
-type SplitDraft = {
-  id: string;
-  categoryId: string;
-  amount: string;
-  note?: string | null;
-};
-
-type MerchantOption = {
-  name: string;
-  lastUsedAt: string;
-  usageCount: number;
-};
-
-type SavingsInstrumentOption = { id: string; name: string; typeName?: string; currentBalance: number; icon?: string | null };
-
-type CategoryBudgetPreview = {
-  percentage: number;
-  tone: "safe" | "warning" | "danger";
-};
-
-const BUDGET_PERIODS: BudgetPeriod[] = ["weekly", "monthly", "yearly"];
-
-function budgetProgressColor(percentage: number) {
-  const capped = Math.min(100, Math.max(0, percentage));
-  return `hsl(${Math.round(120 - capped * 1.2)} 72% 42%)`;
-}
-
-type IncomeGoalOption = {
-  id: string;
-  name: string;
-  targetAmount: number;
-  allocatedAmount: number;
-  monthlyContribution: number;
-  status: string;
-  targetDate: string | null;
-  accountId: string | null;
-};
-
-const INCOME_GOALS_PER_PAGE = 4;
-
-function SavingsInstrumentAvatar({ icon }: { icon?: string | null }) {
-  return (
-    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-[9px] border border-primary/10 bg-primary-soft">
-      <AuthenticatedImage
-        src={getSavingsIconSource(icon)}
-        alt=""
-        width={36}
-        height={36}
-        className="size-full object-cover"
-        unoptimized
-      />
-    </span>
-  );
-}
-
-const LAST_ACCOUNT_KEY = "cocomelon.last-transaction-account";
-
-function sortTransactionAccounts<T extends { id: string; isDefault?: boolean }>(accounts: T[], preferredId: string | null) {
-  const preferred = preferredId
-    ? accounts.find((account) => account.id === preferredId)
-    : accounts.find((account) => account.isDefault);
-  return preferred ? [preferred, ...accounts.filter((account) => account.id !== preferred.id)] : accounts;
-}
-
-const categoryForegrounds: Record<string, string> = {
-  "#e3eee9": "#356b68",
-  "#f8e9e6": "#9e514b",
-  "#f3e8d4": "#95631e",
-  "#e3eff6": "#436f9a",
-  "#e5f3eb": "#2f7d5a",
-  "#ece6f3": "#735b8f",
-  "#fbe8dc": "#a9512e",
-};
-
-function categoryForeground(color: string | null) {
-  return categoryForegrounds[color?.toLowerCase() ?? ""] ?? "#356b68";
-}
-
-function displayAccountName(name: string) {
-  return name.replace(" Wallet", "").replace(" account", "");
-}
-
-function transferTitle(amount: string, sourceName?: string, destinationName?: string, currency = "NPR") {
-  return `Transfer ${currency} ${formatMoney(amount)} from ${displayAccountName(sourceName ?? "account")} to ${displayAccountName(destinationName ?? "account")}`;
-}
-
-function LoadingBlock({ className }: { className: string }) {
-  return <span aria-hidden="true" className={`block animate-pulse rounded-[10px] bg-surface-subtle ${className}`} />;
-}
-
-function serializeTransactionDraft(values: {
-  title: string;
-  description: string;
-  date: string;
-  time: string;
-  kind: TransactionKind;
-  category: string;
-  categoryId: string | null;
-  splits: SplitDraft[];
-  merchantName: string;
-  tags: string[];
-  accountId: string;
-  savingsInstrumentId: string | null;
-  transferToAccountId: string;
-  amount: string;
-  receiptImageUrl: string | null;
-  receiptFileKey: string | null;
-}) {
-  return JSON.stringify({
-    ...values,
-    splits: values.splits.map(({ categoryId, amount, note }) => ({ categoryId, amount, note: note ?? null })),
-    tags: [...values.tags].sort(),
-  });
-}
+import type { Budget } from "@/lib/budgets";
+import type {
+  CategoryBudgetPreview,
+  CategoryOption,
+  IncomeGoalOption,
+  MerchantOption,
+  SavingsInstrumentOption,
+  SplitDraft,
+  TransactionKind,
+} from "./transaction-detail/types";
+import {
+  BUDGET_PERIODS,
+  INCOME_GOALS_PER_PAGE,
+  LAST_ACCOUNT_KEY,
+  tagOptions,
+  transactionTypes,
+} from "./transaction-detail/types";
+import {
+  budgetProgressColor,
+  categoryForeground,
+  displayAccountName,
+  serializeTransactionDraft,
+  sortTransactionAccounts,
+  transferTitle,
+} from "./transaction-detail/selectors";
+import {
+  createTransactionDraftState,
+  transactionDraftReducer,
+  type TransactionDraftAction,
+  type TransactionDraftState,
+} from "./transaction-detail/reducer";
+import { LoadingBlock, SavingsInstrumentAvatar } from "./transaction-detail/presentation";
+import { TransactionTypeForm, type SelectedTransactionType } from "./transaction-detail/transaction-type-forms";
 
 export function TransactionDetail({
   transaction,
@@ -236,34 +92,62 @@ export function TransactionDetail({
   guidedNew?: boolean;
 }) {
   const router = useRouter();
-  const [title, setTitle] = React.useState(
-    isNew ? "" : transaction.description,
+  const [draft, dispatchDraft] = React.useReducer(
+    transactionDraftReducer,
+    createTransactionDraftState({
+      title: isNew ? "" : transaction.description,
+      description: isNew
+        ? ""
+        : transaction.kind === "income"
+          ? `Received through ${transaction.account}`
+          : transaction.kind === "transfer"
+            ? `Moved from ${transaction.account} to ${transaction.destinationAccount}`
+            : `Paid from ${transaction.account}`,
+      date: transaction.date,
+      kind: isNew ? (initialKind ?? "") : transaction.kind,
+      amount: String(transaction.amount),
+    }),
   );
-  const [description, setDescription] = React.useState(
-    isNew
-      ? ""
-      : transaction.kind === "income"
-      ? `Received through ${transaction.account}`
-      : transaction.kind === "transfer"
-        ? `Moved from ${transaction.account} to ${transaction.destinationAccount}`
-        : `Paid from ${transaction.account}`,
-  );
-  const [receiptImageUrl, setReceiptImageUrl] = React.useState<string | null>(null);
+  const setDraftField = React.useCallback(<K extends keyof TransactionDraftState>(field: K, next: React.SetStateAction<TransactionDraftState[K]>) => {
+    dispatchDraft({ type: "set-field", field, value: next } as TransactionDraftAction);
+  }, []);
+  const title = draft.title;
+  const description = draft.description;
+  const date = draft.date;
+  const time = draft.time;
+  const kind = draft.kind;
+  const category = draft.category;
+  const categoryId = draft.categoryId;
+  const splits = draft.splits;
+  const merchantName = draft.merchantName;
+  const tags = draft.tags;
+  const accountId = draft.accountId;
+  const savingsInstrumentId = draft.savingsInstrumentId;
+  const transferToAccountId = draft.transferToAccountId;
+  const amount = draft.amount;
+  const receiptImageUrl = draft.receiptImageUrl;
+  const setTitle = React.useCallback((value: React.SetStateAction<string>) => setDraftField("title", value), [setDraftField]);
+  const setDescription = React.useCallback((value: React.SetStateAction<string>) => setDraftField("description", value), [setDraftField]);
+  const setDate = React.useCallback((value: React.SetStateAction<string>) => setDraftField("date", value), [setDraftField]);
+  const setTime = React.useCallback((value: React.SetStateAction<string>) => setDraftField("time", value), [setDraftField]);
+  const setKind = React.useCallback((value: TransactionKind) => dispatchDraft({ type: "set-kind", value }), []);
+  const setCategory = React.useCallback((value: React.SetStateAction<string>) => setDraftField("category", value), [setDraftField]);
+  const setCategoryId = React.useCallback((value: React.SetStateAction<string | null>) => setDraftField("categoryId", value), [setDraftField]);
+  const setSplits = React.useCallback((value: React.SetStateAction<SplitDraft[]>) => setDraftField("splits", value), [setDraftField]);
+  const setMerchantName = React.useCallback((value: React.SetStateAction<string>) => setDraftField("merchantName", value), [setDraftField]);
+  const setTags = React.useCallback((value: React.SetStateAction<string[]>) => setDraftField("tags", value), [setDraftField]);
+  const setAccountId = React.useCallback((value: React.SetStateAction<string>) => setDraftField("accountId", value), [setDraftField]);
+  const setSavingsInstrumentId = React.useCallback((value: React.SetStateAction<string | null>) => setDraftField("savingsInstrumentId", value), [setDraftField]);
+  const setTransferToAccountId = React.useCallback((value: React.SetStateAction<string>) => setDraftField("transferToAccountId", value), [setDraftField]);
+  const setAmount = React.useCallback((value: React.SetStateAction<string>) => setDraftField("amount", value), [setDraftField]);
+  const setReceiptImageUrl = React.useCallback((value: React.SetStateAction<string | null>) => setDraftField("receiptImageUrl", value), [setDraftField]);
   const [receiptFile, setReceiptFile] = React.useState<File | null>(null);
   const receiptPreviewUrl = React.useMemo(
     () => receiptFile ? URL.createObjectURL(receiptFile) : null,
     [receiptFile],
   );
   const [receiptError, setReceiptError] = React.useState("");
-  const [date, setDate] = React.useState(transaction.date);
-  const [time, setTime] = React.useState("12:00");
-  const [kind, setKind] = React.useState<TransactionKind>(
-    isNew ? (initialKind ?? "") : transaction.kind,
-  );
   const [typeOpen, setTypeOpen] = React.useState(false);
-  const [category, setCategory] = React.useState(transaction.category);
-  const [categoryId, setCategoryId] = React.useState<string | null>(null);
-  const [splits, setSplits] = React.useState<SplitDraft[]>([]);
   const [splitEditorOpen, setSplitEditorOpen] = React.useState(false);
   const [splitAmountIndex, setSplitAmountIndex] = React.useState<number | null>(null);
   const [splitCategoryIndex, setSplitCategoryIndex] = React.useState<number | null>(null);
@@ -273,18 +157,14 @@ export function TransactionDetail({
   const [categoryCreateOpen, setCategoryCreateOpen] = React.useState(false);
   const [newCategoryName, setNewCategoryName] = React.useState("");
   const [newCategoryIcon, setNewCategoryIcon] = React.useState("Wallet");
-  const [showMoreCategoryIcons, setShowMoreCategoryIcons] = React.useState(false);
   const [categoryCreateError, setCategoryCreateError] = React.useState("");
   const [isCreatingCategory, setIsCreatingCategory] = React.useState(false);
   const [savedTagOptions, setSavedTagOptions] = React.useState<string[]>([]);
-  const [merchantName, setMerchantName] = React.useState("");
   const [merchantOptions, setMerchantOptions] = React.useState<MerchantOption[]>([]);
   const [merchantSearch, setMerchantSearch] = React.useState("");
   const [newTag, setNewTag] = React.useState("");
   const [tagError, setTagError] = React.useState("");
-  const [tags, setTags] = React.useState<string[]>([]);
   const [picker, setPicker] = React.useState<"category" | "merchant" | "tags" | null>(null);
-  const [accountId, setAccountId] = React.useState("");
   const [accountOptions, setAccountOptions] = React.useState<Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean }>>([]);
   const [goalOptions, setGoalOptions] = React.useState<IncomeGoalOption[]>([]);
   const [incomeAllocations, setIncomeAllocations] = React.useState<Record<string, string>>({});
@@ -292,9 +172,6 @@ export function TransactionDetail({
   const [goalsPage, setGoalsPage] = React.useState(0);
   const [allocationGoalId, setAllocationGoalId] = React.useState<string | null>(null);
   const [savingsOptions, setSavingsOptions] = React.useState<SavingsInstrumentOption[]>([]);
-  const [savingsInstrumentId, setSavingsInstrumentId] = React.useState<string | null>(null);
-  const [transferToAccountId, setTransferToAccountId] = React.useState("");
-  const [amount, setAmount] = React.useState(String(transaction.amount));
   const [amountOpen, setAmountOpen] = React.useState(false);
   const [dateOpen, setDateOpen] = React.useState(false);
   const dateTransition = useAnimatedVisibility(dateOpen);
@@ -418,7 +295,7 @@ export function TransactionDetail({
     };
     void load();
     return () => { active = false; };
-  }, [guidedNew, initialKind, isNew, transaction.id]);
+  }, [guidedNew, initialKind, isNew, setAccountId, setAmount, setCategory, setCategoryId, setDate, setDescription, setKind, setMerchantName, setReceiptImageUrl, setSavingsInstrumentId, setSplits, setTags, setTime, setTitle, setTransferToAccountId, transaction.id]);
 
   React.useEffect(() => {
     let active = true;
@@ -571,19 +448,7 @@ export function TransactionDetail({
         : kind === "transfer"
           ? "text-info"
           : "text-foreground";
-  const TypeIcon =
-    kind === "income"
-      ? ArrowDownLeft
-      : kind === "expense"
-        ? ArrowUpRight
-        : kind === "savings"
-          ? Landmark
-          : kind === "adjust_balance"
-            ? Banknote
-        : kind === "transfer"
-          ? ArrowLeftRight
-          : Plus;
-  const selectedType =
+  const selectedType: SelectedTransactionType | undefined =
     transactionTypes.find((type) => type.value === kind) ??
     (kind === "adjust_balance"
       ? {
@@ -680,7 +545,6 @@ export function TransactionDetail({
     finishCategorySelection();
     setNewCategoryName("");
     setNewCategoryIcon("Wallet");
-    setShowMoreCategoryIcons(false);
     setIsCreatingCategory(false);
   }
 
@@ -1021,82 +885,17 @@ export function TransactionDetail({
             <X aria-hidden="true" className="size-5" />
           </button>
 
-          <div className="relative min-w-0">
-            <TypeIcon
-              aria-hidden="true"
-              className={`pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 ${selectedType?.foregroundClassName ?? "text-primary"}`}
-            />
-            <button
-              type="button"
-              aria-haspopup="listbox"
-              aria-expanded={typeOpen}
-              onClick={() => setTypeOpen((current) => !current)}
-              className={`h-11 w-full rounded-[11px] border bg-card pl-10 pr-9 text-left text-[15px] font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/20 ${selectedType?.foregroundClassName ?? "text-muted-foreground"} ${
-                saveAttempted && validationErrors.type
-                  ? "border-expense"
-                  : typeOpen
-                    ? "border-primary"
-                    : "border-border"
-              }`}
-            >
-              {selectedType?.label ?? "Choose type"}
-            </button>
-            <ChevronDown
-              aria-hidden="true"
-              className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-transform ${
-                typeOpen ? "rotate-180" : ""
-              }`}
-            />
-
-            {typeOpen ? (
-              <div
-                role="listbox"
-                aria-label="Transaction type"
-                className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-40 overflow-hidden rounded-[14px] border border-border bg-card p-1.5 shadow-[0_16px_44px_rgb(23_32_29_/_0.16)]"
-              >
-                {transactionTypes.map((type) => {
-                  const Icon = type.icon;
-                  const selected = kind === type.value;
-
-                  return (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      key={type.value}
-                      onClick={() => {
-                        setKind(type.value);
-                        if (type.value !== kind) {
-                          setSplits([]);
-                        }
-                        setTypeOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors ${
-                        selected ? "bg-primary-soft" : "hover:bg-surface-subtle"
-                      }`}
-                    >
-                      <span
-                        className={`flex size-9 shrink-0 items-center justify-center rounded-[9px] ${type.iconClassName}`}
-                      >
-                        <Icon aria-hidden="true" className="size-[17px]" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">
-                          {type.label}
-                        </span>
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                          {type.description}
-                        </span>
-                      </span>
-                      {selected ? (
-                        <Check aria-hidden="true" className="size-4 text-primary" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+          <TransactionTypeForm
+            kind={kind}
+            open={typeOpen}
+            selectedType={selectedType}
+            hasError={Boolean(saveAttempted && validationErrors.type)}
+            onToggle={() => setTypeOpen((current) => !current)}
+            onSelect={(nextKind) => {
+              setKind(nextKind);
+              setTypeOpen(false);
+            }}
+          />
 
           <button
             type="button"
@@ -1809,7 +1608,6 @@ export function TransactionDetail({
                       setCategorySearch("");
                       setCategoryCreateOpen(false);
                       setNewCategoryIcon("Wallet");
-                      setShowMoreCategoryIcons(false);
                       setCategoryCreateError("");
                     }
                   }}
@@ -1844,7 +1642,6 @@ export function TransactionDetail({
                           onClick={() => {
                             setCategoryCreateOpen(false);
                             setNewCategoryIcon("Wallet");
-                            setShowMoreCategoryIcons(false);
                             setCategoryCreateError("");
                           }}
                           className="shrink-0 rounded-md px-1 py-1 text-xs font-semibold text-muted-foreground hover:bg-background/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
@@ -1877,36 +1674,8 @@ export function TransactionDetail({
                         </button>
                       </div>
                       <fieldset className="mt-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <legend className="text-xs font-semibold text-foreground">Choose an icon</legend>
-                          <button
-                            type="button"
-                            onClick={() => setShowMoreCategoryIcons((current) => !current)}
-                            className="shrink-0 rounded-md px-1 py-1 text-[11px] font-semibold text-primary hover:bg-background/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                          >
-                            {showMoreCategoryIcons ? "Show fewer" : "Show more"}
-                          </button>
-                        </div>
-                        <div className="mt-2 max-h-[180px] overflow-y-auto overscroll-contain rounded-[10px] pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-surface-subtle [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-foreground/25">
-                          <div className="grid grid-cols-4 gap-1.5 min-[380px]:grid-cols-5">
-                          {categoryIconOptions.slice(0, showMoreCategoryIcons ? categoryIconOptions.length : 8).map((option) => {
-                            const Icon = option.icon;
-                            const selected = newCategoryIcon === option.label;
-                            return (
-                              <button
-                                type="button"
-                                key={option.label}
-                                aria-label={option.label}
-                                aria-pressed={selected}
-                                onClick={() => setNewCategoryIcon(option.label)}
-                                className={`flex min-h-11 items-center justify-center rounded-[9px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-primary"}`}
-                              >
-                                <Icon aria-hidden="true" className="size-5" strokeWidth={1.8} />
-                              </button>
-                            );
-                          })}
-                          </div>
-                        </div>
+                        <legend className="mb-2 block text-xs font-semibold text-foreground">Choose an icon</legend>
+                        <CategoryIconPicker selected={newCategoryIcon} compact onSelect={setNewCategoryIcon} />
                       </fieldset>
                       {categoryCreateError ? <p role="alert" className="mt-2 text-xs font-medium text-expense">{categoryCreateError}</p> : null}
                     </div>

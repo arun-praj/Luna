@@ -14,6 +14,7 @@
 	"secrets": {
 		"required": [
 			"AUTH_JWT_SECRET",
+			"AUTH_ENCRYPTION_KEY",
 			"CRON_SECRET",
 			"NVIDIA_AI_API_KEY",
 			"NVIDIA_AI_API_URL",

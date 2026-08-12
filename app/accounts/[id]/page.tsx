@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Edit3,
@@ -115,6 +116,7 @@ export default function AccountActivityPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const router = useRouter();
   const [backHref, setBackHref] = useState("/accounts");
   const [currentRoute, setCurrentRoute] = useState("/");
   const [accountId, setAccountId] = useState("");
@@ -151,12 +153,17 @@ export default function AccountActivityPage({
     let active = true;
     void authenticatedFetch(`/api/accounts/${accountId}`)
       .then(async (response) => {
-        if (!response.ok)
+        if (!response.ok) {
+          if (response.status === 404) {
+            router.replace("/accounts");
+            return null;
+          }
           throw new Error(
             response.status === 401
               ? "Please sign in to view this account."
               : "Account not found.",
           );
+        }
         const result = (await response.json()) as { account: Account };
         if (active) setAccount(result.account);
       })
@@ -174,7 +181,7 @@ export default function AccountActivityPage({
     return () => {
       active = false;
     };
-  }, [accountId]);
+  }, [accountId, router]);
 
   useEffect(() => {
     if (!accountId) return;

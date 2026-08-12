@@ -140,6 +140,7 @@ export type OfflineBudgetMutation = {
   userId: string;
   budgetId: string;
   operation: "create" | "update" | "delete";
+  kind: "expense" | "savings";
   categoryId: string | null;
   limitAmount: number;
   period: BudgetPeriod;

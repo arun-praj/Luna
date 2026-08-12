@@ -240,7 +240,7 @@ export default function OnboardingPage() {
     if (categories.length === 0) { setMessage("Choose at least one category to continue."); return; }
     setIsSaving(true); setMessage("");
     const response = await authenticatedFetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), currency, avatarPreset, accounts, categories }) });
-    if (response.ok) router.replace("/");
+    if (response.ok) router.replace("/budgets/onboarding?returnTo=/");
     else { const result = await response.json().catch(() => ({})) as { error?: string }; setMessage(result.error ?? "Could not finish setup. Please try again."); setIsSaving(false); }
   }
 

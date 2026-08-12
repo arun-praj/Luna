@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, useMotionValue, useSpring, useTransform, type MotionValue } from "framer-motion";
+import { motion, useMotionValue, useSpring, useTransform, type MotionValue } from "motion/react";
 import { House, Target, UserRound, WalletCards, type LucideIcon } from "lucide-react";
 import { useRef } from "react";
 

@@ -6,6 +6,8 @@ import { db } from "@/backend/db/client";
 import {
   accounts,
   budgetAllocations,
+  budgetCategoryBuckets,
+  budgetMoves,
   budgetPeriods,
   budgetTemplates,
   categories,
@@ -83,7 +85,7 @@ function remapSplits(value: unknown, categoryIds: Map<string, string>, sharedCat
 }
 
 export async function createPortableExport(userId: string, exportedAt: string) {
-  const [userAccounts, userCategories, tags, types, instruments, userGoals, userLoans, budgets, userBudgetTemplates, userBudgetPeriods, userBudgetAllocations, templates, userTransactions] = await Promise.all([
+  const [userAccounts, userCategories, tags, types, instruments, userGoals, userLoans, budgets, userBudgetTemplates, userBudgetPeriods, userBudgetAllocations, userBudgetBuckets, userBudgetMoves, templates, userTransactions] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.userId, userId)),
     db.select().from(categories).where(eq(categories.userId, userId)),
     db.select().from(userTags).where(eq(userTags.userId, userId)),
@@ -95,6 +97,8 @@ export async function createPortableExport(userId: string, exportedAt: string) {
     db.select().from(budgetTemplates).where(eq(budgetTemplates.userId, userId)),
     db.select().from(budgetPeriods).where(eq(budgetPeriods.userId, userId)),
     db.select({ allocation: budgetAllocations }).from(budgetAllocations).innerJoin(budgetPeriods, eq(budgetAllocations.periodId, budgetPeriods.id)).where(eq(budgetPeriods.userId, userId)).then((rows) => rows.map(({ allocation }) => allocation)),
+    db.select().from(budgetCategoryBuckets).where(eq(budgetCategoryBuckets.userId, userId)),
+    db.select().from(budgetMoves).where(eq(budgetMoves.userId, userId)),
     db.select().from(recurringTemplates).where(eq(recurringTemplates.userId, userId)),
     db.select().from(transactions).where(eq(transactions.userId, userId)),
   ]);
@@ -127,6 +131,8 @@ export async function createPortableExport(userId: string, exportedAt: string) {
       budgetTemplates: userBudgetTemplates,
       budgetPeriods: userBudgetPeriods,
       budgetAllocations: userBudgetAllocations,
+      budgetCategoryBuckets: userBudgetBuckets,
+      budgetMoves: userBudgetMoves,
       recurringTemplates: templates,
       transactions: userTransactions,
       recurringOccurrences: occurrences,
@@ -154,11 +160,13 @@ export async function importPortableData(userId: string, payload: unknown) {
   const budgetTemplateRows = rows(data.budgetTemplates ?? [], "budget templates");
   const budgetPeriodRows = rows(data.budgetPeriods ?? [], "budget periods");
   const budgetAllocationRows = rows(data.budgetAllocations ?? [], "budget allocations");
+  const budgetBucketRows = rows(data.budgetCategoryBuckets ?? [], "budget category buckets");
+  const budgetMoveRows = rows(data.budgetMoves ?? [], "budget moves");
   const templateRows = rows(data.recurringTemplates, "recurring templates");
   const transactionRows = rows(data.transactions, "transactions");
   const occurrenceRows = rows(data.recurringOccurrences, "recurring occurrences");
   const historyRows = rows(data.transactionHistory, "transaction history");
-  const allRows = [accountRows, categoryRows, tagRows, typeRows, instrumentRows, goalRows, loanRows, rateRows, installmentRows, paymentRows, budgetRows, budgetTemplateRows, budgetPeriodRows, budgetAllocationRows, templateRows, transactionRows, occurrenceRows, historyRows];
+  const allRows = [accountRows, categoryRows, tagRows, typeRows, instrumentRows, goalRows, loanRows, rateRows, installmentRows, paymentRows, budgetRows, budgetTemplateRows, budgetPeriodRows, budgetAllocationRows, budgetBucketRows, budgetMoveRows, templateRows, transactionRows, occurrenceRows, historyRows];
   const itemCount = allRows.reduce((total, list) => total + list.length, 0);
   if (itemCount > 250_000) throw new Error("This backup contains too many records");
 
@@ -172,6 +180,8 @@ export async function importPortableData(userId: string, payload: unknown) {
   const paymentIds = mapIds(paymentRows, "loan payment");
   const budgetTemplateIds = mapIds(budgetTemplateRows, "budget template");
   const budgetPeriodIds = mapIds(budgetPeriodRows, "budget period");
+  const budgetAllocationIds = mapIds(budgetAllocationRows, "budget allocation");
+  const budgetMoveIds = mapIds(budgetMoveRows, "budget move");
   const skippedBudgetTemplateIds = new Set<string>();
   const templateIds = mapIds(templateRows, "recurring template");
   const transactionIds = mapIds(transactionRows, "transaction");
@@ -181,13 +191,13 @@ export async function importPortableData(userId: string, payload: unknown) {
     db.select({ id: categories.id }).from(categories).where(isNull(categories.userId)),
     db.select({ id: savingsInstrumentTypes.id }).from(savingsInstrumentTypes).where(isNull(savingsInstrumentTypes.userId)),
     db.select({ categoryId: spendingBudgets.categoryId, period: spendingBudgets.period }).from(spendingBudgets).where(eq(spendingBudgets.userId, userId)),
-    db.select({ categoryId: budgetTemplates.categoryId, period: budgetTemplates.recurrence }).from(budgetTemplates).where(eq(budgetTemplates.userId, userId)),
+    db.select({ categoryId: budgetTemplates.categoryId, period: budgetTemplates.recurrence, kind: budgetTemplates.kind }).from(budgetTemplates).where(eq(budgetTemplates.userId, userId)),
   ]);
   const existingTags = new Set(existingTagRows.map((tag) => tag.name.toLocaleLowerCase()));
   const sharedCategoryIds = new Set(sharedCategoryRows.map((category) => category.id));
   const sharedTypeIds = new Set(sharedTypeRows.map((type) => type.id));
   const existingBudgetScopes = new Set(existingBudgetRows.map((budget) => `${budget.period}:${budget.categoryId ?? "overall"}`));
-  for (const budget of existingBudgetTemplateRows) existingBudgetScopes.add(`${budget.period}:${budget.categoryId ?? "overall"}`);
+  for (const budget of existingBudgetTemplateRows) existingBudgetScopes.add(`${budget.period}:${budget.kind}:${budget.categoryId ?? "overall"}`);
 
   for (const row of accountRows) statements.push(db.insert(accounts).values({ ...copy(row, ["name", "type", "currency", "openingBalance", "currentBalance", "displayOrder", "backgroundColor", "icon", "includeInTotalBalance", "allowNegativeBalance"]), id: mapped(row.id, accountIds), userId, isDefault: false } as typeof accounts.$inferInsert));
   for (const row of categoryRows) statements.push(db.insert(categories).values({ ...copy(row, ["name", "type", "icon", "color"]), id: mapped(row.id, categoryIds), userId } as typeof categories.$inferInsert));
@@ -202,16 +212,20 @@ export async function importPortableData(userId: string, payload: unknown) {
   for (const row of budgetTemplateRows) {
     const categoryId = mappedShared(row.categoryId, categoryIds, sharedCategoryIds);
     const period = typeof row.recurrence === "string" ? row.recurrence : "monthly";
-    const scope = `${period}:${categoryId ?? "overall"}`;
+    const kind = row.kind === "savings" ? "savings" : "expense";
+    const scope = `${period}:${kind}:${categoryId ?? "overall"}`;
     if (existingBudgetScopes.has(scope)) { skippedBudgetTemplateIds.add(row.id as string); continue; }
     existingBudgetScopes.add(scope);
-    statements.push(db.insert(budgetTemplates).values({ ...copy(row, ["name", "recurrence", "defaultAmount", "rolloverRule", "createdAt", "updatedAt"]), id: mapped(row.id, budgetTemplateIds), userId, categoryId, clientGeneratedId: null } as typeof budgetTemplates.$inferInsert));
+    statements.push(db.insert(budgetTemplates).values({ ...copy(row, ["name", "recurrence", "kind", "defaultAmount", "rolloverRule", "createdAt", "updatedAt"]), id: mapped(row.id, budgetTemplateIds), userId, categoryId: kind === "savings" ? null : categoryId, kind, clientGeneratedId: null } as typeof budgetTemplates.$inferInsert));
   }
   for (const row of budgetPeriodRows) statements.push(db.insert(budgetPeriods).values({ ...copy(row, ["recurrence", "periodStart", "periodEnd", "totalLimit", "status", "createdAt", "updatedAt"]), id: mapped(row.id, budgetPeriodIds), userId } as typeof budgetPeriods.$inferInsert));
   for (const row of budgetAllocationRows) {
     if (typeof row.templateId === "string" && skippedBudgetTemplateIds.has(row.templateId)) continue;
-    statements.push(db.insert(budgetAllocations).values({ ...copy(row, ["originalAmount", "adjustedAmount", "rolloverAmount", "createdAt", "updatedAt"]), id: randomUUID(), periodId: mapped(row.periodId, budgetPeriodIds), templateId: mapped(row.templateId, budgetTemplateIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds) } as typeof budgetAllocations.$inferInsert));
+    const kind = row.kind === "savings" ? "savings" : "expense";
+    statements.push(db.insert(budgetAllocations).values({ ...copy(row, ["originalAmount", "adjustedAmount", "rolloverAmount", "createdAt", "updatedAt"]), id: mapped(row.id, budgetAllocationIds), periodId: mapped(row.periodId, budgetPeriodIds), templateId: mapped(row.templateId, budgetTemplateIds), categoryId: kind === "savings" ? null : mappedShared(row.categoryId, categoryIds, sharedCategoryIds), kind } as typeof budgetAllocations.$inferInsert));
   }
+  for (const row of budgetBucketRows) statements.push(db.insert(budgetCategoryBuckets).values({ ...copy(row, ["bucket", "createdAt", "updatedAt"]), id: randomUUID(), userId, categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds) } as typeof budgetCategoryBuckets.$inferInsert));
+  for (const row of budgetMoveRows) statements.push(db.insert(budgetMoves).values({ ...copy(row, ["amount", "reversedAt", "createdAt"]), id: mapped(row.id, budgetMoveIds), userId, periodId: mapped(row.periodId, budgetPeriodIds), fromAllocationId: mapped(row.fromAllocationId, budgetAllocationIds), toAllocationId: mapped(row.toAllocationId, budgetAllocationIds), reversalOfId: mapped(row.reversalOfId, budgetMoveIds) } as typeof budgetMoves.$inferInsert));
   for (const row of budgetRows) { const categoryId = mappedShared(row.categoryId, categoryIds, sharedCategoryIds); const period = typeof row.period === "string" ? row.period : "monthly"; const scope = `${period}:${categoryId ?? "overall"}`; if (existingBudgetScopes.has(scope)) continue; existingBudgetScopes.add(scope); statements.push(db.insert(spendingBudgets).values({ ...copy(row, ["name", "limitAmount", "period", "createdAt", "updatedAt"]), id: randomUUID(), userId, categoryId, clientGeneratedId: null, createdAt: typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString(), updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : new Date().toISOString() } as typeof spendingBudgets.$inferInsert)); }
   for (const row of templateRows) statements.push(db.insert(recurringTemplates).values({ ...copy(row, ["type", "amount", "title", "notes", "frequency", "nextDueDate", "endDate", "approvalRequired", "isActive"]), id: mapped(row.id, templateIds), userId, accountId: mapped(row.accountId, accountIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds), transferToAccountId: mapped(row.transferToAccountId, accountIds), savingsInstrumentId: mapped(row.savingsInstrumentId, instrumentIds), goalId: mapped(row.goalId, goalIds) } as typeof recurringTemplates.$inferInsert));
   for (const row of transactionRows) statements.push(db.insert(transactions).values({ ...copy(row, ["type", "amount", "title", "merchantName", "notes", "tags", "isRecurring", "receiptImageUrl", "loanComponent", "date", "transactionAt", "createdAt", "updatedAt"]), id: mapped(row.id, transactionIds), userId, accountId: mapped(row.accountId, accountIds), categoryId: mappedShared(row.categoryId, categoryIds, sharedCategoryIds), splits: remapSplits(row.splits, categoryIds, sharedCategoryIds), recurringTemplateId: mapped(row.recurringTemplateId, templateIds), goalId: mapped(row.goalId, goalIds), savingsInstrumentId: mapped(row.savingsInstrumentId, instrumentIds), transferToAccountId: mapped(row.transferToAccountId, accountIds), loanId: mapped(row.loanId, loanIds), loanPaymentEventId: mapped(row.loanPaymentEventId, paymentIds), syncStatus: "synced", clientGeneratedId: null } as typeof transactions.$inferInsert));

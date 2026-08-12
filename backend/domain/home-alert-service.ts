@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/backend/db/client";
@@ -239,24 +239,30 @@ async function buildCandidates(userId: string, now: Date): Promise<Candidate[]> 
       }
     }, 0);
     const percentage = limitAmount > 0 ? Math.round((spent / limitAmount) * 100) : 0;
-    const threshold = budgetAlertThreshold(percentage);
+    // Do not let rounding create a false alert just below the limit. The
+    // threshold is based on the normalized ledger total, not the display %.
+    const threshold = limitAmount > 0 && spent >= limitAmount ? budgetAlertThreshold(percentage) : null;
     if (threshold === null) continue;
+    const exceeded = spent > limitAmount;
     candidates.push({
       kind: "budget",
       sourceId: allocation.id,
-      occurrenceKey: `period:${periodStart}:threshold:${threshold}`,
+      // Reaching the limit and exceeding it are distinct occurrences. This
+      // lets an over-limit alert surface even if the user dismissed the
+      // earlier “limit reached” reminder.
+      occurrenceKey: `period:${periodStart}:threshold:${exceeded ? "exceeded" : threshold}`,
       showAt: dateAtStart(periodStart),
       expiresAt: dateAtStart(budgetPeriod.periodEnd),
-      hardUrgency: percentage >= 100 ? 2 : 1,
-      deterministicRank: percentage >= 100 ? 850 : 700,
+      hardUrgency: exceeded ? 3 : 2,
+      deterministicRank: exceeded ? 900 : 850,
       payload: {
         href: `/budgets?period=${budgetPeriod.recurrence}&budget=${allocation.id}`,
         feature: "Budget",
         kind: "budget",
-        label: percentage >= 100 ? "Budget limit reached" : "Budget nearly full",
+        label: exceeded ? "Budget exceeded" : "Budget limit reached",
         value: `${currency} ${formatCurrencyAmount(spent)} / ${formatCurrencyAmount(limitAmount)}`,
         detail: `${category?.name ? `${category.name} budget` : "Overall budget"} · ${percentage}% used`,
-        tone: percentage >= 100 ? "warning" : "primary",
+        tone: "warning",
         icon: "budget",
         progress: Math.min(100, percentage),
         action: "budget",
@@ -309,6 +315,7 @@ async function insertCandidates(userId: string, candidates: Candidate[], now: Da
       aiSuppressed: false,
       aiTitle: null,
       aiDetail: null,
+      resolvedAt: null,
       updatedAt: timestamp,
     }).where(and(
       eq(homeAlerts.userId, userId),
@@ -316,8 +323,7 @@ async function insertCandidates(userId: string, candidates: Candidate[], now: Da
       eq(homeAlerts.sourceId, candidate.sourceId),
       eq(homeAlerts.occurrenceKey, candidate.occurrenceKey),
       isNull(homeAlerts.dismissedAt),
-      isNull(homeAlerts.resolvedAt),
-      ne(homeAlerts.payload, payload),
+      or(isNotNull(homeAlerts.resolvedAt), ne(homeAlerts.payload, payload)),
     ));
   }
 }

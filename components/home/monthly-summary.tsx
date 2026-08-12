@@ -170,7 +170,7 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
 
   if (compact) {
     return (
-      <div className="mt-3 grid min-w-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-[12px] border border-border bg-card" aria-label="Monthly overview" data-tour="monthly-overview">
+      <div className="mt-4 grid min-w-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-[12px] border border-border bg-card" aria-label="Monthly overview" data-tour="monthly-overview">
         {overview.map((item) => {
           const Icon = item.icon;
           const values = currencyEntries(
@@ -191,15 +191,15 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
                 <span className={`flex size-5 shrink-0 items-center justify-center rounded-[6px] ${item.iconClassName}`}>
                   <Icon aria-hidden="true" className="size-3" />
                 </span>
-                <span className="truncate text-[11px] font-medium text-muted-foreground">{item.label}</span>
+                <span className="truncate text-[13px] font-medium text-muted-foreground">{item.label}</span>
               </span>
               <span className={`mt-1 block min-w-0 font-semibold tabular-nums ${item.color}`}>
                 {summary.isLoading
                   ? <Skeleton className="h-4 w-full max-w-20" />
                   : visibleValues.map(([currency, value]) => (
                     <span className="flex min-w-0 items-baseline justify-between gap-1 whitespace-nowrap" key={currency}>
-                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">{currency}</span>
-                      <span className="text-[clamp(12px,3.5vw,15px)] leading-4">{formatCurrencyAmount(value)}</span>
+                      <span className="shrink-0 text-[12px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">{currency}</span>
+                      <span className="text-[clamp(14px,3.5vw,17px)] leading-5">{formatCurrencyAmount(value)}</span>
                     </span>
                   ))}
               </span>

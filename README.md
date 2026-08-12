@@ -30,6 +30,7 @@ Most budgeting tools assume a reliable connection and make money management feel
 - **Home dashboard** — see total balance, monthly income, expenses, savings, cash flow, and recent activity at a glance.
 - **Accounts** — manage bank accounts, cash, digital wallets, savings, credit cards, loans, and investments with custom colors and icons.
 - **Transactions** — record income, expenses, savings, transfers, and balance adjustments with categories, notes, tags, dates, and recurring options.
+- **Planning budgets** — build monthly category envelopes, review median-based recommendations, start with 50/30/20, track savings targets, forecast month-end spending, set rollover rules, and move money between categories with an audit trail.
 - **Categories and tags** — use suggested categories or create your own, with custom icons and colors.
 - **Savings and goals** — track savings instruments and progress toward financial goals.
 - **Analytics** — explore income trends, spending by category, savings pace, and related transactions.
@@ -37,7 +38,7 @@ Most budgeting tools assume a reliable connection and make money management feel
 - **Privacy controls** — export personal data and request account deletion from the profile area.
 - **Responsive interface** — designed for compact mobile screens first, with a comfortable desktop layout.
 
-> Offline editing currently covers transactions. Accounts, categories, savings instruments, and profile data are cached for offline rendering and transaction composition; server-only settings still require a connection.
+> Offline editing currently covers transactions and core budget allocations. Recommendations, templates, category transfers, and monthly review calculations require a connection; cached budgets remain available for offline reading.
 
 ## Screenshots
 
@@ -88,6 +89,7 @@ Open `.env.local` and set at least:
 
 ```env
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+AUTH_ENCRYPTION_KEY=replace-with-a-different-random-secret-at-least-32-characters
 APP_URL=http://localhost:3000
 ```
 
@@ -154,7 +156,8 @@ npm run db:migrate
 
 | Variable | Required | Purpose |
 | --- | :---: | --- |
-| `AUTH_JWT_SECRET` | Yes | Signs short-lived access tokens and protects encrypted auth data. |
+| `AUTH_JWT_SECRET` | Yes | Signs short-lived access tokens. |
+| `AUTH_ENCRYPTION_KEY` | Yes | Encrypts refresh-token replacement values and other encrypted auth secrets; keep it separate from `AUTH_JWT_SECRET`. |
 | `APP_URL` | Recommended | Base URL used in password-reset links. |
 | `SMTP_HOST` | Optional | SMTP server for password reset, verification, and report email. |
 | `SMTP_PORT` | Optional | SMTP port, usually `587`. |
@@ -190,7 +193,8 @@ To reduce spam and spoofing risk, use a verified sender from your SMTP provider,
 2. A transaction created offline is written locally first with `syncStatus: "pending"`.
 3. When connectivity returns, pending writes sync through `/api/transactions/sync`.
 4. The API uses `clientGeneratedId` for idempotency, so retries do not duplicate transactions.
-5. Failed writes remain visible with an error and can be retried later.
+5. Budget allocation edits can also be queued locally and retried when connectivity returns.
+6. Failed writes remain visible with an error and can be retried later.
 
 The offline database is isolated per user and never stores passwords, OTP codes, refresh tokens, or raw access tokens.
 
@@ -211,7 +215,7 @@ Luna deploys as a Cloudflare Worker at `luna.arunprajapati.com` with Cloudflare 
 
 ## Status
 
-Luna is an actively developed personal-finance PWA. The core online flows and offline transaction workflow are implemented; deeper offline editing for accounts, categories, savings instruments, and profile settings remains future work.
+Luna is an actively developed personal-finance PWA. The core online flows, planning budgets, and offline transaction/budget allocation workflows are implemented; deeper offline editing for accounts, categories, savings instruments, and profile settings remains future work.
 
 ## License
 
