@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { dataImports } from "@/backend/db/schema";
-import { importPortableData, MAX_IMPORT_BYTES } from "@/backend/domain/data-portability";
+import { importPortableData, MAX_IMPORT_BYTES, PortabilityLimitError } from "@/backend/domain/data-portability";
 
 export const runtime = "nodejs";
 
@@ -28,6 +28,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     await db.update(dataImports).set({ status: "failed", completedAt: new Date().toISOString() }).where(eq(dataImports.id, importId));
-    return errorResponse(error instanceof Error ? error.message : "We could not import this backup", 400);
+    return errorResponse(error instanceof Error ? error.message : "We could not import this backup", error instanceof PortabilityLimitError ? 413 : 400);
   }
 }
