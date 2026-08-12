@@ -5,6 +5,7 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { accounts, transactions, users } from "@/backend/db/schema";
 import { accountInput, accountOrderInput } from "@/backend/domain/validation";
+import { hasDuplicateAccountName } from "@/backend/domain/account-rules";
 import { normalizeMoney } from "@/lib/money";
 
 export const runtime = "nodejs";
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
   const allowNegativeBalance = input.allowNegativeBalance ?? false;
   if ((openingBalance ?? 0) < 0 && !allowNegativeBalance) return errorResponse("Negative balances are disabled. Enable Allow negative balance to use a negative opening balance.", 400);
   const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
+  const existingAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.userId, userId));
+  if (hasDuplicateAccountName(existingAccounts, input.name)) return errorResponse("An account with this name already exists", 409);
   const id = randomUUID();
   const insertAccount = db.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", openingBalance: openingBalance ?? 0, currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
   if (input.isDefault) {

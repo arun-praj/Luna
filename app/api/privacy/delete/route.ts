@@ -6,7 +6,7 @@ import { db } from "@/backend/db/client";
 import { accountDeletionRequests, users } from "@/backend/db/schema";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { deleteUserData } from "@/backend/privacy/delete-user-data";
-import { r2Bucket, r2Configured } from "@/backend/storage/r2";
+import { requireR2Bucket } from "@/backend/storage/r2";
 
 export const runtime = "nodejs";
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   }
   await db.insert(accountDeletionRequests).values({ id: requestId, userId, emailSnapshot: user.email, mode: "immediate", status: "scheduled", requestedAt: now.toISOString(), scheduledFor: null, executedAt: null });
   try {
-    await deleteUserData(db, userId, { storage: r2Configured() ? r2Bucket() : undefined, deletionRequestId: requestId });
+    await deleteUserData(db, userId, { storage: requireR2Bucket(), deletionRequestId: requestId });
     return NextResponse.json({ deleted: true });
   } catch (error) {
     console.error("Immediate account deletion failed", error);

@@ -8,6 +8,7 @@ import { authRateLimits } from "@/backend/db/schema";
 type RateLimitOptions = {
   limit: number;
   windowMs: number;
+  keyBy?: "ip" | "identifier" | "ip-and-identifier";
 };
 
 function clientAddress(request: Request) {
@@ -18,8 +19,10 @@ function clientAddress(request: Request) {
   );
 }
 
-function keyFor(request: Request, scope: string, identifier?: string) {
-  const raw = `${scope}|${clientAddress(request)}|${identifier ?? ""}`;
+function keyFor(request: Request, scope: string, identifier: string | undefined, keyBy: RateLimitOptions["keyBy"] = "ip-and-identifier") {
+  const address = keyBy === "identifier" ? "" : clientAddress(request);
+  const subject = keyBy === "ip" ? "" : identifier ?? "";
+  const raw = `${scope}|${address}|${subject}`;
   return createHash("sha256").update(raw).digest("hex");
 }
 
@@ -29,7 +32,7 @@ export async function checkRateLimit(
   options: RateLimitOptions,
   identifier?: string,
 ) {
-  const key = keyFor(request, scope, identifier);
+  const key = keyFor(request, scope, identifier, options.keyBy);
   const now = Date.now();
   const timestamp = new Date(now).toISOString();
 
@@ -84,7 +87,7 @@ export async function peekRateLimit(
   options: RateLimitOptions,
   identifier?: string,
 ) {
-  const key = keyFor(request, scope, identifier);
+  const key = keyFor(request, scope, identifier, options.keyBy);
   const [current] = await db.select().from(authRateLimits).where(eq(authRateLimits.key, key)).limit(1);
   if (!current) return { allowed: true, retryAfterSeconds: 0 };
 

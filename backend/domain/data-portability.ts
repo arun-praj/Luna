@@ -30,12 +30,12 @@ import {
   transactions,
   userTags,
 } from "@/backend/db/schema";
+import { IMPORT_BATCH_SIZE, MAX_IMPORT_RECORDS } from "@/backend/domain/portability-limits";
+
+export { IMPORT_BATCH_SIZE, MAX_IMPORT_BYTES, MAX_IMPORT_RECORDS } from "@/backend/domain/portability-limits";
 
 export const PORTABILITY_FORMAT = "luna-financial-data";
 export const PORTABILITY_VERSION = 1;
-export const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
-export const MAX_IMPORT_RECORDS = 25_000;
-export const IMPORT_BATCH_SIZE = 100;
 
 export class PortabilityLimitError extends Error {
   constructor(message: string) {
@@ -98,7 +98,8 @@ const importedBudgetPeriod = z.object({ recurrence: z.enum(["weekly", "monthly",
 const importedBudgetAllocation = z.object({ originalAmount: nonNegativeFinite, adjustedAmount: nonNegativeFinite, rolloverAmount: nonNegativeFinite, kind: z.enum(["expense", "savings"]) });
 const importedBudgetBucket = z.object({ bucket: z.enum(["needs", "wants"]) });
 const importedBudgetMove = z.object({ amount: positiveMoneyInput, reversedAt: importTimestamp.nullable().optional() });
-const importedHistory = z.object({ changeType: z.enum(["created", "updated", "deleted"]), oldValues: z.string().nullable().optional(), newValues: z.string().nullable().optional(), changedAt: importTimestamp });
+const importedHistory = z.object({ changeType: z.enum(["created", "updated", "deleted"]), oldValues: z.string().max(100_000).nullable().optional(), newValues: z.string().max(100_000).nullable().optional(), changedAt: importTimestamp });
+const importedOccurrence = z.object({ id: z.string().uuid(), recurringTemplateId: z.string().uuid(), scheduledDate: importDate, status: z.enum(["pending", "posted", "skipped"]), transactionId: z.string().uuid().nullable().optional(), createdAt: importTimestamp, updatedAt: importTimestamp });
 const importedAccountState = z.object({ currentBalance: z.number().finite() });
 const importedGoalState = z.object({ allocatedAmount: nonNegativeFinite });
 const importedTransactionState = z.object({ loanComponent: z.enum(["disbursement", "principal", "interest", "fee"]).nullable().optional() });
@@ -129,6 +130,13 @@ function transactionTags(value: unknown) {
   return result.data;
 }
 
+function validateTimestamps(row: Row, key: string, fields: string[]) {
+  for (const field of fields) {
+    if (row[field] == null) continue;
+    if (typeof row[field] !== "string" || !importTimestamp.safeParse(row[field]).success) throw new Error(`Invalid ${key} ${field}`);
+  }
+}
+
 function rows(value: unknown, key: string): Row[] {
   if (!Array.isArray(value)) throw new Error(`Invalid ${key} data`);
   return value.map((item) => {
@@ -138,8 +146,9 @@ function rows(value: unknown, key: string): Row[] {
 }
 
 function sourceId(row: Row, key: string) {
-  if (typeof row.id !== "string" || !row.id) throw new Error(`Invalid ${key} identifier`);
-  return row.id;
+  const result = z.string().uuid().safeParse(row.id);
+  if (!result.success) throw new Error(`Invalid ${key} identifier`);
+  return result.data;
 }
 
 function mapIds(items: Row[], key: string) {
@@ -194,19 +203,19 @@ function validatePortableRows(
   for (const row of typeRows) { sourceId(row, "saving instrument type"); validateRow(instrumentTypeInput, row, "saving instrument type"); }
   for (const row of instrumentRows) { sourceId(row, "saving instrument"); validateRow(savingsInstrumentInput, row, "saving instrument"); mappedShared(row.typeId, ids.typeIds, sharedTypeIds); }
   for (const row of goalRows) { sourceId(row, "goal"); validateRow(goalInput, row, "goal"); validateRow(importedGoalState, row, "goal"); mapped(row.accountId, ids.accountIds); }
-  for (const row of loanRows) { sourceId(row, "loan"); validateLoanRow(row); mapped(row.accountId, ids.accountIds); }
-  for (const row of rateRows) { sourceId(row, "loan rate"); validateRow(loanRateInput, row, "loan rate"); mapped(row.loanId, ids.loanIds); }
+  for (const row of loanRows) { sourceId(row, "loan"); validateLoanRow(row); validateTimestamps(row, "loan", ["createdAt", "updatedAt"]); mapped(row.accountId, ids.accountIds); }
+  for (const row of rateRows) { sourceId(row, "loan rate"); validateRow(loanRateInput, row, "loan rate"); validateTimestamps(row, "loan rate", ["createdAt"]); mapped(row.loanId, ids.loanIds); }
   for (const row of installmentRows) { sourceId(row, "loan installment"); validateRow(importedLoanInstallment, row, "loan installment"); mapped(row.loanId, ids.loanIds); }
-  for (const row of paymentRows) { sourceId(row, "loan payment"); validateRow(loanPaymentInput, { ...row, installmentId: row.installmentId ?? null, clientGeneratedId: row.clientGeneratedId ?? undefined }, "loan payment"); mapped(row.loanId, ids.loanIds); mapped(row.accountId, ids.accountIds); mapped(row.installmentId, ids.installmentIds); mapped(row.reversedEventId, ids.paymentIds); }
-  for (const row of budgetRows) { sourceId(row, "budget"); validateRow(budgetInput, { categoryId: row.categoryId ?? null, name: row.name, limitAmount: row.limitAmount, period: row.period }, "budget"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
-  for (const row of budgetTemplateRows) { sourceId(row, "budget template"); validateRow(importedBudgetTemplate, row, "budget template"); if (row.kind === "savings" && row.categoryId != null) throw new Error("Savings budget templates cannot reference a category"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
-  for (const row of budgetPeriodRows) { sourceId(row, "budget period"); validateRow(importedBudgetPeriod, row, "budget period"); }
-  for (const row of budgetAllocationRows) { sourceId(row, "budget allocation"); validateRow(importedBudgetAllocation, row, "budget allocation"); mapped(row.periodId, ids.budgetPeriodIds); mapped(row.templateId, ids.budgetTemplateIds, true); if (row.kind === "savings" && row.categoryId != null) throw new Error("Savings budget allocations cannot reference a category"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
-  for (const row of budgetBucketRows) { sourceId(row, "budget category bucket"); validateRow(importedBudgetBucket, row, "budget category bucket"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
-  for (const row of budgetMoveRows) { sourceId(row, "budget move"); validateRow(importedBudgetMove, row, "budget move"); mapped(row.periodId, ids.budgetPeriodIds); mapped(row.fromAllocationId, ids.budgetAllocationIds); mapped(row.toAllocationId, ids.budgetAllocationIds); mapped(row.reversalOfId, ids.budgetMoveIds, true); }
+  for (const row of paymentRows) { sourceId(row, "loan payment"); validateRow(loanPaymentInput, { ...row, installmentId: row.installmentId ?? null, clientGeneratedId: row.clientGeneratedId ?? undefined }, "loan payment"); validateTimestamps(row, "loan payment", ["createdAt"]); mapped(row.loanId, ids.loanIds); mapped(row.accountId, ids.accountIds); mapped(row.installmentId, ids.installmentIds); mapped(row.reversedEventId, ids.paymentIds); }
+  for (const row of budgetRows) { sourceId(row, "budget"); validateRow(budgetInput, { categoryId: row.categoryId ?? null, name: row.name, limitAmount: row.limitAmount, period: row.period }, "budget"); validateTimestamps(row, "budget", ["createdAt", "updatedAt"]); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
+  for (const row of budgetTemplateRows) { sourceId(row, "budget template"); validateRow(importedBudgetTemplate, row, "budget template"); validateTimestamps(row, "budget template", ["createdAt", "updatedAt"]); if (row.kind === "savings" && row.categoryId != null) throw new Error("Savings budget templates cannot reference a category"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
+  for (const row of budgetPeriodRows) { sourceId(row, "budget period"); validateRow(importedBudgetPeriod, row, "budget period"); validateTimestamps(row, "budget period", ["createdAt", "updatedAt"]); }
+  for (const row of budgetAllocationRows) { sourceId(row, "budget allocation"); validateRow(importedBudgetAllocation, row, "budget allocation"); validateTimestamps(row, "budget allocation", ["createdAt", "updatedAt"]); mapped(row.periodId, ids.budgetPeriodIds); mapped(row.templateId, ids.budgetTemplateIds, true); if (row.kind === "savings" && row.categoryId != null) throw new Error("Savings budget allocations cannot reference a category"); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
+  for (const row of budgetBucketRows) { sourceId(row, "budget category bucket"); validateRow(importedBudgetBucket, row, "budget category bucket"); validateTimestamps(row, "budget category bucket", ["createdAt", "updatedAt"]); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); }
+  for (const row of budgetMoveRows) { sourceId(row, "budget move"); validateRow(importedBudgetMove, row, "budget move"); validateTimestamps(row, "budget move", ["createdAt"]); mapped(row.periodId, ids.budgetPeriodIds); mapped(row.fromAllocationId, ids.budgetAllocationIds); mapped(row.toAllocationId, ids.budgetAllocationIds); mapped(row.reversalOfId, ids.budgetMoveIds, true); }
   for (const row of templateRows) { sourceId(row, "recurring template"); validateRow(recurringTemplateInput, row, "recurring template"); mapped(row.accountId, ids.accountIds); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); mapped(row.transferToAccountId, ids.accountIds); mapped(row.savingsInstrumentId, ids.instrumentIds); mapped(row.goalId, ids.goalIds); }
-  for (const row of transactionRows) { sourceId(row, "transaction"); validateTransactionRow(row); mapped(row.accountId, ids.accountIds); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); mapped(row.recurringTemplateId, ids.templateIds); mapped(row.goalId, ids.goalIds); mapped(row.savingsInstrumentId, ids.instrumentIds); mapped(row.transferToAccountId, ids.accountIds); mapped(row.loanId, ids.loanIds); mapped(row.loanPaymentEventId, ids.paymentIds); }
-  for (const row of occurrenceRows) { sourceId(row, "recurring occurrence"); mapped(row.recurringTemplateId, ids.templateIds); mapped(row.transactionId, ids.transactionIds); }
+  for (const row of transactionRows) { sourceId(row, "transaction"); validateTransactionRow(row); validateTimestamps(row, "transaction", ["createdAt", "updatedAt"]); mapped(row.accountId, ids.accountIds); mappedShared(row.categoryId, ids.categoryIds, sharedCategoryIds); mapped(row.recurringTemplateId, ids.templateIds); mapped(row.goalId, ids.goalIds); mapped(row.savingsInstrumentId, ids.instrumentIds); mapped(row.transferToAccountId, ids.accountIds); mapped(row.loanId, ids.loanIds); mapped(row.loanPaymentEventId, ids.paymentIds); }
+  for (const row of occurrenceRows) { sourceId(row, "recurring occurrence"); validateRow(importedOccurrence, row, "recurring occurrence"); mapped(row.recurringTemplateId, ids.templateIds); mapped(row.transactionId, ids.transactionIds); }
   for (const row of historyRows) { sourceId(row, "transaction history"); validateRow(importedHistory, row, "transaction history"); mapped(row.transactionId, ids.transactionIds); }
 }
 

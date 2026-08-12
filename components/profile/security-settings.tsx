@@ -18,18 +18,21 @@ export function SecuritySettingsCard({ userId }: { userId: string }) {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const [isBiometricEnabled, setIsBiometricEnabled] = useState(() => typeof window !== "undefined" && isBiometricLockEnabled(userId));
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
   const [isBiometricSupported, setIsBiometricSupported] = useState<boolean | null>(null);
   const [isBiometricBusy, setIsBiometricBusy] = useState(false);
   const [biometricMessage, setBiometricMessage] = useState("");
 
   useEffect(() => {
     let active = true;
+    void isBiometricLockEnabled(userId).then((enabled) => {
+      if (active) setIsBiometricEnabled(enabled);
+    });
     void isBiometricPlatformAvailable().then((available) => {
       if (active) setIsBiometricSupported(available);
     });
     return () => { active = false; };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!isOpen || status) return;
@@ -97,9 +100,9 @@ export function SecuritySettingsCard({ userId }: { userId: string }) {
   async function resetBiometrics() {
     setIsBiometricBusy(true);
     setBiometricMessage("");
-    disableBiometricLock();
-    setIsBiometricEnabled(false);
     try {
+      await disableBiometricLock();
+      setIsBiometricEnabled(false);
       await registerBiometrics();
       setIsBiometricEnabled(true);
     } catch (error) {
@@ -109,10 +112,17 @@ export function SecuritySettingsCard({ userId }: { userId: string }) {
     }
   }
 
-  function disableBiometrics() {
-    disableBiometricLock();
-    setIsBiometricEnabled(false);
+  async function disableBiometrics() {
+    setIsBiometricBusy(true);
     setBiometricMessage("");
+    try {
+      await disableBiometricLock();
+      setIsBiometricEnabled(false);
+    } catch (error) {
+      setBiometricMessage(biometricErrorMessage(error));
+    } finally {
+      setIsBiometricBusy(false);
+    }
   }
 
   return (
@@ -141,7 +151,7 @@ export function SecuritySettingsCard({ userId }: { userId: string }) {
                   {isBiometricBusy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
                   Reset biometric
                 </button>
-                <button type="button" onClick={disableBiometrics} disabled={isBiometricBusy} className="min-h-9 rounded-[9px] border border-expense/25 px-3 text-xs font-semibold text-expense hover:bg-expense-soft disabled:opacity-50">Turn off</button>
+                <button type="button" onClick={() => void disableBiometrics()} disabled={isBiometricBusy} className="min-h-9 rounded-[9px] border border-expense/25 px-3 text-xs font-semibold text-expense hover:bg-expense-soft disabled:opacity-50">Turn off</button>
               </div>
             ) : (
               <button type="button" onClick={() => void enableBiometrics()} disabled={isBiometricBusy || isBiometricSupported !== true} className="mt-4 inline-flex min-h-10 items-center gap-1.5 rounded-[10px] bg-primary px-3.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">

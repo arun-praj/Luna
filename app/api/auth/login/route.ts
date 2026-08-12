@@ -33,7 +33,11 @@ export async function POST(request: Request) {
     return errorResponse("Invalid email or password", 401);
   }
   if (user.twoFactorEnabled) {
-    return NextResponse.json({ twoFactorRequired: true, challengeToken: await createTwoFactorChallengeToken(user.id) });
+    try {
+      return NextResponse.json({ twoFactorRequired: true, challengeToken: await createTwoFactorChallengeToken(user.id) });
+    } catch {
+      return errorResponse("Unable to start two-factor verification", 500);
+    }
   }
 
   const lastLoginAt = new Date().toISOString();

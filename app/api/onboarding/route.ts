@@ -7,6 +7,7 @@ import { accounts, categories, users } from "@/backend/db/schema";
 import { accountType } from "@/backend/domain/validation";
 import { z } from "zod";
 import { isAvatarPreset } from "@/lib/avatar";
+import { hasDuplicateAccountNames } from "@/backend/domain/account-rules";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,10 @@ const onboardingInput = z.object({
     icon: z.string().trim().max(100),
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
   })).min(1).max(50),
+}).superRefine((value, context) => {
+  if (hasDuplicateAccountNames(value.accounts.map((account) => account.name))) {
+    context.addIssue({ code: "custom", path: ["accounts"], message: "Account names must be unique" });
+  }
 });
 
 export async function POST(request: Request) {
@@ -34,7 +39,9 @@ export async function POST(request: Request) {
   if (!parsed.success) return errorResponse("Please complete your profile, accounts, and categories", 400);
 
   const timestamp = new Date().toISOString();
-  const [user] = await db.select({ currency: users.currency }).from(users).where(eq(users.id, userId)).limit(1);
+  const [user] = await db.select({ currency: users.currency, onboardingCompleted: users.onboardingCompleted }).from(users).where(eq(users.id, userId)).limit(1);
+  const existingAccounts = await db.select({ id: accounts.id }).from(accounts).where(eq(accounts.userId, userId));
+  if (user?.onboardingCompleted || existingAccounts.length > 0) return errorResponse("Onboarding has already been completed", 409);
   await db.update(users).set({ name: parsed.data.name, currency: parsed.data.currency, avatarPreset: parsed.data.avatarPreset, onboardingCompleted: true, updatedAt: timestamp }).where(eq(users.id, userId));
   for (const [index, account] of parsed.data.accounts.entries()) {
     await db.insert(accounts).values({

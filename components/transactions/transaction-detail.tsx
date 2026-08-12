@@ -572,6 +572,12 @@ export function TransactionDetail({
     if (Object.values(validationErrors).some(Boolean)) return;
     setSaving(true);
     setLoadError("");
+    let uploadedReceiptUrl: string | null = null;
+    let receiptCommitted = !receiptFile;
+    const discardUploadedReceipt = async () => {
+      if (!uploadedReceiptUrl || receiptCommitted) return;
+      await authenticatedFetch(uploadedReceiptUrl, { method: "DELETE" }).catch(() => undefined);
+    };
     try {
       let nextReceiptImageUrl = receiptImageUrl;
       if (receiptFile) {
@@ -588,6 +594,7 @@ export function TransactionDetail({
           return;
         }
         nextReceiptImageUrl = uploadResult.url;
+        uploadedReceiptUrl = uploadResult.url;
         setReceiptImageUrl(nextReceiptImageUrl);
       }
       const payload = {
@@ -613,10 +620,12 @@ export function TransactionDetail({
       });
       if (!response.ok) {
         const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        await discardUploadedReceipt();
         setLoadError(result?.error ?? "We could not save this transaction. Check the details and try again.");
         setSaving(false);
         return;
       }
+      receiptCommitted = true;
       if (isNew && kind === "income" && incomeAllocationEntries.length) {
         for (const allocation of incomeAllocationEntries) {
           const goal = goalOptions.find((option) => option.id === allocation.goalId);
@@ -643,6 +652,7 @@ export function TransactionDetail({
       setSaved(true);
       navigateWithRouteExit(() => router.back());
     } catch {
+      await discardUploadedReceipt();
       setLoadError("We could not save this transaction. Check your connection and try again.");
       setSaving(false);
     }

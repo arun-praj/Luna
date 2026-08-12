@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { accounts, categories, goals, recurringTemplates, savingsInstruments, transactionHistory, transactions } from "@/backend/db/schema";
+import { savingsInstrumentReferenceError, transactionCategoryReferenceError } from "@/backend/domain/transaction-semantics";
 import type { z } from "zod";
 import { transactionInput } from "@/backend/domain/validation";
 import { addMoney, normalizeMoney, subtractMoney } from "@/lib/money";
@@ -148,6 +149,8 @@ async function assertReferences(tx: DatabaseExecutor, userId: string, input: Tra
   if (input.categoryId) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, input.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
     if (!category) throw new Error("Category not found");
+    const categoryReferenceError = transactionCategoryReferenceError(input.type, category.type);
+    if (categoryReferenceError) throw new Error(categoryReferenceError);
   }
   for (const split of input.splits ?? []) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, split.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
@@ -160,6 +163,8 @@ async function assertReferences(tx: DatabaseExecutor, userId: string, input: Tra
   }
   if (goal && input.type === "savings" && goal.status === "archived") throw new Error("Archived goals cannot receive or return funds");
   if (input.savingsInstrumentId) {
+    const instrumentReferenceError = savingsInstrumentReferenceError(input.type);
+    if (instrumentReferenceError) throw new Error(instrumentReferenceError);
     const [instrument] = await tx.select().from(savingsInstruments).where(and(eq(savingsInstruments.id, input.savingsInstrumentId), eq(savingsInstruments.userId, userId))).limit(1);
     if (!instrument) throw new Error("Savings instrument not found");
   }

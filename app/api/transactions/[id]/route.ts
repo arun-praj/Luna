@@ -6,8 +6,15 @@ import { accounts, categories, transactions } from "@/backend/db/schema";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { deleteTransaction, serializeTransaction, updateTransaction } from "@/backend/domain/transaction-service";
 import { transactionInput } from "@/backend/domain/validation";
+import { deleteTransactionReceipt } from "@/backend/storage/r2";
 
 export const runtime = "nodejs"; type Context = { params: Promise<{ id: string }> };
+
+function receiptReferenceFromBody(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const value = (body as Record<string, unknown>).receiptImageUrl;
+  return typeof value === "string" ? value : null;
+}
 export async function GET(request: Request, { params }: Context) {
   const userId = await requireAccessToken(request); const { id } = await params;
   if (!userId) return errorResponse("Authentication required", 401);
@@ -41,5 +48,5 @@ export async function GET(request: Request, { params }: Context) {
     })),
   } });
 }
-export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const parsed = transactionInput.safeParse(await request.json().catch(() => null)); if (!parsed.success) { const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title"); return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400); } try { const transaction = await updateTransaction(userId, id, parsed.data); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to update transaction", 400); } }
-export async function DELETE(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); try { await deleteTransaction(userId, id); scheduleHomeAlertRepair(userId); return NextResponse.json({ success: true }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to delete transaction", 400); } }
+export async function PATCH(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const body = await request.json().catch(() => null); const receiptImageUrl = receiptReferenceFromBody(body); const [existing] = await db.select({ receiptImageUrl: transactions.receiptImageUrl }).from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1); const replaceableReceipt = receiptImageUrl && receiptImageUrl !== existing?.receiptImageUrl ? receiptImageUrl : null; const parsed = transactionInput.safeParse(body); if (!parsed.success) { await deleteTransactionReceipt(userId, replaceableReceipt); const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title"); return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400); } try { const transaction = await updateTransaction(userId, id, parsed.data); await deleteTransactionReceipt(userId, existing?.receiptImageUrl !== parsed.data.receiptImageUrl ? existing?.receiptImageUrl : null); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }); } catch (error) { await deleteTransactionReceipt(userId, replaceableReceipt); return errorResponse(error instanceof Error ? error.message : "Unable to update transaction", 400); } }
+export async function DELETE(request: Request, { params }: Context) { const userId = await requireAccessToken(request); const { id } = await params; if (!userId) return errorResponse("Authentication required", 401); const [existing] = await db.select({ receiptImageUrl: transactions.receiptImageUrl }).from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).limit(1); try { await deleteTransaction(userId, id); await deleteTransactionReceipt(userId, existing?.receiptImageUrl); scheduleHomeAlertRepair(userId); return NextResponse.json({ success: true }); } catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to delete transaction", 400); } }

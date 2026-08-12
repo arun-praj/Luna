@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/backend/db/client";
 import { accountDeletionRequests } from "@/backend/db/schema";
 import { deleteUserData } from "@/backend/privacy/delete-user-data";
-import { r2Bucket, r2Configured } from "@/backend/storage/r2";
+import { requireR2Bucket } from "@/backend/storage/r2";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   for (const deletion of due) {
     if (!deletion.userId) continue;
     try {
-      await deleteUserData(db, deletion.userId, { storage: r2Configured() ? r2Bucket() : undefined, deletionRequestId: deletion.id });
+      await deleteUserData(db, deletion.userId, { storage: requireR2Bucket(), deletionRequestId: deletion.id });
       completed += 1;
     } catch (error) {
       failed += 1;

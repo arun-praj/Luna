@@ -1,10 +1,10 @@
 import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "../db/client";
-import { refreshTokens, users } from "../db/schema";
+import { authRateLimits, refreshTokens, users } from "../db/schema";
 import { decryptSecret, encryptSecret } from "./crypto";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -12,13 +12,25 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
   getJwtSecret,
 } from "./config";
+import { TWO_FACTOR_MAX_ATTEMPTS } from "./two-factor-challenge-policy";
+
+export { TWO_FACTOR_MAX_ATTEMPTS } from "./two-factor-challenge-policy";
 
 export class RefreshTokenReuseError extends Error {}
 
 export async function createTwoFactorChallengeToken(userId: string) {
+  const challengeId = randomUUID();
+  const issuedAt = now();
+  await db.insert(authRateLimits).values({
+    key: twoFactorChallengeKey(challengeId),
+    windowStartedAt: issuedAt,
+    attempts: 0,
+    updatedAt: issuedAt,
+  });
   return new SignJWT({ type: "two_factor_challenge" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)
+    .setJti(challengeId)
     .setIssuer("budget-api")
     .setAudience("budget-app")
     .setIssuedAt()
@@ -32,7 +44,9 @@ export async function verifyTwoFactorChallengeToken(token: string) {
       issuer: "budget-api",
       audience: "budget-app",
     });
-    return result.payload.type === "two_factor_challenge" && result.payload.sub ? result.payload.sub : null;
+    return result.payload.type === "two_factor_challenge" && result.payload.sub && result.payload.jti
+      ? { userId: result.payload.sub, challengeId: result.payload.jti }
+      : null;
   } catch {
     return null;
   }
@@ -40,7 +54,26 @@ export async function verifyTwoFactorChallengeToken(token: string) {
 
 const now = () => new Date().toISOString();
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+const twoFactorChallengeKey = (challengeId: string) => hashToken(`two-factor-challenge:${challengeId}`);
 const newOpaqueToken = () => randomBytes(48).toString("base64url");
+
+/** Counts one code submission, rejecting submissions after the five-attempt challenge budget. */
+export async function recordTwoFactorChallengeAttempt(challengeId: string) {
+  const [updated] = await db.update(authRateLimits).set({
+    attempts: sql`${authRateLimits.attempts} + 1`,
+    updatedAt: now(),
+  }).where(and(eq(authRateLimits.key, twoFactorChallengeKey(challengeId)), lt(authRateLimits.attempts, TWO_FACTOR_MAX_ATTEMPTS))).returning({ attempts: authRateLimits.attempts });
+  return Boolean(updated);
+}
+
+/** Atomically consumes a challenge after a correct code, preventing replay and concurrent double login. */
+export async function consumeTwoFactorChallenge(challengeId: string) {
+  const [consumed] = await db.update(authRateLimits).set({
+    attempts: TWO_FACTOR_MAX_ATTEMPTS + 1,
+    updatedAt: now(),
+  }).where(and(eq(authRateLimits.key, twoFactorChallengeKey(challengeId)), lt(authRateLimits.attempts, TWO_FACTOR_MAX_ATTEMPTS + 1))).returning({ key: authRateLimits.key });
+  return Boolean(consumed);
+}
 
 export async function createAccessToken(userId: string) {
   return new SignJWT({ type: "access" })

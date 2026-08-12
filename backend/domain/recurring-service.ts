@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
 
 import { db } from "@/backend/db/client";
 import { accounts, categories, goals, recurringOccurrences, recurringTemplates } from "@/backend/db/schema";
+import { shouldAdvanceRecurringTemplate } from "@/backend/domain/recurring-template-rules";
 import { createTransaction } from "@/backend/domain/transaction-service";
 import { addMoney } from "@/lib/money";
 
@@ -54,9 +55,16 @@ async function createOccurrence(template: RecurringTemplate, scheduledDate: stri
 }
 
 async function advanceTemplate(template: RecurringTemplate, fromDate: string) {
+  if (!shouldAdvanceRecurringTemplate(template.nextDueDate, fromDate)) return;
   const nextDueDate = nextRecurringDate(fromDate, template.frequency);
   const isActive = !template.endDate || nextDueDate <= template.endDate;
-  await db.update(recurringTemplates).set({ nextDueDate, isActive }).where(eq(recurringTemplates.id, template.id));
+  // An older occurrence may be acted on after cron or another device has
+  // already moved the schedule forward. Only advance when the stored cursor
+  // is still at or before the occurrence being handled.
+  await db.update(recurringTemplates).set({ nextDueDate, isActive }).where(and(
+    eq(recurringTemplates.id, template.id),
+    lte(recurringTemplates.nextDueDate, fromDate),
+  ));
 }
 
 async function postOccurrence(template: RecurringTemplate, occurrence: typeof recurringOccurrences.$inferSelect) {
@@ -161,7 +169,16 @@ export async function actOnRecurringTemplate(userId: string, templateId: string,
   }
   if (!occurrence) throw new Error("No pending occurrence is ready");
   if (action === "skip") {
-    const [updated] = await db.update(recurringOccurrences).set({ status: "skipped", updatedAt: new Date().toISOString() }).where(eq(recurringOccurrences.id, occurrence.id)).returning();
+    if (occurrence.status === "posted") throw new Error("This recurring occurrence has already been posted");
+    if (occurrence.status === "skipped") {
+      await advanceTemplate(template, occurrence.scheduledDate);
+      return { occurrence };
+    }
+    const [updated] = await db.update(recurringOccurrences).set({ status: "skipped", updatedAt: new Date().toISOString() }).where(and(
+      eq(recurringOccurrences.id, occurrence.id),
+      eq(recurringOccurrences.status, "pending"),
+    )).returning();
+    if (!updated) throw new Error("This recurring occurrence changed. Please refresh and try again.");
     await advanceTemplate(template, occurrence.scheduledDate);
     return { occurrence: updated };
   }

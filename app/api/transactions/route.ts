@@ -6,8 +6,15 @@ import { accounts, categories, transactions } from "@/backend/db/schema";
 import { createTransaction, serializeTransaction } from "@/backend/domain/transaction-service";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { transactionInput } from "@/backend/domain/validation";
+import { deleteTransactionReceipt } from "@/backend/storage/r2";
 
 export const runtime = "nodejs";
+
+function receiptReferenceFromBody(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const value = (body as Record<string, unknown>).receiptImageUrl;
+  return typeof value === "string" ? value : null;
+}
 
 async function enrichTransactions(rows: (typeof transactions.$inferSelect)[], userId: string) {
   const accountRows = await db.select({ id: accounts.id, name: accounts.name, type: accounts.type, currency: accounts.currency, icon: accounts.icon, backgroundColor: accounts.backgroundColor }).from(accounts).where(eq(accounts.userId, userId));
@@ -95,11 +102,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401);
-  const parsed = transactionInput.safeParse(await request.json().catch(() => null));
+  const body = await request.json().catch(() => null);
+  const receiptImageUrl = receiptReferenceFromBody(body);
+  const parsed = transactionInput.safeParse(body);
   if (!parsed.success) {
+    await deleteTransactionReceipt(userId, receiptImageUrl);
     const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title");
     return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400);
   }
   try { const transaction = await createTransaction(userId, parsed.data); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }, { status: 201 }); }
-  catch (error) { return errorResponse(error instanceof Error ? error.message : "Unable to create transaction", 400); }
+  catch (error) { await deleteTransactionReceipt(userId, receiptImageUrl); return errorResponse(error instanceof Error ? error.message : "Unable to create transaction", 400); }
 }

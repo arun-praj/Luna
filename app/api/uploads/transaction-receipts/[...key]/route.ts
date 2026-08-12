@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { r2Bucket, r2Configured } from "@/backend/storage/r2";
+import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 
@@ -31,5 +32,29 @@ export async function GET(
     });
   } catch {
     return new NextResponse("Not found", { status: 404 });
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ key: string[] }> },
+) {
+  const userId = await requireAccessToken(request);
+  if (!userId) return errorResponse("Authentication required", 401);
+  if (!r2Configured()) return errorResponse("Receipt storage is not configured", 503);
+  const { key: parts } = await params;
+  let key: string;
+  try {
+    key = parts.map(decodeURIComponent).join("/");
+  } catch {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  if (!key.startsWith(`transaction-receipts/${userId}/`) || key.includes("..")) return new NextResponse("Not found", { status: 404 });
+  try {
+    const removed = await deleteUploadIfUnreferenced(userId, "transaction-receipts", key);
+    if (!removed) return errorResponse("This receipt is still attached to a transaction", 409);
+    return new NextResponse(null, { status: 204 });
+  } catch {
+    return errorResponse("Could not remove receipt", 502);
   }
 }

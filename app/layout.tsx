@@ -38,8 +38,10 @@ export default function RootLayout({
         <AuthRedirectListener />
         <RouteTransition />
         <DrawerInteractions />
-        <BiometricLockGate>{children}</BiometricLockGate>
-        <AppleDockNavigation />
+        <BiometricLockGate>
+          {children}
+          <AppleDockNavigation />
+        </BiometricLockGate>
       </body>
     </html>
   );

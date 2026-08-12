@@ -1,5 +1,7 @@
 import { addMoney, normalizeMoney } from "@/lib/money";
 import { z } from "zod";
+import { isTransactionReceiptReference } from "@/backend/domain/receipt-reference";
+import { recurringTemplateShapeIssues } from "@/backend/domain/recurring-template-rules";
 
 export const moneyInput = z.number().finite().transform(normalizeMoney);
 const nonNegativeMoneyInput = z.number().finite().nonnegative().transform(normalizeMoney);
@@ -124,7 +126,7 @@ export const budgetOnboardingInput = z.object({
   }
 });
 
-export const recurringTemplateInput = z.object({
+const recurringTemplateFields = z.object({
   accountId: z.string().uuid(),
   type: recurringType,
   amount: positiveMoneyInput,
@@ -141,11 +143,21 @@ export const recurringTemplateInput = z.object({
   isActive: z.boolean().optional(),
 });
 
+export const recurringTemplateInput = recurringTemplateFields.superRefine((value, context) => {
+  for (const issue of recurringTemplateShapeIssues(value)) {
+    context.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+  }
+});
+
+export const recurringTemplatePatchInput = recurringTemplateFields.partial();
+
 export const transactionSplitInput = z.object({
   categoryId: z.string().uuid(),
   amount: z.number().finite().positive(),
   note: z.string().trim().max(200).nullable().optional(),
 });
+
+const transactionReceiptReference = z.string().max(2000).refine(isTransactionReceiptReference, "Enter a valid receipt image reference");
 
 export const transactionInput = z.object({
   accountId: referenceId,
@@ -159,7 +171,7 @@ export const transactionInput = z.object({
   tags: z.array(z.string().trim().min(1).max(50)).max(30).optional(),
   isRecurring: z.boolean().optional(),
   recurringTemplateId: z.string().uuid().nullable().optional(),
-  receiptImageUrl: z.string().url().max(2000).nullable().optional(),
+  receiptImageUrl: transactionReceiptReference.nullable().optional(),
   goalId: z.string().uuid().nullable().optional(),
   savingsInstrumentId: z.string().uuid().nullable().optional(),
   transferToAccountId: referenceId.nullable().optional(),
