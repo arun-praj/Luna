@@ -6,6 +6,7 @@ import { db } from "@/backend/db/client";
 import { accountDeletionRequests, users } from "@/backend/db/schema";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { deleteUserData } from "@/backend/privacy/delete-user-data";
+import { r2Bucket, r2Configured } from "@/backend/storage/r2";
 
 export const runtime = "nodejs";
 
@@ -37,9 +38,17 @@ export async function POST(request: Request) {
     await db.insert(accountDeletionRequests).values({ id: requestId, userId, emailSnapshot: user.email, mode: "after_30_days", status: "scheduled", requestedAt: now.toISOString(), scheduledFor, executedAt: null });
     return NextResponse.json({ scheduledFor });
   }
-  await db.insert(accountDeletionRequests).values({ id: requestId, userId, emailSnapshot: user.email, mode: "immediate", status: "completed", requestedAt: now.toISOString(), scheduledFor: null, executedAt: now.toISOString() });
-  await deleteUserData(db, userId);
-  return NextResponse.json({ deleted: true });
+  await db.insert(accountDeletionRequests).values({ id: requestId, userId, emailSnapshot: user.email, mode: "immediate", status: "scheduled", requestedAt: now.toISOString(), scheduledFor: null, executedAt: null });
+  try {
+    await deleteUserData(db, userId, { storage: r2Configured() ? r2Bucket() : undefined, deletionRequestId: requestId });
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    console.error("Immediate account deletion failed", error);
+    // Keep the user and make this failed attempt visible as retryable rather
+    // than claiming completion before the cleanup has actually succeeded.
+    await db.update(accountDeletionRequests).set({ status: "cancelled" }).where(eq(accountDeletionRequests.id, requestId));
+    return errorResponse("Account deletion could not be completed. Please try again.", 500);
+  }
 }
 
 export async function DELETE(request: Request) {
