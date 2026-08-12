@@ -119,7 +119,7 @@ export function BudgetOnboarding({ initialReturnTo = "/" }: Props) {
       if (!response.ok) { if (response.status === 401) router.replace(loginPathFor("/budgets/onboarding")); else if (active) setError("Budget setup could not be loaded. Try again."); return; }
       const result = await response.json() as BudgetOnboardingStatus;
       if (!active) return;
-      if (result.completed) { router.replace(returnTo === "/" ? "/budgets" : returnTo); return; }
+      if (result.completed) { router.replace(returnTo); return; }
       setStatus(result);
       setCurrency(result.currency);
       setSources(result.income.sources.length ? result.income.sources.map((source) => ({ id: source.id, name: source.name, amount: String(source.amount), interval: source.interval, categoryId: source.categoryId ?? "" })) : [EMPTY_SOURCE()]);

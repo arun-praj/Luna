@@ -239,9 +239,19 @@ export default function OnboardingPage() {
   async function finish() {
     if (categories.length === 0) { setMessage("Choose at least one category to continue."); return; }
     setIsSaving(true); setMessage("");
-    const response = await authenticatedFetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), currency, avatarPreset, accounts, categories }) });
-    if (response.ok) router.replace("/budgets/onboarding?returnTo=/");
-    else { const result = await response.json().catch(() => ({})) as { error?: string }; setMessage(result.error ?? "Could not finish setup. Please try again."); setIsSaving(false); }
+    try {
+      const response = await authenticatedFetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), currency, avatarPreset, accounts, categories }) });
+      if (response.ok) {
+        router.replace("/budgets/onboarding?returnTo=/");
+        return;
+      }
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      setMessage(result.error ?? "Could not finish setup. Please try again.");
+    } catch {
+      setMessage("Could not reach Luna. Check your connection and try again.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   if (step === 0) return <WelcomeScreen onContinue={() => setStep(1)} />;
@@ -320,7 +330,7 @@ export default function OnboardingPage() {
             {step === 2 && <><p className="text-sm font-semibold text-primary">Your money, your way</p><h1 className="mt-3 text-[34px] font-semibold leading-[1.05] tracking-[-0.05em]">Where do you keep your money?</h1><p className="mt-4 text-[15px] leading-6 text-muted-foreground">Tap to add an account. You can add as many as you need.</p><div className="mt-8 flex flex-wrap gap-2.5">{ACCOUNT_SUGGESTIONS.map((account) => <button key={account.name} type="button" onClick={() => toggleAccount(account)} className={`flex items-center gap-2 rounded-full border px-4 py-3 text-sm font-semibold transition-all ${accountSelected(account.name) ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-border bg-card hover:border-primary/50"}`}><span className="grid size-7 place-items-center rounded-full" style={{ backgroundColor: account.color }}><WalletCards aria-hidden="true" className="size-4 text-white" /></span>{account.name}{accountSelected(account.name) && <Check aria-hidden="true" className="size-4" />}</button>)}</div>{accounts.filter((account) => !ACCOUNT_SUGGESTIONS.some((suggestion) => suggestion.name === account.name)).length > 0 && <div aria-label="Added accounts" className="mt-4 flex flex-wrap gap-2">{accounts.filter((account) => !ACCOUNT_SUGGESTIONS.some((suggestion) => suggestion.name === account.name)).map((account) => <button key={account.name} type="button" onClick={() => toggleAccount(account)} className="flex items-center gap-2 rounded-full border border-primary bg-primary px-3.5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm"><span className="grid size-7 place-items-center rounded-full" style={{ backgroundColor: account.color }}><WalletCards aria-hidden="true" className="size-4 text-white" /></span>{account.name}<X aria-hidden="true" className="size-4" /></button>)}</div>}<div className="mt-8 flex gap-2"><input value={customAccount} onChange={(event) => setCustomAccount(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomAccount(); }} placeholder="Add another account" className="min-h-12 min-w-0 flex-1 rounded-[13px] border border-border bg-card px-4 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10" /><button type="button" onClick={addCustomAccount} className="flex size-12 shrink-0 items-center justify-center rounded-[13px] bg-surface-subtle text-primary hover:bg-primary-soft" aria-label="Add account"><Plus className="size-5" /></button></div>{accounts.length > 0 && <p className="mt-5 text-sm text-muted-foreground">{accounts.length} account{accounts.length === 1 ? "" : "s"} ready</p>}</>}
 
           </div>
-          {message && step !== 1 ? <p aria-live="polite" className="mt-5 min-h-5 text-sm text-expense">{message}</p> : null}
+          {message && step !== 1 ? <p role="alert" aria-live="assertive" className="mt-5 min-h-5 rounded-[11px] border border-expense/25 bg-expense-soft px-3 py-2.5 text-sm font-semibold text-expense motion-safe:animate-[title-error-nudge_260ms_ease-out]">{message}</p> : null}
         </section>
 
         <footer className="sticky bottom-0 z-20 -mx-4 mt-5 flex items-center justify-between gap-4 border-t border-border bg-background/95 px-4 pt-4 pb-2 backdrop-blur sm:-mx-6 sm:px-6">

@@ -24,7 +24,7 @@ const onboardingInput = z.object({
     type: z.enum(["expense", "income"]),
     icon: z.string().trim().max(100),
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
-  })).min(1).max(40),
+  })).min(1).max(50),
 });
 
 export async function POST(request: Request) {
