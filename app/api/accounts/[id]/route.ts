@@ -6,7 +6,7 @@ import { accounts } from "@/backend/db/schema";
 import { accountInput } from "@/backend/domain/validation";
 import { hasDuplicateAccountName } from "@/backend/domain/account-rules";
 import { createBalanceAdjustment } from "@/backend/domain/transaction-service";
-import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
+import { attachStoredObject, deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 import { normalizeMoney } from "@/lib/money";
 
 export const runtime = "nodejs";
@@ -39,6 +39,7 @@ export async function PATCH(request: Request, { params }: Context) {
   if (Object.keys(updates).length > 0) await db.update(accounts).set(updates).where(eq(accounts.id, id));
   if (openingBalance !== undefined) await createBalanceAdjustment(userId, id, openingBalance);
   const [account] = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
+  if (account?.icon) await attachStoredObject(userId, "account-images", account.icon, "account", id);
   if (current.icon !== account?.icon) {
     await deleteUploadIfUnreferenced(userId, "account-images", current.icon).catch((error) => console.error("Account image cleanup failed", { userId, id, error }));
   }

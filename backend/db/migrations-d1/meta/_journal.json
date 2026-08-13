@@ -162,6 +162,20 @@
       "when": 1786462898005,
       "tag": "0022_stormy_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1786559540638,
+      "tag": "0023_classy_thunderbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1786560031981,
+      "tag": "0024_gigantic_susan_delgado",
+      "breakpoints": true
     }
   ]
 }

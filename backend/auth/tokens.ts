@@ -4,7 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "../db/client";
-import { authRateLimits, refreshTokens, users } from "../db/schema";
+import { authRateLimits, refreshTokens, users, webauthnUnlockGrants } from "../db/schema";
 import { decryptSecret, encryptSecret } from "./crypto";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -52,6 +52,46 @@ export async function verifyTwoFactorChallengeToken(token: string) {
   }
 }
 
+export async function createEmailVerificationToken(userId: string) {
+  return new SignJWT({ type: "email_verification" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuer("budget-api")
+    .setAudience("budget-app")
+    .setIssuedAt()
+    .setExpirationTime("15m")
+    .sign(getJwtSecret());
+}
+
+export async function verifyEmailVerificationToken(token: string) {
+  try {
+    const result = await jwtVerify(token, getJwtSecret(), { issuer: "budget-api", audience: "budget-app" });
+    return result.payload.type === "email_verification" && result.payload.sub ? result.payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function createPendingRegistrationToken(pendingRegistrationId: string) {
+  return new SignJWT({ type: "pending_registration" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(pendingRegistrationId)
+    .setIssuer("budget-api")
+    .setAudience("budget-app")
+    .setIssuedAt()
+    .setExpirationTime("15m")
+    .sign(getJwtSecret());
+}
+
+export async function verifyPendingRegistrationToken(token: string) {
+  try {
+    const result = await jwtVerify(token, getJwtSecret(), { issuer: "budget-api", audience: "budget-app" });
+    return result.payload.type === "pending_registration" && result.payload.sub ? result.payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 const now = () => new Date().toISOString();
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const twoFactorChallengeKey = (challengeId: string) => hashToken(`two-factor-challenge:${challengeId}`);
@@ -75,8 +115,8 @@ export async function consumeTwoFactorChallenge(challengeId: string) {
   return Boolean(consumed);
 }
 
-export async function createAccessToken(userId: string) {
-  return new SignJWT({ type: "access" })
+export async function createAccessToken(userId: string, unlockGrantId?: string) {
+  return new SignJWT({ type: "access", ...(unlockGrantId ? { unlockGrantId } : {}) })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)
     .setIssuer("budget-api")
@@ -86,16 +126,29 @@ export async function createAccessToken(userId: string) {
     .sign(getJwtSecret());
 }
 
-export async function verifyAccessToken(token: string) {
+export async function createBiometricUnlockGrant(userId: string) {
+  const id = randomUUID();
+  const nowDate = new Date();
+  const expiresAt = new Date(nowDate.getTime() + 15 * 60_000).toISOString();
+  await db.insert(webauthnUnlockGrants).values({ id, userId, expiresAt, revokedAt: null, createdAt: nowDate.toISOString() });
+  return { id, accessToken: await createAccessToken(userId, id), expiresAt };
+}
+
+export async function revokeBiometricUnlockGrants(userId: string) {
+  await db.update(webauthnUnlockGrants).set({ revokedAt: now() }).where(and(eq(webauthnUnlockGrants.userId, userId), isNull(webauthnUnlockGrants.revokedAt)));
+}
+
+export async function verifyAccessTokenDetails(token: string) {
   try {
-    const result = await jwtVerify(token, getJwtSecret(), {
-      issuer: "budget-api",
-      audience: "budget-app",
-    });
-    return result.payload.type === "access" && result.payload.sub ? result.payload.sub : null;
+    const result = await jwtVerify(token, getJwtSecret(), { issuer: "budget-api", audience: "budget-app" });
+    return result.payload.type === "access" && result.payload.sub ? { userId: result.payload.sub, unlockGrantId: typeof result.payload.unlockGrantId === "string" ? result.payload.unlockGrantId : null } : null;
   } catch {
     return null;
   }
+}
+
+export async function verifyAccessToken(token: string) {
+  return (await verifyAccessTokenDetails(token))?.userId ?? null;
 }
 
 export async function createSession(userId: string, deviceLabel?: string) {
@@ -181,7 +234,13 @@ export async function rotateRefreshToken(rawToken: string) {
 }
 
 export async function revokeRefreshToken(rawToken: string) {
-  await db.update(refreshTokens).set({ revokedAt: now(), revokedReason: "logout" }).where(and(eq(refreshTokens.tokenHash, hashToken(rawToken)), isNull(refreshTokens.revokedAt)));
+  const [session] = await db.select({ userId: refreshTokens.userId }).from(refreshTokens).where(eq(refreshTokens.tokenHash, hashToken(rawToken))).limit(1);
+  if (!session) return;
+  const timestamp = now();
+  await db.batch([
+    db.update(refreshTokens).set({ revokedAt: timestamp, revokedReason: "logout" }).where(and(eq(refreshTokens.tokenHash, hashToken(rawToken)), isNull(refreshTokens.revokedAt))),
+    db.update(webauthnUnlockGrants).set({ revokedAt: timestamp }).where(and(eq(webauthnUnlockGrants.userId, session.userId), isNull(webauthnUnlockGrants.revokedAt))),
+  ]);
 }
 
 export async function revokeAllSessions(userId: string, reason: "logout" | "admin" = "admin") {

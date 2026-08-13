@@ -46,6 +46,7 @@ export const users = sqliteTable(
     twoFactorBackupCodes: text("two_factor_backup_codes"),
     twoFactorVerifiedAt: optionalIsoTimestamp("two_factor_verified_at"),
     emailVerifiedAt: optionalIsoTimestamp("email_verified_at"),
+    biometricLockEnabled: integer("biometric_lock_enabled", { mode: "boolean" }).notNull().default(false),
     phoneVerifiedAt: optionalIsoTimestamp("phone_verified_at"),
     pwaInstallDismissedAt: optionalIsoTimestamp("pwa_install_dismissed_at"),
     lastLoginAt: optionalIsoTimestamp("last_login_at"),
@@ -68,6 +69,28 @@ export const authRateLimits = sqliteTable(
     updatedAt: isoTimestamp("updated_at"),
   },
   (table) => [index("auth_rate_limits_updated_idx").on(table.updatedAt)],
+);
+
+export const pendingRegistrations = sqliteTable(
+  "pending_registrations",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    passwordHash: text("password_hash").notNull(),
+    currency: text("currency").notNull().default("NPR"),
+    verificationCodeHash: text("verification_code_hash").notNull(),
+    verificationAttemptCount: integer("verification_attempt_count").notNull().default(0),
+    verificationExpiresAt: isoTimestamp("verification_expires_at"),
+    verificationClaimedAt: optionalIsoTimestamp("verification_claimed_at"),
+    verificationClaimId: text("verification_claim_id"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    uniqueIndex("pending_registrations_email_unique").on(table.email),
+    index("pending_registrations_expiry_idx").on(table.verificationExpiresAt),
+  ],
 );
 
 export const otpCodes = sqliteTable(
@@ -113,6 +136,60 @@ export const webauthnCredentials = sqliteTable(
   ],
 );
 
+export const webauthnChallenges = sqliteTable(
+  "webauthn_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    challenge: text("challenge").notNull(),
+    purpose: text("purpose", { enum: ["registration", "authentication"] }).notNull(),
+    expiresAt: isoTimestamp("expires_at"),
+    consumedAt: optionalIsoTimestamp("consumed_at"),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [index("webauthn_challenges_user_idx").on(table.userId, table.purpose), index("webauthn_challenges_expiry_idx").on(table.expiresAt)],
+);
+
+export const webauthnUnlockGrants = sqliteTable(
+  "webauthn_unlock_grants",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: isoTimestamp("expires_at"),
+    revokedAt: optionalIsoTimestamp("revoked_at"),
+    createdAt: isoTimestamp("created_at"),
+  },
+  (table) => [index("webauthn_unlock_grants_user_idx").on(table.userId, table.expiresAt)],
+);
+
+export const storageUsage = sqliteTable("storage_usage", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  reservedBytes: integer("reserved_bytes").notNull().default(0),
+  updatedAt: isoTimestamp("updated_at"),
+});
+
+export const storedObjects = sqliteTable(
+  "stored_objects",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    objectKey: text("object_key").notNull(),
+    kind: text("kind", { enum: ["account-images", "savings-images", "transaction-receipts"] }).notNull(),
+    byteSize: integer("byte_size").notNull(),
+    contentType: text("content_type").notNull(),
+    checksum: text("checksum").notNull(),
+    status: text("status", { enum: ["reserved", "uploaded", "attached", "delete_pending", "deleted", "failed"] }).notNull(),
+    entityType: text("entity_type"),
+    entityId: text("entity_id"),
+    reservedAt: isoTimestamp("reserved_at"),
+    uploadedAt: optionalIsoTimestamp("uploaded_at"),
+    deleteAfter: optionalIsoTimestamp("delete_after"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [uniqueIndex("stored_objects_key_unique").on(table.objectKey), index("stored_objects_user_status_idx").on(table.userId, table.status), index("stored_objects_cleanup_idx").on(table.status, table.deleteAfter)],
+);
+
 export const refreshTokens = sqliteTable(
   "refresh_tokens",
   {
@@ -150,6 +227,9 @@ export const passwordResetTokens = sqliteTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: isoTimestamp("expires_at"),
     usedAt: optionalIsoTimestamp("used_at"),
+    claimId: text("claim_id"),
+    claimedAt: optionalIsoTimestamp("claimed_at"),
+    finalizedAt: optionalIsoTimestamp("finalized_at"),
     createdAt: isoTimestamp("created_at"),
   },
   (table) => [
@@ -751,7 +831,12 @@ export const accountDeletionRequests = sqliteTable(
 export const schema = {
   users,
   otpCodes,
+  pendingRegistrations,
   webauthnCredentials,
+  webauthnChallenges,
+  webauthnUnlockGrants,
+  storageUsage,
+  storedObjects,
   refreshTokens,
   passwordResetTokens,
   notificationSettings,

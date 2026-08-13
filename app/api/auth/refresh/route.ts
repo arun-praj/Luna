@@ -13,6 +13,11 @@ export async function POST() {
     if (!session) return errorResponse("Session expired", 401);
     const user = await getUserById(session.userId);
     if (!user) return errorResponse("User not found", 401);
+    if (!user.emailVerifiedAt) {
+      const response = errorResponse("Email verification required", 403);
+      clearRefreshTokenCookie(response);
+      return response;
+    }
     const response = NextResponse.json({ user: toPublicUserProfile(user), accessToken: session.accessToken, expiresIn: session.expiresIn });
     setRefreshTokenCookie(response, session.refreshToken);
     return response;

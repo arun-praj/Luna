@@ -6,6 +6,7 @@ import { db } from "@/backend/db/client";
 import { savingsInstrumentTypes, savingsInstruments } from "@/backend/db/schema";
 import { savingsInstrumentInput } from "@/backend/domain/validation";
 import { normalizeMoney } from "@/lib/money";
+import { attachStoredObject } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 export async function GET(request: Request) {
@@ -27,5 +28,6 @@ export async function POST(request: Request) {
   const id = randomUUID();
   await db.insert(savingsInstruments).values({ id, userId, typeId: parsed.data.typeId, name: parsed.data.name, description: parsed.data.description ?? "", currentBalance: parsed.data.currentBalance ?? 0, interestRate: parsed.data.interestRate ?? null, icon: parsed.data.icon ?? "Growth", backgroundColor: parsed.data.backgroundColor ?? "#e5f3eb", maturityDate: parsed.data.maturityDate ?? null });
   const [instrument] = await db.select().from(savingsInstruments).where(eq(savingsInstruments.id, id)).limit(1);
+  if (instrument?.icon) await attachStoredObject(userId, "savings-images", instrument.icon, "savings_instrument", id);
   return NextResponse.json({ instrument: instrument ? { ...instrument, currentBalance: normalizeMoney(instrument.currentBalance) } : instrument }, { status: 201 });
 }

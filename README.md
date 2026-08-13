@@ -91,6 +91,7 @@ Open `.env.local` and set at least:
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
 AUTH_ENCRYPTION_KEY=replace-with-a-different-random-secret-at-least-32-characters
 APP_URL=http://localhost:3000
+WEBAUTHN_RP_ID=localhost
 ```
 
 For Wrangler/D1 development, copy `.dev.vars.example` to `.dev.vars` and add the same SMTP and NVIDIA values there. Never commit either local file.
@@ -159,6 +160,7 @@ npm run db:migrate
 | `AUTH_JWT_SECRET` | Yes | Signs short-lived access tokens. |
 | `AUTH_ENCRYPTION_KEY` | Yes | Encrypts refresh-token replacement values and other encrypted auth secrets; keep it separate from `AUTH_JWT_SECRET`. |
 | `APP_URL` | Recommended | Base URL used in password-reset links. |
+| `WEBAUTHN_RP_ID` | Recommended | WebAuthn relying-party ID; use the host portion of `APP_URL` without scheme, path, or port. |
 | `SMTP_HOST` | Optional | SMTP server for password reset, verification, and report email. |
 | `SMTP_PORT` | Optional | SMTP port, usually `587`. |
 | `SMTP_SECURE` | Optional | Set to `true` when the SMTP server requires TLS immediately. |

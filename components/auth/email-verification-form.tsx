@@ -3,7 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { authenticatedFetch, safeReturnPath, signOut } from "@/lib/auth-client";
+import { authenticatedFetch, clearPendingRegistrationToken, getPendingRegistrationToken, safeReturnPath, setAccessToken, signOut } from "@/lib/auth-client";
 
 const CODE_LENGTH = 6;
 
@@ -29,9 +29,11 @@ export function EmailVerificationForm() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [pendingToken] = useState(() => getPendingRegistrationToken());
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
+    if (pendingToken) return;
     void authenticatedFetch("/api/auth/me").then(async (response) => {
       if (!response.ok) router.replace(`/login?next=${encodeURIComponent(next)}`);
       else {
@@ -39,23 +41,27 @@ export function EmailVerificationForm() {
         if (result.user?.emailVerifiedAt) router.replace(next);
       }
     });
-  }, [next, router]);
+  }, [next, pendingToken, router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
     setError("");
-    const response = await authenticatedFetch("/api/auth/email-verification/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
-    const result = await response.json().catch(() => ({})) as { error?: string };
+    const response = await (pendingToken ? fetch("/api/auth/email-verification/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, pendingToken }) }) : authenticatedFetch("/api/auth/email-verification/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) }));
+    const result = await response.json().catch(() => ({})) as { error?: string; accessToken?: string };
     if (!response.ok) setError(result.error ?? "Could not verify that code");
-    else router.replace(next);
+    else {
+      if (result.accessToken) setAccessToken(result.accessToken);
+      clearPendingRegistrationToken();
+      router.replace(next);
+    }
     setIsSubmitting(false);
   }
 
   async function resend() {
     setIsResending(true);
     setError("");
-    const response = await authenticatedFetch("/api/auth/email-verification/request", { method: "POST" });
+    const response = await (pendingToken ? fetch("/api/auth/email-verification/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pendingToken }) }) : authenticatedFetch("/api/auth/email-verification/request", { method: "POST" }));
     const result = await response.json().catch(() => ({})) as { message?: string; error?: string };
     if (response.ok) setMessage(result.message ?? "A new code is on its way.");
     else setError(result.error ?? "Could not send a new code");

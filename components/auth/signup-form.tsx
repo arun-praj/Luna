@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Eye, EyeOff, LockKeyhole, Mail, Phone } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearApiCache, setAccessToken } from "@/lib/auth-client";
+import { clearApiCache, setPendingRegistrationToken } from "@/lib/auth-client";
 
 export function SignupForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -30,7 +30,7 @@ export function SignupForm() {
       });
       const result = (await response.json()) as {
         error?: string;
-        accessToken?: string;
+        pendingToken?: string;
         user?: {
           emailVerifiedAt?: string | null;
           onboardingCompleted?: boolean;
@@ -38,10 +38,10 @@ export function SignupForm() {
       };
       if (!response.ok)
         throw new Error(result.error ?? "Unable to create account");
-      if (!result.accessToken) throw new Error("Unable to create account session");
+      if (!result.pendingToken) throw new Error("Unable to start email verification");
       clearApiCache();
-      setAccessToken(result.accessToken);
-      router.push(result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? "/" : "/onboarding") : "/verify-email?next=/onboarding");
+      setPendingRegistrationToken(result.pendingToken);
+      router.push("/verify-email?next=/onboarding");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Unable to create account",

@@ -46,7 +46,8 @@
 		"binding": "ASSETS"
 	},
 	"vars": {
-		"APP_URL": "https://luna.arunprajapati.com"
+		"APP_URL": "https://luna.arunprajapati.com",
+		"WEBAUTHN_RP_ID": "luna.arunprajapati.com"
 	},
 	"d1_databases": [
 		{

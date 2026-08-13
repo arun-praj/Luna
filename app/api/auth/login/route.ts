@@ -8,6 +8,11 @@ import { errorResponse, setRefreshTokenCookie } from "@/backend/auth/http";
 import { toPublicUserProfile } from "@/backend/auth/profile";
 import { loginInput } from "@/backend/auth/validation";
 import { checkRateLimit, peekRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
+import { createEmailVerificationCode, EMAIL_VERIFICATION_MINUTES } from "@/backend/auth/email-verification";
+import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/email";
+import { createEmailVerificationToken } from "@/backend/auth/tokens";
+import { and, isNull } from "drizzle-orm";
+import { otpCodes } from "@/backend/db/schema";
 
 export const runtime = "nodejs";
 
@@ -31,6 +36,21 @@ export async function POST(request: Request) {
       checkRateLimit(request, "login-email", failedLoginEmailLimit, parsed.data.email),
     ]);
     return errorResponse("Invalid email or password", 401);
+  }
+  if (!user.emailVerifiedAt) {
+    const verificationLimit = await checkRateLimit(request, "email-verification", { limit: 5, windowMs: 15 * 60 * 1000 }, user.id);
+    if (!verificationLimit.allowed) return NextResponse.json({ error: "Too many verification requests. Try again later." }, { status: 429, headers: rateLimitHeaders(verificationLimit.retryAfterSeconds) });
+    let verificationEmailSent = false;
+    if (isSmtpConfigured()) {
+      const verification = await createEmailVerificationCode(user.id);
+      try {
+        await sendEmailVerificationEmail({ to: user.email, code: verification.code, expiresMinutes: EMAIL_VERIFICATION_MINUTES });
+        verificationEmailSent = true;
+      } catch {
+        await db.delete(otpCodes).where(and(eq(otpCodes.id, verification.id), isNull(otpCodes.consumedAt)));
+      }
+    }
+    return NextResponse.json({ emailVerificationRequired: true, verificationToken: await createEmailVerificationToken(user.id), verificationEmailSent, message: "Please verify your email before signing in." });
   }
   if (user.twoFactorEnabled) {
     try {

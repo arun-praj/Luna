@@ -183,6 +183,20 @@
       "when": 1786462899876,
       "tag": "0025_cooing_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786559541367,
+      "tag": "0026_jazzy_black_panther",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786560032716,
+      "tag": "0027_foamy_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

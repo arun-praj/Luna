@@ -3,6 +3,7 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { r2Configured } from "@/backend/storage/r2";
 import { isUploadQuotaError, putUserUpload } from "@/backend/storage/upload-lifecycle";
 import { MAX_UPLOAD_BYTES } from "@/backend/storage/upload-policy";
+import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,8 @@ const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
+  const uploadLimit = await checkRateLimit(request, "upload-user", { limit: 100, windowMs: 60 * 60 * 1000 }, userId);
+  if (!uploadLimit.allowed) return NextResponse.json({ error: "Too many uploads. Try again later." }, { status: 429, headers: rateLimitHeaders(uploadLimit.retryAfterSeconds) });
   if (!r2Configured()) return errorResponse("Image storage is not configured", 503);
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("file");

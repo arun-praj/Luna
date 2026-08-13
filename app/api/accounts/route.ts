@@ -7,6 +7,7 @@ import { accounts, transactions, users } from "@/backend/db/schema";
 import { accountInput, accountOrderInput } from "@/backend/domain/validation";
 import { hasDuplicateAccountName } from "@/backend/domain/account-rules";
 import { normalizeMoney } from "@/lib/money";
+import { attachStoredObject } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
     await db.batch([insertAccount]);
   }
   const [account] = await db.select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))).limit(1);
+  if (account?.icon) await attachStoredObject(userId, "account-images", account.icon, "account", id);
   return NextResponse.json({ account: account ? { ...account, currentBalance: normalizeMoney(account.currentBalance) } : account }, { status: 201 });
 }
 

@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   assertUploadFitsQuota,
+  assertImageSignature,
+  detectedImageContentType,
   MAX_UPLOAD_BYTES,
   ownedUploadKey,
   ORPHAN_UPLOAD_GRACE_MS,
@@ -26,6 +28,13 @@ test("upload policy rejects oversized files and cumulative quota overflow", () =
     UploadQuotaExceededError,
   );
   assert.throws(() => assertUploadFitsQuota(0, MAX_UPLOAD_BYTES + 1), /smaller than 5 MB/);
+});
+
+test("upload policy validates image signatures instead of trusting MIME labels", () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.equal(detectedImageContentType(png), "image/png");
+  assert.doesNotThrow(() => assertImageSignature(png, "image/png"));
+  assert.throws(() => assertImageSignature(png, "image/jpeg"));
 });
 
 test("orphan cleanup preserves referenced and recently uploaded objects", () => {

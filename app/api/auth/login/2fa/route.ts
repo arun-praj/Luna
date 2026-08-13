@@ -26,7 +26,8 @@ export async function POST(request: Request) {
   const userLimit = await checkRateLimit(request, "login-2fa-user", { limit: 15, windowMs: 15 * 60 * 1000, keyBy: "identifier" }, userId);
   if (!userLimit.allowed) return NextResponse.json({ error: "Too many verification attempts. Try again later." }, { status: 429, headers: rateLimitHeaders(userLimit.retryAfterSeconds) });
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user?.twoFactorEnabled || !user.twoFactorSecretEncrypted) return errorResponse("Authenticator protection is not enabled", 401);
+  if (!user?.emailVerifiedAt) return errorResponse("Please verify your email before signing in", 403);
+  if (!user.twoFactorEnabled || !user.twoFactorSecretEncrypted) return errorResponse("Authenticator protection is not enabled", 401);
   let secret: string;
   try {
     secret = decryptSecret(user.twoFactorSecretEncrypted);

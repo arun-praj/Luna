@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/backend/db/client";
-import { users } from "@/backend/db/schema";
-import { createSession } from "@/backend/auth/tokens";
-import { errorResponse, setRefreshTokenCookie } from "@/backend/auth/http";
+import { pendingRegistrations, users } from "@/backend/db/schema";
+import { createPendingRegistrationToken } from "@/backend/auth/tokens";
+import { errorResponse } from "@/backend/auth/http";
 import { hashPassword } from "@/backend/auth/password";
-import { toPublicUserProfile } from "@/backend/auth/profile";
 import { signupInput } from "@/backend/auth/validation";
 import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/email";
-import { createEmailVerificationCode, EMAIL_VERIFICATION_MINUTES } from "@/backend/auth/email-verification";
+import { newVerificationCode, pendingRegistrationCodeHash, pendingRegistrationExpiry, removeExpiredPendingRegistrations, PENDING_REGISTRATION_MINUTES } from "@/backend/auth/pending-registration";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
@@ -21,25 +20,45 @@ export async function POST(request: Request) {
   if (!signupLimit.allowed) return NextResponse.json({ error: "Too many signup attempts. Try again later." }, { status: 429, headers: rateLimitHeaders(signupLimit.retryAfterSeconds) });
   if (parsed.data.otpEnabled) return errorResponse("OTP delivery is not configured yet", 501);
 
-  const [existing] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
-  if (existing) return errorResponse("Unable to create account with those details", 409);
+  const now = new Date();
+  await removeExpiredPendingRegistrations(now);
+  const [existingUser, existingPending] = await Promise.all([
+    db.select({ id: users.id }).from(users).where(eq(users.email, parsed.data.email)).limit(1),
+    db.select({ id: pendingRegistrations.id }).from(pendingRegistrations).where(and(eq(pendingRegistrations.email, parsed.data.email), gt(pendingRegistrations.verificationExpiresAt, now.toISOString()))).limit(1),
+  ]);
+  // Keep account existence and pending-registration state intentionally
+  // indistinguishable to callers. No normal session is issued here.
+  if (existingUser.length || existingPending.length) return errorResponse("Unable to create account with those details", 409);
 
-  const timestamp = new Date().toISOString();
-  const user = { id: randomUUID(), name: "", email: parsed.data.email, phone: parsed.data.phone ?? null, passwordHash: await hashPassword(parsed.data.password), currency: parsed.data.currency, hideTotalBalance: false, monthlyReportEnabled: false, onboardingCompleted: false, budgetOnboardingCompleted: false, tutorialStartedAt: null, tutorialCompletedAt: null, otpEnabled: false, twoFactorEnabled: false, twoFactorSecretEncrypted: null, twoFactorSetupSecretEncrypted: null, twoFactorBackupCodes: null, twoFactorVerifiedAt: null, emailVerifiedAt: null, phoneVerifiedAt: null, pwaInstallDismissedAt: null, lastLoginAt: null, avatarPreset: "sunrise", createdAt: timestamp, updatedAt: timestamp };
-  await db.insert(users).values(user);
+  const id = randomUUID();
+  const code = newVerificationCode();
+  const timestamp = now.toISOString();
+  const pending = {
+    id,
+    email: parsed.data.email,
+    phone: parsed.data.phone ?? null,
+    passwordHash: await hashPassword(parsed.data.password),
+    currency: parsed.data.currency,
+    verificationCodeHash: pendingRegistrationCodeHash(id, code),
+    verificationAttemptCount: 0,
+    verificationExpiresAt: pendingRegistrationExpiry(now),
+    verificationClaimedAt: null,
+    verificationClaimId: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(pendingRegistrations).values(pending);
 
-  const session = await createSession(user.id);
   let verificationEmailSent = false;
   if (isSmtpConfigured()) {
     try {
-      const verification = await createEmailVerificationCode(user.id);
-      await sendEmailVerificationEmail({ to: user.email, code: verification.code, expiresMinutes: EMAIL_VERIFICATION_MINUTES });
+      await sendEmailVerificationEmail({ to: pending.email, code, expiresMinutes: PENDING_REGISTRATION_MINUTES });
       verificationEmailSent = true;
     } catch {
-      // Account creation is still complete; the verification screen can retry delivery.
+      // Keep the pending record. It contains only a password hash and a
+      // hashed code; the user may retry delivery without creating duplicates.
     }
   }
-  const response = NextResponse.json({ user: toPublicUserProfile(user), accessToken: session.accessToken, expiresIn: session.expiresIn, emailVerificationRequired: true, verificationEmailSent }, { status: 201 });
-  setRefreshTokenCookie(response, session.refreshToken);
-  return response;
+
+  return NextResponse.json({ pendingToken: await createPendingRegistrationToken(id), emailVerificationRequired: true, verificationEmailSent }, { status: 201 });
 }

@@ -5,7 +5,7 @@ import { AlertCircle, Eye, EyeOff, Info, LoaderCircle, LockKeyhole, Mail } from 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PublicUserProfile } from "@/backend/auth/profile";
-import { authenticatedFetch, clearApiCache, primeApiCache, safeReturnPath, setAccessToken } from "@/lib/auth-client";
+import { authenticatedFetch, clearApiCache, primeApiCache, safeReturnPath, setAccessToken, setPendingRegistrationToken } from "@/lib/auth-client";
 
 export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -55,7 +55,7 @@ export function LoginForm() {
         }),
       });
       const responseText = await response.text();
-      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string; user?: PublicUserProfile } = {};
+      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string; verificationToken?: string; emailVerificationRequired?: boolean; user?: PublicUserProfile } = {};
       try {
         result = responseText.trim()
             ? (JSON.parse(responseText) as {
@@ -76,6 +76,13 @@ export function LoginForm() {
         setChallengeToken(result.challengeToken);
         setMessage("Enter the code from your authenticator app, or use a backup code.");
         setMessageTone("info");
+        return;
+      }
+      if (result.emailVerificationRequired && result.verificationToken) {
+        setPendingRegistrationToken(result.verificationToken);
+        setMessage("Please verify your email before signing in.");
+        setMessageTone("info");
+        router.push(`/verify-email?next=${encodeURIComponent(returnPath)}`);
         return;
       }
       if (!result.accessToken)

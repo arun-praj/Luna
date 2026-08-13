@@ -2,6 +2,8 @@
 AUTH_JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
 AUTH_ENCRYPTION_KEY=replace-with-a-different-random-secret-at-least-32-characters
 APP_URL=http://localhost:3000
+# WebAuthn must match the host portion of APP_URL without scheme, path, or port.
+WEBAUTHN_RP_ID=localhost
 
 # SMTP settings for verified report delivery. Keep the From address aligned with the authenticated SMTP account.
 SMTP_HOST=smtp.gmail.com

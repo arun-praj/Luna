@@ -9,6 +9,7 @@ const API_CACHE_TTL_MS = 120_000;
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 const REFRESH_REQUEST_TIMEOUT_MS = 10_000;
 const API_CACHE_STORAGE_KEY = "cocomelon.api-cache";
+const PENDING_REGISTRATION_TOKEN_KEY = "cocomelon.pending-registration-token";
 export const ONLINE_DATA_CHANGED_EVENT = "cocomelon:online-data-changed";
 let refreshPromise: Promise<string | null> | null = null;
 let accessToken: string | null = null;
@@ -125,6 +126,19 @@ export function clearAccessToken() {
   window.localStorage.removeItem("cocomelon.offline-active-user");
   clearApiCache();
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
+}
+
+export function setPendingRegistrationToken(token: string) {
+  if (typeof window !== "undefined") window.sessionStorage.setItem(PENDING_REGISTRATION_TOKEN_KEY, token);
+}
+
+export function getPendingRegistrationToken() {
+  if (typeof window === "undefined") return null;
+  return window.sessionStorage.getItem(PENDING_REGISTRATION_TOKEN_KEY);
+}
+
+export function clearPendingRegistrationToken() {
+  if (typeof window !== "undefined") window.sessionStorage.removeItem(PENDING_REGISTRATION_TOKEN_KEY);
 }
 
 function clearAccessTokenIfCurrent(expectedToken: string | null) {
@@ -400,6 +414,13 @@ export async function signOut() {
     } catch {
       // The auth state has already been cleared. A later launch cannot select
       // this snapshot because its active-user marker was removed above.
+    }
+    try {
+      const { clearBiometricLockRegistration } = await import("@/lib/biometric-lock-storage");
+      await clearBiometricLockRegistration();
+    } catch {
+      // Device storage cleanup is best effort; the server grant is revoked by
+      // the logout endpoint and the gate fails closed without a credential.
     }
   }
 }

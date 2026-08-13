@@ -5,6 +5,7 @@ import { runScheduledRecurringTransactions } from "@/backend/domain/recurring-se
 import { runScheduledHomeAlerts } from "@/backend/domain/home-alert-service";
 import { pruneExpiredRateLimitRows } from "@/backend/auth/rate-limit";
 import { runScheduledUploadMaintenance } from "@/backend/storage/upload-lifecycle";
+import { runScheduledAuthMaintenance } from "@/backend/auth/maintenance";
 
 function contentSecurityPolicy(nonce: string) {
   return [
@@ -78,6 +79,7 @@ const lunaWorker = {
       runScheduledRecurringTransactions(new Date(controller.scheduledTime)),
       runScheduledHomeAlerts(new Date(controller.scheduledTime)),
       runScheduledUploadMaintenance(new Date(controller.scheduledTime)),
+      runScheduledAuthMaintenance(new Date(controller.scheduledTime)),
       pruneExpiredRateLimitRows(),
     ]);
     const failures = results.filter(

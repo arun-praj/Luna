@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/backend/db/client";
-import { accountDeletionRequests, accounts, budgetAllocations, budgetCategoryBuckets, budgetIncomeSources, budgetMoves, budgetPeriods, budgetTemplates, categories, goals, homeAlerts, loanInstallments, loanPaymentEvents, loanRatePeriods, loans, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, transactionHistory, transactions, userTags, users, webauthnCredentials } from "@/backend/db/schema";
+import { accountDeletionRequests, accounts, budgetAllocations, budgetCategoryBuckets, budgetIncomeSources, budgetMoves, budgetPeriods, budgetTemplates, categories, goals, homeAlerts, loanInstallments, loanPaymentEvents, loanRatePeriods, loans, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, pendingRegistrations, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, storageUsage, storedObjects, transactionHistory, transactions, userTags, users, webauthnChallenges, webauthnCredentials, webauthnUnlockGrants } from "@/backend/db/schema";
 import { deleteUserUploadObjects, type AccountDeletionStorage } from "@/backend/privacy/delete-user-data-helpers";
 
 type BatchStatement = Parameters<typeof db.batch>[0][number];
@@ -32,8 +32,13 @@ export const accountDeletionTableOrder = [
   "notification_deliveries",
   "notification_settings",
   "otp_codes",
+  "pending_registrations",
   "password_reset_tokens",
+  "webauthn_challenges",
   "webauthn_credentials",
+  "webauthn_unlock_grants",
+  "stored_objects",
+  "storage_usage",
   "refresh_tokens",
   "accounts",
   "categories",
@@ -77,8 +82,13 @@ export async function deleteUserData(executor: DatabaseLike, userId: string, opt
     executor.delete(notificationDeliveries).where(eq(notificationDeliveries.userId, userId)),
     executor.delete(notificationSettings).where(eq(notificationSettings.userId, userId)),
     executor.delete(otpCodes).where(eq(otpCodes.userId, userId)),
+    executor.delete(pendingRegistrations).where(eq(pendingRegistrations.email, executor.select({ email: users.email }).from(users).where(eq(users.id, userId)))),
     executor.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId)),
+    executor.delete(webauthnChallenges).where(eq(webauthnChallenges.userId, userId)),
     executor.delete(webauthnCredentials).where(eq(webauthnCredentials.userId, userId)),
+    executor.delete(webauthnUnlockGrants).where(eq(webauthnUnlockGrants.userId, userId)),
+    executor.delete(storedObjects).where(eq(storedObjects.userId, userId)),
+    executor.delete(storageUsage).where(eq(storageUsage.userId, userId)),
     executor.delete(refreshTokens).where(eq(refreshTokens.userId, userId)),
     executor.delete(accounts).where(eq(accounts.userId, userId)),
     executor.delete(categories).where(eq(categories.userId, userId)),

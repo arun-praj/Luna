@@ -3,7 +3,10 @@ import "server-only";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { REFRESH_TOKEN_COOKIE, REFRESH_TOKEN_TTL_SECONDS } from "./config";
-import { verifyAccessToken } from "./tokens";
+import { verifyAccessTokenDetails } from "./tokens";
+import { db } from "../db/client";
+import { users, webauthnUnlockGrants } from "../db/schema";
+import { and, eq, gt, isNull } from "drizzle-orm";
 
 export function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -24,5 +27,17 @@ export async function getRefreshTokenCookie() {
 export async function requireAccessToken(request: Request) {
   const header = request.headers.get("authorization");
   if (!header?.startsWith("Bearer ")) return null;
-  return verifyAccessToken(header.slice(7));
+  const details = await verifyAccessTokenDetails(header.slice(7));
+  if (!details) return null;
+  const [user] = await db.select({ id: users.id, emailVerifiedAt: users.emailVerifiedAt, biometricLockEnabled: users.biometricLockEnabled }).from(users).where(eq(users.id, details.userId)).limit(1);
+  if (!user?.emailVerifiedAt) return null;
+  if (user.biometricLockEnabled && !details.unlockGrantId) {
+    const pathname = new URL(request.url).pathname;
+    if (!(pathname === "/api/auth/webauthn" || pathname.startsWith("/api/auth/webauthn/")) && pathname !== "/api/auth/me") return null;
+  }
+  if (user.biometricLockEnabled && details.unlockGrantId) {
+    const [grant] = await db.select({ id: webauthnUnlockGrants.id }).from(webauthnUnlockGrants).where(and(eq(webauthnUnlockGrants.id, details.unlockGrantId), eq(webauthnUnlockGrants.userId, user.id), isNull(webauthnUnlockGrants.revokedAt), gt(webauthnUnlockGrants.expiresAt, new Date().toISOString()))).limit(1);
+    if (!grant) return null;
+  }
+  return user.id;
 }
