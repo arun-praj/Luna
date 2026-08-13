@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { users, webauthnChallenges, webauthnCredentials, webauthnUnlockGrants } from "@/backend/db/schema";
-import { errorResponse, requireAccessToken } from "@/backend/auth/http";
+import { errorResponse, requireFreshReauthentication } from "@/backend/auth/http";
 
 export const runtime = "nodejs";
 export async function DELETE(request: Request) {
-  const userId = await requireAccessToken(request);
+  const userId = await requireFreshReauthentication(request);
   if (!userId) return errorResponse("Authentication required", 401);
   const now = new Date().toISOString();
   await db.batch([

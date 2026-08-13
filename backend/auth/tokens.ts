@@ -141,7 +141,7 @@ export async function revokeBiometricUnlockGrants(userId: string) {
 export async function verifyAccessTokenDetails(token: string) {
   try {
     const result = await jwtVerify(token, getJwtSecret(), { issuer: "budget-api", audience: "budget-app" });
-    return result.payload.type === "access" && result.payload.sub ? { userId: result.payload.sub, unlockGrantId: typeof result.payload.unlockGrantId === "string" ? result.payload.unlockGrantId : null } : null;
+    return result.payload.type === "access" && result.payload.sub ? { userId: result.payload.sub, unlockGrantId: typeof result.payload.unlockGrantId === "string" ? result.payload.unlockGrantId : null, issuedAt: typeof result.payload.iat === "number" ? result.payload.iat : null } : null;
   } catch {
     return null;
   }

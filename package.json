@@ -11,6 +11,8 @@
     "test": "node --experimental-strip-types --test lib/biometric-lock-policy.test.ts backend/domain/account-rules.test.ts backend/domain/home-alert-rules.test.ts backend/domain/budget-service.test.ts backend/domain/budget-income.test.ts backend/domain/account-consistency.test.ts backend/domain/portability-limits.test.ts backend/domain/validation-receipt.test.ts backend/domain/recurring-service.test.ts backend/domain/transaction-semantics.test.ts backend/privacy/delete-user-data-helpers.test.ts backend/storage/r2-contract.test.ts backend/storage/transaction-receipts.test.ts backend/storage/upload-policy.test.ts backend/auth/two-factor-challenge.test.ts",
     "test:integration:d1": "node scripts/test-account-deletion-d1.mjs",
     "test:integration:2fa": "node scripts/test-two-factor-challenge-d1.mjs",
+    "test:integration:attachments": "node scripts/test-stored-object-attachments-d1.mjs",
+    "test:integration:biometric": "node scripts/test-biometric-assurance-route.mjs",
     "test:integration:security": "node scripts/test-security-claims-d1.mjs",
     "db:generate": "drizzle-kit generate --config backend/db/drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config backend/db/drizzle.config.ts",

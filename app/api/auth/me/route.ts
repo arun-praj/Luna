@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { errorResponse, requireAccessToken } from "@/backend/auth/http";
+import { errorResponse, requireAccessToken, requireBaseAccessToken } from "@/backend/auth/http";
 import { getUserById } from "@/backend/auth/tokens";
 import { db } from "@/backend/db/client";
 import { users } from "@/backend/db/schema";
@@ -11,7 +11,7 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const userId = await requireAccessToken(request);
+  const userId = await requireBaseAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
   const user = await getUserById(userId);
   return user ? NextResponse.json({ user: toPublicUserProfile(user) }) : errorResponse("Authentication required", 401);

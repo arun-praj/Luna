@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { accounts, savingsInstruments, storedObjects, storageUsage, transactions, users } from "@/backend/db/schema";
 import { r2Bucket, r2Configured } from "@/backend/storage/r2";
@@ -9,6 +9,7 @@ import { assertImageSignature, MAX_UPLOAD_BYTES, ownedUploadKey, ORPHAN_UPLOAD_G
 
 export type UploadObject = { key: string; size: number; uploaded?: Date };
 type UploadListPage = { objects: UploadObject[]; truncated: boolean; cursor?: string };
+export type UploadBatchStatement = Parameters<typeof db.batch>[0][number];
 
 function listPage(options: { prefix: string; cursor?: string }): Promise<UploadListPage> { return r2Bucket().list(options) as Promise<UploadListPage>; }
 
@@ -77,12 +78,58 @@ export async function referencedUploadKeys(userId: string) {
   return references;
 }
 
-export async function attachStoredObject(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string) {
+function looksLikeManagedReference(reference: string) {
+  return reference.startsWith("/api/uploads/") || uploadKinds.some((kind) => reference.startsWith(`${kind}/`));
+}
+
+/** Prepare an attachment transition for the same D1 batch as the entity write. */
+export async function prepareStoredObjectAttachment(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string): Promise<UploadBatchStatement | null> {
+  if (!reference) return null;
   const key = ownedUploadKey(kind, userId, reference);
-  if (!key) return false;
-  const timestamp = new Date().toISOString();
-  const [attached] = await db.update(storedObjects).set({ status: "attached", entityType, entityId, deleteAfter: null, updatedAt: timestamp }).where(and(eq(storedObjects.userId, userId), eq(storedObjects.objectKey, key), inArray(storedObjects.status, ["uploaded", "attached"]))).returning({ id: storedObjects.id });
-  return Boolean(attached);
+  if (!key) {
+    if (looksLikeManagedReference(reference) || kind === "transaction-receipts" || /^https?:\/\//i.test(reference)) throw new Error("Invalid stored object attachment");
+    return null;
+  }
+  const [stored] = await db.select({ id: storedObjects.id, status: storedObjects.status, entityType: storedObjects.entityType, entityId: storedObjects.entityId }).from(storedObjects).where(and(eq(storedObjects.userId, userId), eq(storedObjects.objectKey, key))).limit(1);
+  if (!stored || !["uploaded", "attached"].includes(stored.status)) throw new Error("Invalid stored object attachment");
+  if (stored.status === "attached") {
+    if (stored.entityType !== entityType || stored.entityId !== entityId) throw new Error("Stored object is already attached");
+    return null;
+  }
+  const statement = db.update(storedObjects).set({ status: "attached", entityType, entityId, deleteAfter: null, updatedAt: new Date().toISOString() }).where(and(eq(storedObjects.id, stored.id), eq(storedObjects.userId, userId), eq(storedObjects.status, "uploaded"), isNull(storedObjects.entityType), isNull(storedObjects.entityId)));
+  return statement as unknown as UploadBatchStatement;
+}
+
+/** Prepare the old attachment transition for the same batch as a replacement or deletion. */
+export async function prepareStoredObjectDetachment(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string): Promise<UploadBatchStatement | null> {
+  const key = ownedUploadKey(kind, userId, reference);
+  if (!key) return null;
+  const statement = db.update(storedObjects).set({ status: "delete_pending", deleteAfter: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(
+    eq(storedObjects.userId, userId),
+    eq(storedObjects.objectKey, key),
+    eq(storedObjects.status, "attached"),
+    eq(storedObjects.entityType, entityType),
+    eq(storedObjects.entityId, entityId),
+  ));
+  return statement as unknown as UploadBatchStatement;
+}
+
+export async function attachStoredObject(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string) {
+  const statement = await prepareStoredObjectAttachment(userId, kind, reference, entityType, entityId);
+  if (!statement) return Boolean(reference);
+  await db.batch([statement]);
+  return true;
+}
+
+async function markDeletePending(userId: string, storedId: string, status: typeof storedObjects.$inferSelect.status, now: string) {
+  const [pending] = await db.update(storedObjects).set({ status: "delete_pending", deleteAfter: now, updatedAt: now }).where(and(eq(storedObjects.id, storedId), eq(storedObjects.userId, userId), eq(storedObjects.status, status))).returning({ id: storedObjects.id });
+  return Boolean(pending);
+}
+
+async function markDeleted(userId: string, storedId: string, bytes: number, now: string) {
+  const [deleted] = await db.update(storedObjects).set({ status: "deleted", deleteAfter: now, updatedAt: now }).where(and(eq(storedObjects.id, storedId), eq(storedObjects.userId, userId), eq(storedObjects.status, "delete_pending"))).returning({ id: storedObjects.id });
+  if (deleted) await releaseReservedBytes(userId, bytes, now);
+  return Boolean(deleted);
 }
 
 export async function deleteUploadIfUnreferenced(userId: string, kind: UploadKind, reference: string | null | undefined) {
@@ -93,11 +140,10 @@ export async function deleteUploadIfUnreferenced(userId: string, kind: UploadKin
   const [stored] = await db.select({ id: storedObjects.id, byteSize: storedObjects.byteSize, status: storedObjects.status }).from(storedObjects).where(and(eq(storedObjects.userId, userId), eq(storedObjects.objectKey, key))).limit(1);
   if (!stored) { await r2Bucket().delete(key); return true; }
   if (stored.status === "attached") return false;
-  await r2Bucket().delete(key);
   const now = new Date().toISOString();
-  const [deleted] = await db.update(storedObjects).set({ status: "deleted", deleteAfter: now, updatedAt: now }).where(and(eq(storedObjects.id, stored.id), eq(storedObjects.status, stored.status))).returning({ id: storedObjects.id });
-  if (deleted) await releaseReservedBytes(userId, stored.byteSize, now);
-  return Boolean(deleted);
+  if (!(await markDeletePending(userId, stored.id, stored.status, now))) return false;
+  try { await r2Bucket().delete(key); } catch { return false; }
+  return markDeleted(userId, stored.id, stored.byteSize, new Date().toISOString());
 }
 
 export async function sweepOrphanedUserUploads(userId: string, now = new Date()) {
@@ -108,10 +154,10 @@ export async function sweepOrphanedUserUploads(userId: string, now = new Date())
     if (references.has(row.objectKey)) continue;
     const createdAt = new Date(row.uploadedAt ?? row.reservedAt).getTime();
     if (!Number.isFinite(createdAt) || createdAt > now.getTime() - ORPHAN_UPLOAD_GRACE_MS) continue;
-    await r2Bucket().delete(row.objectKey);
     const timestamp = now.toISOString();
-    const [removed] = await db.update(storedObjects).set({ status: "deleted", deleteAfter: timestamp, updatedAt: timestamp }).where(and(eq(storedObjects.id, row.id), inArray(storedObjects.status, ["reserved", "uploaded", "delete_pending"]))).returning({ id: storedObjects.id });
-    if (removed) { await releaseReservedBytes(userId, row.byteSize, timestamp); deleted += 1; }
+    if (!(await markDeletePending(userId, row.id, row.status, timestamp))) continue;
+    try { await r2Bucket().delete(row.objectKey); } catch { continue; }
+    if (await markDeleted(userId, row.id, row.byteSize, timestamp)) deleted += 1;
   }
   return { scanned: rows.length, deleted };
 }

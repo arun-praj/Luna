@@ -4,12 +4,12 @@ import { and, eq, isNull } from "drizzle-orm";
 import { generateRegistrationOptions } from "@simplewebauthn/server";
 import { db } from "@/backend/db/client";
 import { users, webauthnChallenges, webauthnCredentials } from "@/backend/db/schema";
-import { errorResponse, requireAccessToken } from "@/backend/auth/http";
+import { errorResponse, requireFreshReauthentication } from "@/backend/auth/http";
 import { webAuthnConfig } from "@/backend/auth/webauthn";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
-  const userId = await requireAccessToken(request);
+  const userId = await requireFreshReauthentication(request);
   if (!userId) return errorResponse("Authentication required", 401);
   const [user] = await db.select({ id: users.id, email: users.email, name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
   if (!user) return errorResponse("Authentication required", 401);

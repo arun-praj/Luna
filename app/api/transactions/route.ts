@@ -6,7 +6,7 @@ import { accounts, categories, transactions } from "@/backend/db/schema";
 import { createTransaction, serializeTransaction } from "@/backend/domain/transaction-service";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { transactionInput } from "@/backend/domain/validation";
-import { attachStoredObject, deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
+import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 
@@ -110,6 +110,6 @@ export async function POST(request: Request) {
     const titleIssue = parsed.error.issues.find((issue) => issue.path[0] === "title");
     return errorResponse(titleIssue ? "Add a title for this transaction" : "Invalid transaction", 400);
   }
-  try { const transaction = await createTransaction(userId, parsed.data); if (transaction.receiptImageUrl) await attachStoredObject(userId, "transaction-receipts", transaction.receiptImageUrl, "transaction", transaction.id); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }, { status: 201 }); }
+  try { const transaction = await createTransaction(userId, parsed.data); scheduleHomeAlertRepair(userId); return NextResponse.json({ transaction: serializeTransaction(transaction) }, { status: 201 }); }
   catch (error) { await deleteUploadIfUnreferenced(userId, "transaction-receipts", receiptImageUrl); return errorResponse(error instanceof Error ? error.message : "Unable to create transaction", 400); }
 }

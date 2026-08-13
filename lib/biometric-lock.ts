@@ -26,7 +26,7 @@ export async function isBiometricLockEnabled(userId?: string) {
 
 export async function disableBiometricLock() {
   const response = await serverRequest("/api/auth/webauthn", { method: "DELETE" });
-  if (!response.ok && response.status !== 401) throw new Error("Could not disable biometric unlock.");
+  if (!response.ok) throw new Error(response.status === 401 ? "Fresh biometric verification is required before disabling biometric unlock." : "Could not disable biometric unlock.");
   await clearBiometricLockRegistration();
 }
 

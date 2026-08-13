@@ -7,7 +7,7 @@ import { accounts, transactions, users } from "@/backend/db/schema";
 import { accountInput, accountOrderInput } from "@/backend/domain/validation";
 import { hasDuplicateAccountName } from "@/backend/domain/account-rules";
 import { normalizeMoney } from "@/lib/money";
-import { attachStoredObject } from "@/backend/storage/upload-lifecycle";
+import { prepareStoredObjectAttachment, type UploadBatchStatement } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 
@@ -73,17 +73,23 @@ export async function POST(request: Request) {
   const existingAccounts = await db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.userId, userId));
   if (hasDuplicateAccountName(existingAccounts, input.name)) return errorResponse("An account with this name already exists", 409);
   const id = randomUUID();
+  let attachmentStatement;
+  try {
+    attachmentStatement = await prepareStoredObjectAttachment(userId, "account-images", input.icon, "account", id);
+  } catch (error) {
+    return errorResponse(error instanceof Error ? error.message : "Invalid account image", 400);
+  }
   const insertAccount = db.insert(accounts).values({ id, userId, name: input.name, type: input.type, currency: input.currency ?? user?.currency ?? "NPR", openingBalance: openingBalance ?? 0, currentBalance: openingBalance ?? 0, isDefault: input.isDefault ?? false, displayOrder: input.displayOrder ?? 0, backgroundColor: input.backgroundColor ?? null, icon: input.icon ?? null, includeInTotalBalance: input.includeInTotalBalance ?? true, allowNegativeBalance });
   if (input.isDefault) {
-    await db.batch([
-      db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId)),
-      insertAccount,
-    ]);
+    const statements: UploadBatchStatement[] = [db.update(accounts).set({ isDefault: false }).where(eq(accounts.userId, userId)) as unknown as UploadBatchStatement];
+    if (attachmentStatement) statements.push(attachmentStatement);
+    statements.push(insertAccount as unknown as UploadBatchStatement);
+    await db.batch(statements as [UploadBatchStatement, ...UploadBatchStatement[]]);
   } else {
-    await db.batch([insertAccount]);
+    if (attachmentStatement) await db.batch([attachmentStatement, insertAccount]);
+    else await db.batch([insertAccount]);
   }
   const [account] = await db.select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId))).limit(1);
-  if (account?.icon) await attachStoredObject(userId, "account-images", account.icon, "account", id);
   return NextResponse.json({ account: account ? { ...account, currentBalance: normalizeMoney(account.currentBalance) } : account }, { status: 201 });
 }
 

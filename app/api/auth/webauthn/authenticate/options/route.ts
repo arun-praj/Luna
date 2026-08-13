@@ -4,12 +4,12 @@ import { and, eq, isNull } from "drizzle-orm";
 import { generateAuthenticationOptions } from "@simplewebauthn/server";
 import { db } from "@/backend/db/client";
 import { webauthnChallenges, webauthnCredentials } from "@/backend/db/schema";
-import { errorResponse, requireAccessToken } from "@/backend/auth/http";
+import { errorResponse, requireBaseAccessToken } from "@/backend/auth/http";
 import { webAuthnConfig } from "@/backend/auth/webauthn";
 
 export const runtime = "nodejs";
 export async function POST(request: Request) {
-  const userId = await requireAccessToken(request);
+  const userId = await requireBaseAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);
   const credentials = await db.select({ credentialId: webauthnCredentials.credentialId }).from(webauthnCredentials).where(eq(webauthnCredentials.userId, userId));
   if (!credentials.length) return errorResponse("No biometric credential is registered on this device", 403);

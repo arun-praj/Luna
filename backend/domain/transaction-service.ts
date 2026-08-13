@@ -6,6 +6,7 @@ import { savingsInstrumentReferenceError, transactionCategoryReferenceError } fr
 import type { z } from "zod";
 import { transactionInput } from "@/backend/domain/validation";
 import { addMoney, normalizeMoney, subtractMoney } from "@/lib/money";
+import { prepareStoredObjectAttachment, prepareStoredObjectDetachment } from "@/backend/storage/upload-lifecycle";
 
 export type TransactionInput = z.infer<typeof transactionInput>;
 type DatabaseExecutor = typeof db;
@@ -359,11 +360,12 @@ async function getBalanceAdjustmentCategory(userId: string) {
   return existing;
 }
 
-async function commitCreatedTransaction(userId: string, row: TransactionRow, changes: TransactionChange[], goalActions = new Map<string, SQL>(), categoryToCreate?: typeof categories.$inferInsert) {
+async function commitCreatedTransaction(userId: string, row: TransactionRow, changes: TransactionChange[], goalActions = new Map<string, SQL>(), categoryToCreate?: typeof categories.$inferInsert, attachmentStatement?: BatchStatement | null) {
   const snapshots = await getSnapshots(userId);
   const timestamp = row.updatedAt;
   const statements: BatchStatement[] = [];
   if (categoryToCreate) statements.push(db.insert(categories).values(categoryToCreate));
+  if (attachmentStatement) statements.push(attachmentStatement);
   statements.push(db.insert(transactions).values(row));
   addAtomicGuard(statements, row.id, userId, sql`changes() = 1`, timestamp);
   buildEffectStatements(statements, row.id, userId, timestamp, changes, snapshots, goalActions);
@@ -432,7 +434,8 @@ export async function createTransaction(userId: string, input: TransactionInput)
   const goalActions = new Map<string, SQL>();
   const action = goalActionCondition(normalizedInput);
   if (normalizedInput.goalId && action) goalActions.set(normalizedInput.goalId, action);
-  return commitCreatedTransaction(userId, row, changes, goalActions);
+  const attachmentStatement = await prepareStoredObjectAttachment(userId, "transaction-receipts", normalizedInput.receiptImageUrl, "transaction", row.id);
+  return commitCreatedTransaction(userId, row, changes, goalActions, undefined, attachmentStatement);
 }
 
 function transactionCas(old: TransactionRow, userId: string) {
@@ -473,7 +476,12 @@ export async function updateTransaction(userId: string, id: string, input: Trans
   const goalActions = new Map<string, SQL>();
   const action = goalActionCondition(normalizedInput, old);
   if (normalizedInput.goalId && action) goalActions.set(normalizedInput.goalId, action);
+  const attachmentStatement = await prepareStoredObjectAttachment(userId, "transaction-receipts", normalizedInput.receiptImageUrl, "transaction", id);
+  const detachmentStatement = old.receiptImageUrl !== next.receiptImageUrl
+    ? await prepareStoredObjectDetachment(userId, "transaction-receipts", old.receiptImageUrl, "transaction", id)
+    : null;
   buildEffectStatements(statements, id, userId, timestamp, changes, snapshots, goalActions);
+  if (attachmentStatement) statements.unshift(attachmentStatement);
   statements.push(db.update(transactions).set({
     accountId: next.accountId, type: next.type, amount: next.amount, categoryId: next.categoryId, splits: next.splits,
     title: next.title, merchantName: next.merchantName, notes: next.notes, tags: next.tags, isRecurring: next.isRecurring,
@@ -481,6 +489,7 @@ export async function updateTransaction(userId: string, id: string, input: Trans
     savingsInstrumentId: next.savingsInstrumentId, transferToAccountId: next.transferToAccountId, date: next.date,
     transactionAt: next.transactionAt, updatedAt: next.updatedAt,
   }).where(transactionCas(old, userId)));
+  if (detachmentStatement) statements.push(detachmentStatement);
   addAtomicGuard(statements, id, userId, sql`changes() = 1`, timestamp);
   statements.push(db.insert(transactionHistory).values({
     id: randomUUID(), transactionId: id, changedBy: userId, changeType: "updated",
@@ -500,12 +509,14 @@ export async function deleteTransaction(userId: string, id: string) {
   const snapshots = await getSnapshots(userId);
   const timestamp = new Date().toISOString();
   const statements: BatchStatement[] = [];
+  const detachmentStatement = await prepareStoredObjectDetachment(userId, "transaction-receipts", old.receiptImageUrl, "transaction", id);
   buildEffectStatements(statements, id, userId, timestamp, changes, snapshots, new Map());
   statements.push(db.insert(transactionHistory).values({
     id: randomUUID(), transactionId: id, changedBy: userId, changeType: "deleted",
     oldValues: JSON.stringify(serializeTransaction(old)), newValues: null, changedAt: timestamp,
   }));
   statements.push(db.delete(transactions).where(transactionCas(old, userId)));
+  if (detachmentStatement) statements.push(detachmentStatement);
   addAtomicGuard(statements, id, userId, sql`changes() = 1`, timestamp);
   await executeFinancialBatch(statements);
   return old;

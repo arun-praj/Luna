@@ -6,7 +6,7 @@ import { db } from "@/backend/db/client";
 import { savingsInstrumentTypes, savingsInstruments } from "@/backend/db/schema";
 import { savingsInstrumentInput } from "@/backend/domain/validation";
 import { normalizeMoney } from "@/lib/money";
-import { attachStoredObject } from "@/backend/storage/upload-lifecycle";
+import { prepareStoredObjectAttachment, type UploadBatchStatement } from "@/backend/storage/upload-lifecycle";
 
 export const runtime = "nodejs";
 export async function GET(request: Request) {
@@ -26,8 +26,15 @@ export async function POST(request: Request) {
   const [type] = await db.select().from(savingsInstrumentTypes).where(and(eq(savingsInstrumentTypes.id, parsed.data.typeId), or(eq(savingsInstrumentTypes.userId, userId), isNull(savingsInstrumentTypes.userId)))).limit(1);
   if (!type) return errorResponse("Savings instrument type not found", 400);
   const id = randomUUID();
-  await db.insert(savingsInstruments).values({ id, userId, typeId: parsed.data.typeId, name: parsed.data.name, description: parsed.data.description ?? "", currentBalance: parsed.data.currentBalance ?? 0, interestRate: parsed.data.interestRate ?? null, icon: parsed.data.icon ?? "Growth", backgroundColor: parsed.data.backgroundColor ?? "#e5f3eb", maturityDate: parsed.data.maturityDate ?? null });
+  let attachmentStatement;
+  try {
+    attachmentStatement = await prepareStoredObjectAttachment(userId, "savings-images", parsed.data.icon, "savings_instrument", id);
+  } catch (error) {
+    return errorResponse(error instanceof Error ? error.message : "Invalid savings image", 400);
+  }
+  const insertInstrument = db.insert(savingsInstruments).values({ id, userId, typeId: parsed.data.typeId, name: parsed.data.name, description: parsed.data.description ?? "", currentBalance: parsed.data.currentBalance ?? 0, interestRate: parsed.data.interestRate ?? null, icon: parsed.data.icon ?? "Growth", backgroundColor: parsed.data.backgroundColor ?? "#e5f3eb", maturityDate: parsed.data.maturityDate ?? null });
+  if (attachmentStatement) await db.batch([attachmentStatement, insertInstrument as unknown as UploadBatchStatement]);
+  else await db.batch([insertInstrument]);
   const [instrument] = await db.select().from(savingsInstruments).where(eq(savingsInstruments.id, id)).limit(1);
-  if (instrument?.icon) await attachStoredObject(userId, "savings-images", instrument.icon, "savings_instrument", id);
   return NextResponse.json({ instrument: instrument ? { ...instrument, currentBalance: normalizeMoney(instrument.currentBalance) } : instrument }, { status: 201 });
 }

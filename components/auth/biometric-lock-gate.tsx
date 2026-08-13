@@ -82,7 +82,7 @@ export function BiometricLockGate({ children }: { children: React.ReactNode }) {
   async function recover() {
     setIsBusy(true);
     try {
-      await disableBiometricLock();
+      await disableBiometricLock().catch(() => undefined);
       await signOut();
       router.replace("/login");
     } finally {
