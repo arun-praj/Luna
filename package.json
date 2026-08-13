@@ -13,6 +13,7 @@
     "test:integration:2fa": "node scripts/test-two-factor-challenge-d1.mjs",
     "test:integration:attachments": "node scripts/test-stored-object-attachments-d1.mjs",
     "test:integration:biometric": "node scripts/test-biometric-assurance-route.mjs",
+    "test:integration:password-reset": "node scripts/test-password-reset-atomicity.mjs",
     "test:integration:security": "node scripts/test-security-claims-d1.mjs",
     "db:generate": "drizzle-kit generate --config backend/db/drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config backend/db/drizzle.config.ts",
