@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowDownLeft,
   ArrowLeft,
+  ArrowUpLeft,
   Plus,
   Search,
-  WalletCards,
+  X,
 } from "lucide-react";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { GuideIcon } from "@/components/guides/feature-guide";
@@ -24,14 +26,6 @@ type Category = {
   usageFrequency: number;
 };
 
-const colorClasses = [
-  "border-[#c7dbd2] bg-[#e3eee9]",
-  "border-[#e6c9c4] bg-[#f8e9e6]",
-  "border-[#e3d2b6] bg-[#f3e8d4]",
-  "border-[#cadde9] bg-[#e3eff6]",
-  "border-[#c7dbd2] bg-[#e5f3eb]",
-  "border-[#d8cee7] bg-[#ece6f3]",
-];
 const categoryForegrounds: Record<string, string> = {
   "#e3eee9": "#356b68",
   "#f8e9e6": "#9e514b",
@@ -44,6 +38,127 @@ const categoryForegrounds: Record<string, string> = {
 
 function categoryForeground(color: string | null) {
   return categoryForegrounds[color?.toLowerCase() ?? ""] ?? "#356b68";
+}
+
+function sortCategories(categories: Category[]) {
+  return [...categories].sort(
+    (left, right) =>
+      right.usageFrequency - left.usageFrequency ||
+      left.name.localeCompare(right.name),
+  );
+}
+
+function CategorySection({
+  categories,
+  currentRoute,
+  heading,
+  icon: SectionIcon,
+  tone,
+}: {
+  categories: Category[];
+  currentRoute: string;
+  heading: "Expenses" | "Income";
+  icon: typeof ArrowDownLeft;
+  tone: "expense" | "income";
+}) {
+  const transactionCount = categories.reduce(
+    (total, category) => total + category.usageFrequency,
+    0,
+  );
+  const Icon = SectionIcon;
+
+  return (
+    <section aria-labelledby={`${tone}-categories-heading`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon
+            aria-hidden="true"
+            className={`size-[18px] shrink-0 ${tone === "expense" ? "text-expense" : "text-income"}`}
+            strokeWidth={1.9}
+          />
+          <h3
+            id={`${tone}-categories-heading`}
+            className="text-[18px] font-semibold tracking-[-0.025em]"
+          >
+            {heading}
+          </h3>
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {categories.length}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {transactionCount > 0
+            ? `${transactionCount.toLocaleString()} ${transactionCount === 1 ? "transaction" : "transactions"}`
+            : "No activity yet"}
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 min-[600px]:grid-cols-2">
+        {categories.map((category) => {
+          const CategoryIcon = getCategoryIcon(category.icon, category.name);
+          const iconColor = categoryForeground(category.color);
+          const usageLabel =
+            category.usageFrequency > 0
+              ? `${category.usageFrequency.toLocaleString()} ${category.usageFrequency === 1 ? "use" : "uses"}`
+              : "No activity";
+
+          return (
+            <Link
+              href={withReturnTo(`/categories/${category.id}`, currentRoute)}
+              key={category.id}
+              className="group flex min-h-[72px] min-w-0 items-center gap-3 rounded-[12px] border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-border-strong hover:bg-surface-subtle active:bg-surface-subtle focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            >
+              <span
+                aria-hidden="true"
+                style={
+                  category.color
+                    ? { backgroundColor: category.color, color: iconColor }
+                    : { color: iconColor }
+                }
+                className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-surface-subtle"
+              >
+                <CategoryIcon className="size-[19px]" strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block break-words text-[15px] font-semibold leading-5 text-foreground">
+                  {category.name}
+                </span>
+                <span className="mt-1 block text-[13px] leading-4 text-muted-foreground">
+                  {category.type === "expense" ? "Expense" : "Income"} category
+                </span>
+              </span>
+              <span className="shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                {usageLabel}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CategoryListSkeleton() {
+  return (
+    <div
+      aria-label="Loading categories"
+      className="mt-5 grid grid-cols-1 gap-2 min-[600px]:grid-cols-2"
+    >
+      {Array.from({ length: 6 }, (_, index) => (
+        <div
+          className="flex min-h-[72px] items-center gap-3 rounded-[12px] border border-border bg-card px-3"
+          key={index}
+        >
+          <Skeleton className="size-10 shrink-0 rounded-[10px]" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+          <Skeleton className="h-3 w-14 shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function CategoriesPage() {
@@ -91,19 +206,27 @@ export default function CategoriesPage() {
     };
   }, []);
 
-  const filteredCategories = [...categories]
-    .sort(
-      (left, right) =>
-        right.usageFrequency - left.usageFrequency ||
-        left.type.localeCompare(right.type) ||
-        left.name.localeCompare(right.name),
-    )
-    .filter((category) =>
-      category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
-    );
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const filteredCategories = useMemo(
+    () =>
+      sortCategories(categories).filter((category) =>
+        category.name.toLocaleLowerCase().includes(normalizedSearch),
+      ),
+    [categories, normalizedSearch],
+  );
+  const expenseCategories = filteredCategories.filter(
+    (category) => category.type === "expense",
+  );
+  const incomeCategories = filteredCategories.filter(
+    (category) => category.type === "income",
+  );
+  const totalUsage = categories.reduce(
+    (total, category) => total + category.usageFrequency,
+    0,
+  );
 
   return (
-    <main className="page-route-enter min-h-dvh bg-background">
+    <main className="page-route-enter min-h-dvh overflow-x-clip bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -122,7 +245,10 @@ export default function CategoriesPage() {
                 Categories
               </h1>
             </div>
-            <GuideIcon href={withReturnTo("/categories/guide", currentRoute)} label="Categories" />
+            <GuideIcon
+              href={withReturnTo("/categories/guide", currentRoute)}
+              label="Categories"
+            />
           </div>
           <Link
             href={withReturnTo("/categories/new", currentRoute)}
@@ -133,132 +259,119 @@ export default function CategoriesPage() {
           </Link>
         </StickyPageHeader>
 
-        <section
-          aria-label="Category overview"
-          className="relative mt-8 overflow-hidden rounded-[18px] border border-primary/15 bg-primary px-5 py-5 text-primary-foreground sm:px-6 sm:py-6"
-        >
-          <div className="relative z-10 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-white/75">
-                Your spending is organized into
-              </p>
-              <p className="mt-2 text-[34px] font-semibold leading-none tracking-[-0.05em]">
-                {isLoading ? (
-                  <Skeleton className="h-9 w-32 bg-white/20" />
-                ) : (
-                  `${categories.length} categories`
-                )}
-              </p>
-            </div>
-            <WalletCards
-              aria-hidden="true"
-              className="mb-1 size-10 text-white/35"
-              strokeWidth={1.5}
+        <div className="sticky top-[68px] z-10 -mx-4 mt-3 bg-background/90 px-4 py-2 backdrop-blur-xl supports-[backdrop-filter]:bg-background/78 sm:top-[88px] sm:-mx-5 sm:px-5 sm:py-3">
+          <label className="flex min-h-12 items-center gap-2 rounded-[12px] border border-border bg-card px-3 text-muted-foreground shadow-sm focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-primary/15 sm:min-h-[52px]">
+            <Search aria-hidden="true" className="size-[18px] shrink-0" />
+            <span className="sr-only">Search categories</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search categories"
+              aria-label="Search categories"
+              className="min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none placeholder:text-muted-foreground"
             />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear category search"
+                className="flex size-11 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              >
+                <X aria-hidden="true" className="size-4" />
+              </button>
+            ) : null}
+          </label>
+        </div>
+
+        <section
+          aria-label="Category summary"
+          className="mt-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-1"
+        >
+          <div>
+            <h2 className="text-[21px] font-semibold tracking-[-0.03em]">
+              All categories
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Grouped by type for a quicker scan.
+            </p>
           </div>
-          <div className="pointer-events-none absolute -right-6 -top-10 size-36 rounded-full border-[18px] border-white/10" />
-          <div className="pointer-events-none absolute -bottom-20 right-16 size-40 rounded-full border-[22px] border-white/[0.07]" />
+          <p
+            aria-live="polite"
+            className="text-sm font-semibold tabular-nums text-primary"
+          >
+            {isLoading
+              ? "Loading"
+              : `${filteredCategories.length} of ${categories.length}`}
+          </p>
         </section>
 
-        <section aria-labelledby="category-list-heading" className="mt-9">
-          <div className="flex items-end justify-between gap-3 px-1">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">
-                Keep every rupee in view
-              </p>
-              <h2
-                id="category-list-heading"
-                className="mt-1 text-[21px] font-semibold tracking-[-0.03em]"
-              >
-                All categories
-              </h2>
-            </div>
-            <label className="flex min-w-0 items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-muted-foreground shadow-sm focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-primary/10">
-              <Search aria-hidden="true" className="size-4 shrink-0" />
-              <span className="sr-only">Search categories</span>
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search"
-                aria-label="Search categories"
-                className="w-20 min-w-0 bg-transparent text-xs font-medium text-foreground outline-none placeholder:text-muted-foreground sm:w-28"
-              />
-            </label>
+        {isLoading ? (
+          <CategoryListSkeleton />
+        ) : error ? (
+          <div
+            role="alert"
+            className="mt-5 rounded-[12px] border border-expense/25 bg-expense-soft p-4 text-sm text-expense"
+          >
+            {error}
           </div>
-          {isLoading ? (
-            <div className="route-data-reveal mt-4 grid grid-cols-3 gap-2 min-[520px]:gap-3">
-              {Array.from({ length: 6 }, (_, index) => (
-                <Skeleton className="h-32 rounded-[14px]" key={index} />
-              ))}
-            </div>
-          ) : error ? (
-            <div
-              role="alert"
-              className="mt-4 rounded-[14px] border border-expense/25 bg-expense-soft p-4 text-sm text-expense"
+        ) : categories.length === 0 ? (
+          <div className="mt-5 rounded-[14px] border border-dashed border-border-strong bg-card p-8 text-center">
+            <p className="text-sm font-semibold">No categories yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Create a category to organize transactions.
+            </p>
+            <Link
+              href={withReturnTo("/categories/new", currentRoute)}
+              className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-[10px] border border-primary/25 bg-primary-soft px-4 text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
             >
-              {error}
-            </div>
-          ) : categories.length === 0 ? (
-            <div className="mt-4 rounded-[14px] border border-dashed border-border-strong bg-card p-8 text-center">
-              <p className="text-sm font-semibold">No categories yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Create a category to organize transactions.
-              </p>
-            </div>
-          ) : filteredCategories.length === 0 ? (
-            <div className="mt-4 rounded-[14px] border border-dashed border-border-strong bg-card p-8 text-center">
-              <p className="text-sm font-semibold">No matching categories</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Try a different search or create a new category.
-              </p>
-            </div>
-          ) : (
-            <div className="route-data-reveal mt-4 grid grid-cols-3 gap-2 min-[520px]:gap-3">
-              {filteredCategories.map((category, index) => {
-                const iconColor = categoryForeground(category.color);
-                const Icon = getCategoryIcon(category.icon, category.name);
-                return (
-                  <Link
-                    href={withReturnTo(`/categories/${category.id}`, currentRoute)}
-                    key={category.id}
-                    style={
-                      category.color
-                        ? { backgroundColor: category.color }
-                        : undefined
-                    }
-                    className={`group relative flex min-h-[128px] flex-col justify-between overflow-hidden rounded-[14px] border p-3 text-left transition-[border-color,transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(23_32_29_/_0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${colorClasses[index % colorClasses.length]}`}
-                  >
-                    <span
-                      style={{ color: iconColor }}
-                      className="flex size-10 items-center justify-center rounded-[11px] bg-white/60"
-                    >
-                      <Icon
-                        aria-hidden="true"
-                        className="size-[19px]"
-                        strokeWidth={1.8}
-                      />
-                    </span>
-                    <span className="mt-3 block min-w-0">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 break-words whitespace-normal text-[13px] font-semibold leading-5 min-[520px]:text-[15px]">
-                          {category.name}
-                        </span>
-                      </span>
-                      <span className="mt-1 block truncate text-[10px] capitalize text-muted-foreground min-[520px]:text-xs">
-                        {category.type} category
-                      </span>
-                      <span className="mt-2 block text-[12px] font-semibold tabular-nums text-muted-foreground min-[520px]:text-[13px]">
-                        {category.usageFrequency > 0
-                          ? `${category.usageFrequency} ${category.usageFrequency === 1 ? "transaction" : "transactions"}`
-                          : "No activity yet"}
-                      </span>
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </section>
+              <Plus aria-hidden="true" className="size-4" />
+              Add category
+            </Link>
+          </div>
+        ) : filteredCategories.length === 0 ? (
+          <div className="mt-5 rounded-[14px] border border-dashed border-border-strong bg-card p-8 text-center">
+            <p className="text-sm font-semibold">No matching categories</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Try a different search or clear the current query.
+            </p>
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              className="mt-5 inline-flex min-h-11 items-center rounded-[10px] border border-primary/25 bg-primary-soft px-4 text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            >
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <div className="route-data-reveal mt-8 space-y-8">
+            {expenseCategories.length > 0 ? (
+              <CategorySection
+                categories={expenseCategories}
+                currentRoute={currentRoute}
+                heading="Expenses"
+                icon={ArrowDownLeft}
+                tone="expense"
+              />
+            ) : null}
+            {incomeCategories.length > 0 ? (
+              <CategorySection
+                categories={incomeCategories}
+                currentRoute={currentRoute}
+                heading="Income"
+                icon={ArrowUpLeft}
+                tone="income"
+              />
+            ) : null}
+          </div>
+        )}
+
+        {!isLoading && !error && categories.length > 0 ? (
+          <p className="mt-8 px-1 text-xs text-muted-foreground">
+            {totalUsage > 0
+              ? `${totalUsage.toLocaleString()} transactions are represented across these categories.`
+              : "Usage will appear here as you add transactions."}
+          </p>
+        ) : null}
       </div>
     </main>
   );
