@@ -34,12 +34,17 @@ import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { AnimatedBalanceAmount } from "@/components/home/animated-balance-amount";
 import { getAccountBackgroundColor, getAccountForeground } from "@/lib/account-appearance";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { ListDataSkeleton, Skeleton } from "@/components/ui/data-skeleton";
 import { useAnimatedVisibility } from "@/lib/use-animated-visibility";
 import { GuideIcon } from "@/components/guides/feature-guide";
+import {
+  getAccountSwipeDragOffset,
+  shouldOpenAccountSwipe,
+} from "@/components/accounts/account-swipe-motion";
 
 type Account = {
   id: string;
@@ -208,26 +213,67 @@ function SwipeableAccountCard({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const pointerStart = useRef<{ x: number; y: number; offset: number } | null>(null);
+  const pointerStart = useRef<{
+    x: number;
+    y: number;
+    offset: number;
+    lastX: number;
+    lastTime: number;
+    velocity: number;
+  } | null>(null);
   const offsetRef = useRef(0);
   const draggedRef = useRef(false);
+  const actionRef = useRef<HTMLAnchorElement>(null);
+  const cardRef = useRef<HTMLAnchorElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<number | null>(null);
   const offset = dragOffset ?? (open ? ACCOUNT_SWIPE_ACTION_WIDTH : 0);
   const backgroundColor = getAccountBackgroundColor(account.backgroundColor, account.type);
   const swipeActionColor = getAccountForeground(account.backgroundColor, account.type);
 
+  useEffect(() => {
+    if (!open && actionRef.current === document.activeElement) {
+      cardRef.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
+
   const setSwipeOffset = (nextOffset: number) => {
-    const clamped = Math.max(0, Math.min(ACCOUNT_SWIPE_ACTION_WIDTH, nextOffset));
-    offsetRef.current = clamped;
-    setDragOffset(clamped);
+    const resisted = getAccountSwipeDragOffset(nextOffset, ACCOUNT_SWIPE_ACTION_WIDTH);
+    offsetRef.current = resisted;
+    setDragOffset(resisted);
   };
+
+  function readRenderedOffset(element: HTMLElement) {
+    const transform = window.getComputedStyle(element).transform;
+    if (!transform || transform === "none") return offsetRef.current;
+    const matrix3d = transform.match(/^matrix3d\((.+)\)$/);
+    if (matrix3d) return Number.parseFloat(matrix3d[1].split(",")[12] ?? "0") || 0;
+    const matrix = transform.match(/^matrix\((.+)\)$/);
+    if (matrix) return Number.parseFloat(matrix[1].split(",")[4] ?? "0") || 0;
+    return offsetRef.current;
+  }
+
+  function releasePointerCapture(event: ReactPointerEvent<HTMLAnchorElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLAnchorElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    const currentOffset = dragOffset ?? (open ? ACCOUNT_SWIPE_ACTION_WIDTH : 0);
+    const currentOffset = readRenderedOffset(event.currentTarget);
     offsetRef.current = currentOffset;
-    pointerStart.current = { x: event.clientX, y: event.clientY, offset: currentOffset };
+    pointerStart.current = {
+      x: event.clientX,
+      y: event.clientY,
+      offset: currentOffset,
+      lastX: event.clientX,
+      lastTime: performance.now(),
+      velocity: 0,
+    };
     draggedRef.current = false;
+    setSwipeOffset(currentOffset);
+    setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -239,20 +285,33 @@ function SwipeableAccountCard({
     if (!draggedRef.current && Math.abs(horizontalDistance) < 8) return;
     if (!draggedRef.current && Math.abs(verticalDistance) > Math.abs(horizontalDistance)) {
       pointerStart.current = null;
+      setIsDragging(false);
+      releasePointerCapture(event);
       return;
     }
     draggedRef.current = true;
+    const now = performance.now();
+    const elapsed = Math.max(1, now - start.lastTime);
+    const instantaneousVelocity = ((event.clientX - start.lastX) / elapsed) * 1000;
+    start.velocity = start.velocity * 0.72 + instantaneousVelocity * 0.28;
+    start.lastX = event.clientX;
+    start.lastTime = now;
     setSwipeOffset(start.offset + horizontalDistance);
   }
 
-  function handlePointerEnd(event: ReactPointerEvent<HTMLAnchorElement>) {
+  function handlePointerEnd(event: ReactPointerEvent<HTMLAnchorElement>, cancelled = false) {
     const start = pointerStart.current;
     pointerStart.current = null;
+    releasePointerCapture(event);
+    setIsDragging(false);
     if (!start) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const shouldOpen = offsetRef.current >= ACCOUNT_SWIPE_ACTION_WIDTH / 2;
+    const shouldOpen = cancelled
+      ? open
+      : shouldOpenAccountSwipe({
+          offset: offsetRef.current,
+          velocity: start.velocity,
+          actionWidth: ACCOUNT_SWIPE_ACTION_WIDTH,
+        });
     setDragOffset(null);
     onOpenChange(shouldOpen);
     if (draggedRef.current) {
@@ -265,28 +324,37 @@ function SwipeableAccountCard({
   return (
     <div className="relative overflow-hidden rounded-[14px]" style={{ backgroundColor: swipeActionColor }}>
       <Link
+        ref={actionRef}
         href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)}
         aria-label={`Edit ${account.name}`}
+        aria-hidden={!open}
+        tabIndex={open ? 0 : -1}
         style={{ backgroundColor: swipeActionColor }}
-        className="absolute inset-y-0 left-0 flex w-[88px] flex-col items-center justify-center gap-1 text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2"
+        className={`absolute inset-y-0 left-0 flex min-h-11 w-[88px] flex-col items-center justify-center gap-1 text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 ${open ? "pointer-events-auto" : "pointer-events-none"}`}
       >
         <Pencil aria-hidden="true" className="size-[18px]" />
         <span className="text-xs font-semibold">Edit</span>
       </Link>
       <Link
+        ref={cardRef}
         href={withReturnTo(`/accounts/${account.id}`, currentRoute)}
-        style={{ backgroundColor, transform: `translate3d(${offset}px, 0, 0)` }}
+        aria-label={`Open ${account.name} details. Edit or delete this account from its details.`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
+        onPointerCancel={(event) => handlePointerEnd(event, true)}
         onClick={(event) => {
           if (draggedRef.current || open || dragOffset !== null) {
             event.preventDefault();
             onOpenChange(false);
           }
         }}
-        className={`group relative block w-full touch-pan-y overflow-hidden rounded-[14px] border text-left will-change-transform transition-[filter,transform] duration-200 hover:brightness-[0.985] active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${cardClasses[index % cardClasses.length]}`}
+        className={`group relative block w-full touch-pan-y overflow-hidden rounded-[14px] border text-left will-change-transform transition-[filter,transform] duration-200 hover:brightness-[0.985] active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${isDragging ? "select-none" : ""} ${cardClasses[index % cardClasses.length]}`}
+        style={{
+          backgroundColor,
+          transform: `translate3d(${offset}px, 0, 0)`,
+          transition: isDragging ? "none" : undefined,
+        }}
       >
         <span className="flex min-h-[72px] items-center gap-3 px-4 py-3">
           <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-white/80 bg-white/45 shadow-[0_1px_2px_rgba(23,32,29,0.06)]">
@@ -477,23 +545,21 @@ export default function AccountsPage() {
   return (
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-10 sm:px-5">
-        <StickyPageHeader className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              href={backHref}
-              aria-label="Back"
-              className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-            >
-              <ArrowLeft aria-hidden="true" className="size-5" />
-            </Link>
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="text-[28px] font-semibold tracking-[-0.04em]">
-                Accounts
-              </h1>
-              <GuideIcon href={withReturnTo("/accounts/guide", currentRoute)} label="Accounts" />
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+        <StickyPageHeader className="-mx-4 px-4 pb-3 sm:-mx-5 sm:px-5">
+          <PageHeader
+            leading={
+              <Link
+                href={backHref}
+                aria-label="Back"
+                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              >
+                <ArrowLeft aria-hidden="true" className="size-5" />
+              </Link>
+            }
+            title={<h1 className="text-[28px] font-semibold tracking-[-0.04em]">Accounts</h1>}
+            secondary={<GuideIcon href={withReturnTo("/accounts/guide", currentRoute)} label="Accounts" />}
+            actions={
+              <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               aria-label="Sort and organize accounts"
@@ -509,7 +575,9 @@ export default function AccountsPage() {
             >
               <Plus aria-hidden="true" className="size-5" />
             </Link>
-          </div>
+              </div>
+            }
+          />
         </StickyPageHeader>
         <section
           aria-label="Account balance summary"

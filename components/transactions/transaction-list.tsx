@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createElement, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   ChevronRight,
@@ -135,7 +135,6 @@ function timelineTime(item: TimelineItem) {
 }
 
 export function TransactionList({ limit, searchable = false, period, includeAlerts = false }: TransactionListProps) {
-  const router = useRouter();
   const activityAlerts = useActivityAlerts(includeAlerts);
   const [transactions, setTransactions] = useState<ApiTransaction[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -343,168 +342,151 @@ export function TransactionList({ limit, searchable = false, period, includeAler
               const transactionDescription = transaction.merchantName
                 ? `${transaction.merchantName}${transaction.notes ? ` · ${transaction.notes}` : ""}`
                 : transaction.notes;
-              return (
-                <div
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`Open ${transaction.title || transaction.categoryName || meta.label} transaction`}
-                  onClick={() => router.push(`/transactions/${transaction.id}`)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      router.push(`/transactions/${transaction.id}`);
-                    }
-                  }}
-                  key={`transaction:${transaction.id}`}
-                  className={`group flex min-h-[76px] cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
-                >
-                  <span
-                    className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[10px]"
-                    style={{
-                      backgroundColor: categoryColor,
-                      color: getCategoryForeground(categoryColor),
-                    }}
-                  >
-                    {transaction.categoryName || transaction.splits.length ? (
-                      createElement(CategoryIcon, {
-                        "aria-hidden": true,
-                        className: "size-[18px]",
-                      })
-                    ) : (
-                      <Icon aria-hidden="true" className="size-[18px]" />
-                    )}
+              const transactionName = transaction.title || transaction.categoryName || meta.label;
+              const categoryHref = transaction.categoryId
+                ? withReturnTo(`/categories/${transaction.categoryId}`, getCurrentRoute())
+                : null;
+              const categoryClassName = "flex min-h-11 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-2 text-[0.6875rem] font-medium [background-color:transparent] [border-color:transparent] sm:max-w-32 sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[0.625rem] sm:font-semibold sm:[background-color:var(--category-background)] sm:[border-color:var(--category-border)]";
+              const categoryStyle = {
+                "--category-background": `${categoryColor}88`,
+                "--category-border": `${categoryColor}cc`,
+                color: getCategoryForeground(categoryColor),
+              } as CSSProperties;
+              const categoryContent = transaction.categoryName ? (
+                <>
+                  {createElement(CategoryIcon, {
+                    "aria-hidden": true,
+                    className: "size-3 shrink-0",
+                  })}
+                  <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                    {transaction.categoryName}
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
-                      <h4 className="transaction-list-title-clamp min-w-0 break-words text-[15px] font-semibold leading-5 sm:truncate">
-                        {transaction.title ||
-                          transaction.categoryName ||
-                          meta.label}
-                      </h4>
-                      <p
-                        className={`max-w-full break-words text-[14px] font-semibold leading-5 tabular-nums sm:shrink-0 sm:whitespace-nowrap sm:text-right ${meta.amountClassName}`}
-                      >
-                        {formatAmount(transaction)}
-                      </p>
-                    </div>
-                    <div className="mt-1.5 flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-1.5">
+                </>
+              ) : null;
+              return (
+                <article
+                  key={`transaction:${transaction.id}`}
+                  className={`flex min-w-0 flex-col gap-1 px-4 py-3.5 ${showTransactionDivider ? "border-t border-border" : ""}`}
+                >
+                  <Link
+                    href={`/transactions/${transaction.id}`}
+                    aria-label={`Open ${transactionName} transaction, ${formatAmount(transaction)}`}
+                    className="group flex min-h-11 min-w-0 items-start gap-3 rounded-[10px] p-1 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35"
+                  >
+                    <span
+                      className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[10px]"
+                      style={{
+                        backgroundColor: categoryColor,
+                        color: getCategoryForeground(categoryColor),
+                      }}
+                    >
+                      {transaction.categoryName || transaction.splits.length ? (
+                        createElement(CategoryIcon, {
+                          "aria-hidden": true,
+                          className: "size-[18px]",
+                        })
+                      ) : (
+                        <Icon aria-hidden="true" className="size-[18px]" />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+                        <h4 className="min-w-0 break-words text-[0.9375rem] font-semibold leading-[1.35] [overflow-wrap:anywhere]">
+                          {transactionName}
+                        </h4>
+                        <p
+                          className={`max-w-full break-words text-[0.875rem] font-semibold leading-[1.35] tabular-nums sm:shrink-0 sm:whitespace-nowrap sm:text-right ${meta.amountClassName}`}
+                        >
+                          {formatAmount(transaction)}
+                        </p>
+                      </div>
                       {transactionDescription ? (
-                        <span className="transaction-list-description-clamp min-w-0 break-words leading-4 sm:flex-1 sm:truncate">
+                        <p className="mt-1.5 min-w-0 break-words text-sm leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]">
                           {transactionDescription}
-                        </span>
+                        </p>
                       ) : null}
-                      <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 sm:contents">
-                      {transaction.splits.length ? (
-                        <span className="flex w-fit max-w-full shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
-                          <Layers3 aria-hidden="true" className="size-3 shrink-0" />
-                          {transaction.splits.length} categories
-                        </span>
-                      ) : transaction.categoryName ? (
-                        <span
-                          role="link"
-                          tabIndex={0}
+                    </div>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="mt-1 size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+                    />
+                  </Link>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pl-[3.25rem] text-xs text-muted-foreground">
+                    {transaction.splits.length ? (
+                      <span className="flex min-h-11 w-fit max-w-full shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[0.625rem] font-semibold text-primary">
+                        <Layers3 aria-hidden="true" className="size-3 shrink-0" />
+                        {transaction.splits.length} categories
+                      </span>
+                    ) : categoryContent ? (
+                      categoryHref ? (
+                        <Link
+                          href={categoryHref}
                           aria-label={`Open ${transaction.categoryName} category`}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (transaction.categoryId) router.push(withReturnTo(`/categories/${transaction.categoryId}`, getCurrentRoute()));
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              if (transaction.categoryId) router.push(withReturnTo(`/categories/${transaction.categoryId}`, getCurrentRoute()));
-                            }
-                          }}
-                          className="flex min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-0 text-[11px] font-medium [background-color:transparent] [border-color:transparent] sm:max-w-32 sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[10px] sm:font-semibold sm:[background-color:var(--category-background)] sm:[border-color:var(--category-border)]"
+                          className={`${categoryClassName} hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35`}
+                          style={categoryStyle}
+                        >
+                          {categoryContent}
+                        </Link>
+                      ) : (
+                        <span className={categoryClassName} style={categoryStyle}>
+                          {categoryContent}
+                        </span>
+                      )
+                    ) : null}
+                    {!transaction.splits.length && transaction.categoryName ? (
+                      <span aria-hidden="true" className="text-[0.625rem] text-muted-foreground">·</span>
+                    ) : null}
+                    {(() => {
+                      const accountColor = getAccountBackgroundColor(transaction.accountColor, transaction.accountType);
+                      const accountForeground = getAccountForeground(accountColor, transaction.accountType);
+                      return (
+                        <Link
+                          href={`/accounts/${transaction.accountId}`}
+                          aria-label={`Open ${transaction.accountName} account`}
+                          className="flex min-h-11 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-2 text-[0.6875rem] font-medium text-foreground [background-color:transparent] [border-color:transparent] hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:max-w-[min(11rem,45vw)] sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[0.625rem] sm:font-semibold sm:[background-color:var(--account-background)] sm:[border-color:var(--account-border)]"
                           style={{
-                            "--category-background": `${categoryColor}88`,
-                            "--category-border": `${categoryColor}cc`,
-                            color: getCategoryForeground(categoryColor),
+                            "--account-background": `${accountColor}88`,
+                            "--account-border": `${accountColor}cc`,
+                            color: accountForeground,
                           } as CSSProperties}
                         >
-                          {createElement(CategoryIcon, {
-                            "aria-hidden": true,
-                            className: "size-3 shrink-0",
-                          })}
-                          <span className="truncate">
-                            {transaction.categoryName}
-                          </span>
-                        </span>
-                      ) : null}
-                      {!transaction.splits.length && transaction.categoryName ? (
-                        <span aria-hidden="true" className="text-[10px] text-muted-foreground sm:hidden">·</span>
-                      ) : null}
-                      {(() => {
-                        const accountColor = getAccountBackgroundColor(transaction.accountColor, transaction.accountType);
-                        const accountForeground = getAccountForeground(accountColor, transaction.accountType);
-                        return (
-                      <span
-                        role="link"
-                        tabIndex={0}
-                        aria-label={`Open ${transaction.accountName} account`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          router.push(`/accounts/${transaction.accountId}`);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            router.push(`/accounts/${transaction.accountId}`);
-                          }
-                        }}
-                        className="flex min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-0 text-[11px] font-medium text-foreground [background-color:transparent] [border-color:transparent] sm:max-w-[min(11rem,45vw)] sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[10px] sm:font-semibold sm:[background-color:var(--account-background)] sm:[border-color:var(--account-border)]"
-                        style={{
-                          "--account-background": `${accountColor}88`,
-                          "--account-border": `${accountColor}cc`,
-                          color: accountForeground,
-                        } as CSSProperties}
-                      >
-                        {hasDestinationAccount ? (
-                          <span className="flex min-w-0 items-center gap-1">
-                            <AccountAvatar
-                              icon={sourceAccount.icon}
-                              name={sourceAccount.name}
-                              type={sourceAccount.type}
-                              backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
-                              size={16}
-                            />
-                            <span className="min-w-0 truncate">{compactAccountName(sourceAccount.name)}</span>
-                            <span aria-hidden="true" className="shrink-0 text-[9px] text-muted-foreground">→</span>
-                            <AccountAvatar
-                              icon={destinationAccount.icon}
-                              name={destinationAccount.name}
-                              type={destinationAccount.type}
-                              backgroundColor={getAccountBackgroundColor(destinationAccount.color, destinationAccount.type)}
-                              size={16}
-                            />
-                            <span className="min-w-0 truncate">{compactAccountName(destinationAccount.name)}</span>
-                          </span>
-                        ) : (
-                          <>
-                            <AccountAvatar
-                              icon={sourceAccount.icon}
-                              name={sourceAccount.name}
-                              type={sourceAccount.type}
-                              backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
-                              size={16}
-                            />
-                            <span className="truncate">{secondary}</span>
-                          </>
-                        )}
-                      </span>
-                        );
-                      })()}
-                      </span>
-                    </div>
+                          {hasDestinationAccount ? (
+                            <span className="flex min-w-0 items-center gap-1">
+                              <AccountAvatar
+                                icon={sourceAccount.icon}
+                                name={sourceAccount.name}
+                                type={sourceAccount.type}
+                                backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
+                                size={16}
+                              />
+                              <span className="min-w-0 truncate">{compactAccountName(sourceAccount.name)}</span>
+                              <span aria-hidden="true" className="shrink-0 text-[0.5625rem] text-muted-foreground">→</span>
+                              <AccountAvatar
+                                icon={destinationAccount.icon}
+                                name={destinationAccount.name}
+                                type={destinationAccount.type}
+                                backgroundColor={getAccountBackgroundColor(destinationAccount.color, destinationAccount.type)}
+                                size={16}
+                              />
+                              <span className="min-w-0 truncate">{compactAccountName(destinationAccount.name)}</span>
+                            </span>
+                          ) : (
+                            <>
+                              <AccountAvatar
+                                icon={sourceAccount.icon}
+                                name={sourceAccount.name}
+                                type={sourceAccount.type}
+                                backgroundColor={getAccountBackgroundColor(sourceAccount.color, sourceAccount.type)}
+                                size={16}
+                              />
+                              <span className="truncate">{secondary}</span>
+                            </>
+                          )}
+                        </Link>
+                      );
+                    })()}
                   </div>
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="mt-1 size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
-                  />
-                </div>
+                </article>
               );
             })}
           </div>

@@ -95,5 +95,5 @@ export function FeatureGuide({ config, returnTo }: { config: FeatureGuideConfig;
 }
 
 export function GuideIcon({ href, label }: { href: string; label: string }) {
-  return <Link href={href} aria-label={`${label} guide`} className="flex size-7 shrink-0 items-center justify-center text-primary transition-colors hover:text-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><CircleHelp aria-hidden="true" className="size-[18px]" /></Link>;
+  return <Link href={href} aria-label={`${label} guide`} className="flex size-11 shrink-0 items-center justify-center rounded-[11px] text-primary transition-colors hover:bg-primary-soft hover:text-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><CircleHelp aria-hidden="true" className="size-[18px]" /></Link>;
 }

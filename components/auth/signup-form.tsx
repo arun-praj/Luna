@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Eye, EyeOff, LockKeyhole, Mail, Phone } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, Phone } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearApiCache, setPendingRegistrationToken } from "@/lib/auth-client";
+import { clearApiCache, emailVerificationPath, setPendingRegistrationToken } from "@/lib/auth-client";
+import { waitForRegistrationHandoff } from "@/lib/auth-flow";
 
 export function SignupForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -14,6 +15,7 @@ export function SignupForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const handoffStartedAt = Date.now();
     setIsSubmitting(true);
     setMessage("");
     const form = new FormData(event.currentTarget);
@@ -31,17 +33,23 @@ export function SignupForm() {
       const result = (await response.json()) as {
         error?: string;
         pendingToken?: string;
+        verificationToken?: string;
+        emailVerificationRequired?: boolean;
+        verificationEmailDelivery?: "sent" | "queued" | "failed" | "unavailable";
         user?: {
           emailVerifiedAt?: string | null;
           onboardingCompleted?: boolean;
         };
       };
-      if (!response.ok)
-        throw new Error(result.error ?? "Unable to create account");
-      if (!result.pendingToken) throw new Error("Unable to start email verification");
+      if (!response.ok) throw new Error(result.error ?? "Unable to create account");
+      const verificationToken = result.pendingToken ?? result.verificationToken;
+      if (!verificationToken) throw new Error("Unable to start email verification");
       clearApiCache();
-      setPendingRegistrationToken(result.pendingToken);
-      router.push("/verify-email?next=/onboarding");
+      if (!setPendingRegistrationToken(verificationToken)) {
+        throw new Error("Unable to keep the verification step ready");
+      }
+      await waitForRegistrationHandoff(handoffStartedAt);
+      router.replace(emailVerificationPath("/onboarding", result.verificationEmailDelivery));
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Unable to create account",
@@ -122,7 +130,12 @@ export function SignupForm() {
           disabled={isSubmitting}
           className="min-h-12 w-full rounded-[13px] bg-primary px-5 text-[15px] font-semibold text-primary-foreground shadow-[0_8px_18px_rgb(53_107_104_/_0.15)] transition-[background-color,transform,box-shadow] hover:bg-primary-hover hover:shadow-[0_10px_24px_rgb(53_107_104_/_0.2)] active:translate-y-px focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/20 disabled:cursor-wait disabled:opacity-70"
         >
-          {isSubmitting ? "Creating account…" : "Create account"}
+          {isSubmitting ? (
+            <span className="flex items-center justify-center gap-2" role="status">
+              <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
+              <span>Creating account…</span>
+            </span>
+          ) : "Create account"}
         </button>
       </form>
       <p

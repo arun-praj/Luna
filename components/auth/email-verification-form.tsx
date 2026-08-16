@@ -24,8 +24,14 @@ export function EmailVerificationForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = safeReturnPath(searchParams.get("next"), "/onboarding");
+  const emailDelivery = searchParams.get("emailDelivery");
+  const emailSent = searchParams.get("emailSent");
   const [code, setCode] = useState("");
-  const [message, setMessage] = useState("We’ll keep the code valid for 10 minutes.");
+  const [message, setMessage] = useState(() => {
+    if (emailDelivery === "failed" || emailDelivery === "unavailable" || emailSent === "0") return "We couldn’t send the code yet. Try sending a new code below.";
+    if (emailDelivery === "queued") return "We’re sending your six-digit code now. If it doesn’t arrive, send a new code below.";
+    return "A six-digit code was sent to your inbox. It stays valid for 10 minutes.";
+  });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);

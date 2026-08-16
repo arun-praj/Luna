@@ -5,6 +5,7 @@ import { createElement, useEffect, useState } from "react";
 import { ArrowLeft, CalendarDays, Edit3, Gauge, ReceiptText, Tags, WalletCards } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { PageDataSkeleton } from "@/components/ui/data-skeleton";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { formatCurrencyAmount } from "@/lib/currency";
@@ -120,20 +121,11 @@ export default function BudgetDetailPage({ params }: { params: Promise<{ id: str
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <div className="-mx-4 sm:-mx-5" style={{ backgroundColor: accent }}>
           <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
-                  <ArrowLeft aria-hidden="true" className="size-5" />
-                </Link>
-                <div className="min-w-0">
-                  <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">{budget.name.replace(/ budget$/, "")}</h1>
-                  <p className="mt-0.5 truncate text-xs font-medium capitalize text-muted-foreground">{budget.period} budget</p>
-                </div>
-              </div>
-              <Link href={editHref} aria-label="Edit budget" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
-                <Edit3 aria-hidden="true" className="size-[18px]" />
-              </Link>
-            </div>
+            <PageHeader
+              leading={<Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+              title={<div className="min-w-0"><h1 className="break-words text-[24px] font-semibold tracking-[-0.04em]">{budget.name.replace(/ budget$/, "")}</h1><p className="mt-0.5 break-words text-xs font-medium capitalize text-muted-foreground">{budget.period} budget</p></div>}
+              actions={<Link href={editHref} aria-label="Edit budget" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Edit3 aria-hidden="true" className="size-[18px]" /></Link>}
+            />
           </StickyPageHeader>
           <section aria-label="Budget summary" className="border-y border-black/10 px-4 py-8 text-center text-foreground sm:px-5">
             <div className="mx-auto flex size-12 items-center justify-center rounded-[14px] text-primary" style={{ backgroundColor: "rgba(255,255,255,0.58)" }}>

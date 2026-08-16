@@ -7,6 +7,7 @@ import { ArrowLeft, CalendarDays, Edit3, ReceiptText, Target } from "lucide-reac
 import { GoalActionForm } from "@/components/goals/goal-action-form";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { PageDataSkeleton } from "@/components/ui/data-skeleton";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { getReturnTo } from "@/lib/navigation";
@@ -73,32 +74,11 @@ export default function GoalDetailPage({ params }: { params: Promise<{ id: strin
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <div className="-mx-4 sm:-mx-5" style={{ backgroundColor: heroColor }}>
           <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <Link
-                  href={backHref}
-                  aria-label="Back to goals"
-                  className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                >
-                  <ArrowLeft aria-hidden="true" className="size-5" />
-                </Link>
-                <div className="min-w-0">
-                  <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">
-                    {goal.name}
-                  </h1>
-                  <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
-                    Savings goal
-                  </p>
-                </div>
-              </div>
-              <Link
-                href={`/goals/${goal.id}/edit`}
-                aria-label="Edit goal"
-                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-              >
-                <Edit3 aria-hidden="true" className="size-[18px]" />
-              </Link>
-            </div>
+            <PageHeader
+              leading={<Link href={backHref} aria-label="Back to goals" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+              title={<div className="min-w-0"><h1 className="break-words text-[24px] font-semibold tracking-[-0.04em]">{goal.name}</h1><p className="mt-0.5 break-words text-xs font-medium text-muted-foreground">Savings goal</p></div>}
+              actions={<Link href={`/goals/${goal.id}/edit`} aria-label="Edit goal" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Edit3 aria-hidden="true" className="size-[18px]" /></Link>}
+            />
           </StickyPageHeader>
           <section
             aria-label="Goal progress"

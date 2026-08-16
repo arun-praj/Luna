@@ -6,6 +6,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
+:root {
+  /*
+   * The Add transaction trigger is fixed above the viewport edge. Keep the
+   * final meaningful page content clear of its 56px control, shadow, safe
+   * area, and a small breathing margin on every surface that owns it.
+   */
+  --luna-add-transaction-bottom-offset: calc(1rem + env(safe-area-inset-bottom));
+  --luna-add-transaction-content-clearance: calc(9rem + env(safe-area-inset-bottom));
+}
+
+.luna-add-transaction-content {
+  padding-bottom: var(--luna-add-transaction-content-clearance);
+  scroll-padding-bottom: var(--luna-add-transaction-content-clearance);
+}
+
+.luna-add-transaction-trigger {
+  bottom: var(--luna-add-transaction-bottom-offset);
+}
+
 @keyframes title-error-nudge {
   0% {
     opacity: 0;
@@ -132,7 +151,7 @@
   }
 }
 
-@keyframes profile-route-enter {
+@keyframes luna-route-enter {
   0% {
     opacity: 0;
   }
@@ -142,15 +161,13 @@
   }
 }
 
-@keyframes profile-route-exit {
+@keyframes luna-route-exit {
   0% {
     opacity: 1;
-    transform: translateX(0);
   }
 
   100% {
     opacity: 0;
-    transform: translate3d(0, -4px, 0);
   }
 }
 
@@ -174,36 +191,27 @@
   }
 }
 
-@keyframes profile-picker-enter {
+@keyframes luna-sheet-enter {
   0% {
     opacity: 0;
-    transform: translate3d(0, 24px, 0) scale(0.96);
-  }
-
-  68% {
-    opacity: 1;
-    transform: translate3d(0, -3px, 0) scale(1.008);
-  }
-
-  84% {
-    transform: translate3d(0, 1px, 0) scale(0.998);
+    transform: translate3d(0, 24px, 0);
   }
 
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 }
 
-@keyframes profile-picker-exit {
+@keyframes luna-sheet-exit {
   0% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 
   100% {
     opacity: 0;
-    transform: translate3d(0, 20px, 0) scale(0.965);
+    transform: translate3d(0, 24px, 0);
   }
 }
 
@@ -231,26 +239,17 @@
   }
 }
 
-.profile-route-enter {
-  animation: profile-route-enter 180ms ease-out both;
-  transform-origin: left center;
-}
-
-.profile-route-exit {
-  animation: profile-route-exit 140ms ease-in both;
-  transform-origin: left center;
-  pointer-events: none;
-}
-
+.profile-route-enter,
 .page-route-enter {
-  animation: profile-route-enter 180ms ease-out both;
-  transform-origin: left center;
+  animation: luna-route-enter 180ms ease-out both;
+  will-change: opacity;
 }
 
+.profile-route-exit,
 .page-route-exit {
-  animation: profile-route-exit 140ms ease-in both;
+  animation: luna-route-exit 140ms ease-out both;
   pointer-events: none;
-  transform-origin: left center;
+  will-change: opacity;
 }
 
 body[data-route-transition="return"] .page-route-enter,
@@ -266,35 +265,40 @@ body:has([aria-modal="true"]) {
 }
 
 .drawer-scrim-enter {
-  animation: profile-scrim-enter 260ms ease-out both;
+  animation: profile-scrim-enter 180ms ease-out both;
 }
 
 .drawer-scrim-exit {
-  animation: profile-scrim-exit 320ms ease-in both;
+  animation: profile-scrim-exit 150ms ease-out both;
   pointer-events: none;
 }
 
 .drawer-enter {
-  animation: profile-picker-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: luna-sheet-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .drawer-exit {
-  animation: profile-picker-exit 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: luna-sheet-exit 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
   pointer-events: none;
 }
 
-/* Bottom drawers share one dismiss affordance: swipe the top handle down, or
-   use the red close action at the left edge of the header. */
-[class*="rounded-t-"] > div:first-child:is([aria-hidden="true"], [class*="rounded-full"]) {
-  cursor: grab;
-  touch-action: none;
+/* Explicit opt-in keeps gesture ownership independent from visual classes or copy. */
+[data-luna-bottom-sheet] {
+  overscroll-behavior: contain;
 }
 
-[class*="rounded-t-"] > header > button[aria-label^="Close" i] {
-  order: -1;
-  border-color: color-mix(in srgb, var(--expense) 24%, transparent) !important;
-  background: var(--expense-soft) !important;
-  color: var(--expense) !important;
+[data-luna-bottom-sheet][data-luna-bottom-sheet-settled="true"] {
+  animation: none !important;
+}
+
+[data-luna-bottom-sheet-handle] {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+[data-luna-bottom-sheet-handle]:active {
+  cursor: grabbing;
 }
 
 .transaction-picker-morph {
@@ -302,20 +306,20 @@ body:has([aria-modal="true"]) {
 }
 
 .profile-scrim-enter {
-  animation: profile-scrim-enter 260ms ease-out both;
+  animation: profile-scrim-enter 180ms ease-out both;
 }
 
 .profile-scrim-exit {
-  animation: profile-scrim-exit 320ms ease-in both;
+  animation: profile-scrim-exit 150ms ease-out both;
   pointer-events: none;
 }
 
 .profile-picker-enter {
-  animation: profile-picker-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: luna-sheet-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .profile-picker-exit {
-  animation: profile-picker-exit 320ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: luna-sheet-exit 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
   pointer-events: none;
 }
 
@@ -399,6 +403,31 @@ body:has([aria-modal="true"]) {
   .profile-picker-exit,
   .route-data-reveal {
     animation: none;
+  }
+
+  [data-luna-bottom-sheet] {
+    animation: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .luna-sticky-page-header,
+  .luna-bottom-sheet-backdrop {
+    background-color: var(--background) !important;
+    backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .luna-sticky-page-header,
+  [data-luna-bottom-sheet] {
+    border-color: var(--foreground) !important;
+    box-shadow: none !important;
+  }
+
+  .luna-bottom-sheet-backdrop {
+    background-color: color-mix(in srgb, var(--foreground) 45%, transparent) !important;
+    backdrop-filter: none !important;
   }
 }
 

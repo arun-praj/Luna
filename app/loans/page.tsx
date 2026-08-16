@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, HandCoins, Plus } from "lucide-react";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { GuideIcon } from "@/components/guides/feature-guide";
 import { ListDataSkeleton } from "@/components/ui/data-skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -124,25 +125,13 @@ export default function LoansPage() {
   return (
     <main className="page-route-enter min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12">
-        <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3">
-          <Link
-            href="/profile"
-            className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground">Plan repayments</p>
-            <h1 className="text-[27px] font-semibold">Loans</h1>
-          </div>
-          <GuideIcon href="/loans/guide" label="Loans" />
-          <Link
-            href="/loans/new"
-            className="flex size-11 items-center justify-center rounded-[11px] bg-primary text-primary-foreground"
-            aria-label="Add loan"
-          >
-            <Plus className="size-5" />
-          </Link>
+        <StickyPageHeader className="-mx-4 px-4 pb-3">
+          <PageHeader
+            leading={<Link href="/profile" aria-label="Back to profile" className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+            title={<div className="min-w-0"><p className="text-xs text-muted-foreground">Plan repayments</p><h1 className="text-[27px] font-semibold">Loans</h1></div>}
+            secondary={<GuideIcon href="/loans/guide" label="Loans" />}
+            actions={<Link href="/loans/new" className="flex size-11 items-center justify-center rounded-[11px] bg-primary text-primary-foreground" aria-label="Add loan"><Plus aria-hidden="true" className="size-5" /></Link>}
+          />
         </StickyPageHeader>
         {error ? (
           <p className="mt-4 rounded-[12px] bg-expense-soft p-3 text-sm text-expense">

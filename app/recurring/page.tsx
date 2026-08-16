@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, Check, ChevronDown, CirclePause, CirclePlay, Clock3, Landmark, Pencil, Plus, Repeat2, SkipForward, Target, X } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { GuideIcon } from "@/components/guides/feature-guide";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { Calendar } from "@/components/ui/calendar";
@@ -217,13 +218,13 @@ export default function RecurringPage() {
   return (
     <main className="min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
-        <StickyPageHeader className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link href="/" aria-label="Back to home" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>
-            <div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">Scheduled transactions</p><h1 className="truncate text-[26px] font-semibold tracking-[-0.04em]">Recurring</h1></div>
-            <GuideIcon href="/recurring/guide" label="Recurring" />
-          </div>
-          <button type="button" onClick={openCreate} aria-label="Add recurring transaction" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/25 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Plus aria-hidden="true" className="size-5" /></button>
+        <StickyPageHeader className="-mx-4 px-4 pb-3 sm:-mx-5 sm:px-5">
+          <PageHeader
+            leading={<Link href="/" aria-label="Back to home" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+            title={<div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">Scheduled transactions</p><h1 className="text-[26px] font-semibold tracking-[-0.04em]">Recurring</h1></div>}
+            secondary={<GuideIcon href="/recurring/guide" label="Recurring" />}
+            actions={<button type="button" onClick={openCreate} aria-label="Add recurring transaction" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/25 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Plus aria-hidden="true" className="size-5" /></button>}
+          />
         </StickyPageHeader>
 
         <section aria-labelledby="recurring-overview-heading" className="mt-8 px-1">

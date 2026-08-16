@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { authenticatedFetch } from "@/lib/auth-client";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { PageDataSkeleton } from "@/components/ui/data-skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatCurrencyAmount } from "@/lib/currency";
@@ -212,25 +213,12 @@ export default function LoanDetailPage() {
   return (
     <main className="min-h-dvh bg-background">
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12">
-        <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3">
-          <Link
-            href="/loans"
-            className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground">
-              {loan.direction === "borrowed" ? "I owe" : "Owed to me"}
-            </p>
-            <h1 className="truncate text-[25px] font-semibold">{loan.name}</h1>
-          </div>
-          <Link
-            href={`/loans/${loan.id}/edit`}
-            className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"
-          >
-            <Edit3 className="size-5" />
-          </Link>
+        <StickyPageHeader className="-mx-4 px-4 pb-3">
+          <PageHeader
+            leading={<Link href="/loans" aria-label="Back to loans" className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+            title={<div className="min-w-0"><p className="text-xs text-muted-foreground">{loan.direction === "borrowed" ? "I owe" : "Owed to me"}</p><h1 className="break-words text-[25px] font-semibold">{loan.name}</h1></div>}
+            actions={<Link href={`/loans/${loan.id}/edit`} aria-label="Edit loan" className="flex size-11 items-center justify-center rounded-[11px] border border-border bg-card"><Edit3 aria-hidden="true" className="size-5" /></Link>}
+          />
         </StickyPageHeader>
         {error ? (
           <p className="mt-4 rounded-[12px] bg-expense-soft p-3 text-sm text-expense">

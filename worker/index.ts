@@ -1,4 +1,5 @@
 import handler from "vinext/server/app-router-entry";
+import { runWithExecutionContext } from "vinext/shims/request-context";
 import { runScheduledNotifications } from "@/backend/notifications/scheduler";
 import { runScheduledReports, runScheduledReportTests } from "@/backend/reports/scheduler";
 import { runScheduledRecurringTransactions } from "@/backend/domain/recurring-service";
@@ -54,7 +55,9 @@ const lunaWorker = {
     forwardedHeaders.set("x-request-id", requestId);
 
     try {
-      const response = await handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx);
+      const response = await runWithExecutionContext(ctx, () =>
+        handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx),
+      );
       return withSecurityHeaders(response, requestId, csp);
     } catch (error) {
       console.error(JSON.stringify({

@@ -32,7 +32,7 @@ export function HomeContent() {
   return (
     <>
       <main className="page-route-enter min-h-screen bg-background">
-        <div className="mx-auto w-full max-w-[720px] px-4 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-5">
+        <div className="luna-add-transaction-content mx-auto w-full max-w-[720px] px-4 sm:px-5">
           <header className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:-mx-5 sm:px-5 sm:pt-10">
             <Link
               href="/profile"

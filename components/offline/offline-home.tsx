@@ -234,15 +234,16 @@ function OfflineTransactionComposer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="offline-transaction-heading"
+        data-luna-bottom-sheet="true"
         className={`relative z-10 max-h-[92dvh] w-full max-w-[720px] min-w-0 overflow-x-clip overflow-y-auto rounded-t-[24px] border border-border bg-background px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-20px_70px_rgb(23_32_29_/_0.22)] sm:px-5 ${transition.closing ? "drawer-exit" : "drawer-enter"}`}
       >
-        <span className="mx-auto block h-1.5 w-11 rounded-full bg-border-strong" />
+        <span data-luna-bottom-sheet-handle="true" className="mx-auto block h-1.5 w-11 rounded-full bg-border-strong" />
         <div className="mt-3 flex items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-primary">Saved on this device</p>
             <h2 id="offline-transaction-heading" className="mt-1 text-[24px] font-semibold tracking-[-0.04em]">Add offline transaction</h2>
           </div>
-          <button type="button" onClick={resetAndClose} className="flex size-10 items-center justify-center rounded-[11px] border border-border bg-card" aria-label="Close">
+          <button type="button" data-luna-bottom-sheet-close="true" onClick={resetAndClose} className="flex size-10 items-center justify-center rounded-[11px] border border-border bg-card" aria-label="Close">
             <X aria-hidden="true" className="size-5" />
           </button>
         </div>

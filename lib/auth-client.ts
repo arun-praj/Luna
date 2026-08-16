@@ -26,14 +26,35 @@ const apiRequests = new Map<string, Promise<Response>>();
 
 const publicAuthPaths = new Set(["/login", "/signup", "/forgot-password", "/reset-password", "/verify-email"]);
 
+export function isPublicAuthPath(pathname: string) {
+  return publicAuthPaths.has(pathname.split("?")[0]);
+}
+
+export function isAuthRedirectExemptPath(pathname: string) {
+  return isPublicAuthPath(pathname) || pathname === "/terms" || pathname === "/privacy";
+}
+
+export function shouldApplySessionProbeRedirect(active: boolean, signal: { aborted: boolean }) {
+  return active && !signal.aborted;
+}
+
 export function safeReturnPath(value: string | null | undefined, fallback = "/") {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/api/") || publicAuthPaths.has(value.split("?")[0])) return fallback;
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/api/") || isPublicAuthPath(value)) return fallback;
   return value;
 }
 
 export function loginPathFor(returnTo?: string) {
   const path = safeReturnPath(returnTo ?? (typeof window === "undefined" ? "/" : `${window.location.pathname}${window.location.search}`));
   return `/login?next=${encodeURIComponent(path)}`;
+}
+
+export function emailVerificationPath(
+  returnTo = "/",
+  delivery?: "sent" | "queued" | "failed" | "unavailable",
+) {
+  const params = new URLSearchParams({ next: safeReturnPath(returnTo) });
+  if (delivery) params.set("emailDelivery", delivery);
+  return `/verify-email?${params.toString()}`;
 }
 
 export function notifyAuthExpired() {
@@ -129,7 +150,20 @@ export function clearAccessToken() {
 }
 
 export function setPendingRegistrationToken(token: string) {
-  if (typeof window !== "undefined") window.sessionStorage.setItem(PENDING_REGISTRATION_TOKEN_KEY, token);
+  if (typeof window === "undefined") return false;
+  try {
+    return persistPendingRegistrationToken(window.sessionStorage, token);
+  } catch {
+    return false;
+  }
+}
+
+export function persistPendingRegistrationToken(
+  storage: Pick<Storage, "setItem" | "getItem">,
+  token: string,
+) {
+  storage.setItem(PENDING_REGISTRATION_TOKEN_KEY, token);
+  return storage.getItem(PENDING_REGISTRATION_TOKEN_KEY) === token;
 }
 
 export function getPendingRegistrationToken() {

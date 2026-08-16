@@ -1,4 +1,5 @@
-const ROUTE_EXIT_DURATION_MS = 300;
+// Keep imperative editor exits in lockstep with the shared route-exit CSS.
+const ROUTE_EXIT_DURATION_MS = 140;
 
 export function navigateWithRouteExit(navigate: () => void) {
   const main = document.querySelector("main");

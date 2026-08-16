@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRightLeft, CalendarRange, Check, ChevronDown, ChevronRight, Copy, Gauge, Lightbulb, Plus, Search, Tags, Target, Trash2, WalletCards, X } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { BottomSheet } from "@/components/layout/bottom-sheet";
 import { MoneyEditor } from "@/components/money/money-editor";
 import { ListDataSkeleton } from "@/components/ui/data-skeleton";
 import { LunaLoader } from "@/components/ui/luna-loader";
@@ -77,13 +78,11 @@ function CategoryPicker({ categories, selectedId, search, onSearchChange, onClos
   const query = search.trim().toLocaleLowerCase();
   const filtered = categories.filter((category) => category.name.toLocaleLowerCase().includes(query));
 
-  return createPortal((
-    <div className="drawer-scrim-enter fixed inset-0 z-[80] flex items-end bg-foreground/25 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="budget-category-picker-title" className="drawer-enter flex h-[min(82dvh,640px)] w-full flex-col overflow-hidden rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)]">
+  return (
+    <BottomSheet open onClose={onClose} labelledBy="budget-category-picker-title" className="drawer-enter flex h-[min(82dvh,640px)] w-full flex-col overflow-hidden rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)]" backdropClassName="drawer-scrim-enter z-[80]">
         <div className="mx-auto flex min-h-0 w-full max-w-[480px] flex-1 flex-col">
-          <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-foreground/15" aria-hidden="true" />
           <header className="grid shrink-0 grid-cols-[44px_1fr_44px] items-center">
-            <button type="button" aria-label="Close category picker" onClick={onClose} className="flex size-11 items-center justify-center rounded-[10px] text-expense hover:bg-expense-soft">
+            <button type="button" data-luna-bottom-sheet-close="true" aria-label="Close category picker" onClick={onClose} className="flex size-11 items-center justify-center rounded-[10px] text-expense hover:bg-expense-soft">
               <X aria-hidden="true" className="size-5" />
             </button>
             <h2 id="budget-category-picker-title" className="text-center text-[17px] font-semibold">Choose category</h2>
@@ -110,9 +109,8 @@ function CategoryPicker({ categories, selectedId, search, onSearchChange, onClos
           </div>
           {!filtered.length ? <p className="py-8 text-center text-sm text-muted-foreground">No matching expense categories.</p> : null}
         </div>
-      </section>
-    </div>
-  ), document.body);
+    </BottomSheet>
+  );
 }
 
 function PreviousBudgetDrawer({ period, currency, budgets, periodStart, periodEnd, loading, copying, error, onClose, onCopy }: {
@@ -131,11 +129,11 @@ function PreviousBudgetDrawer({ period, currency, budgets, periodStart, periodEn
   const periodLabel = PERIODS.find((item) => item.value === period)?.label ?? period;
   return createPortal((
     <div className="drawer-scrim-enter fixed inset-0 z-[80] flex items-end bg-foreground/25 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="previous-budget-title" className="drawer-enter flex h-[min(78dvh,620px)] w-full flex-col overflow-hidden rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)]">
+      <section role="dialog" aria-modal="true" aria-labelledby="previous-budget-title" data-luna-bottom-sheet="true" className="drawer-enter flex h-[min(78dvh,620px)] w-full flex-col overflow-hidden rounded-t-[18px] border-t border-border bg-background px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_40px_rgb(23_32_29_/_0.14)]">
         <div className="mx-auto flex min-h-0 w-full max-w-[520px] flex-1 flex-col">
-          <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-foreground/15" aria-hidden="true" />
+          <div data-luna-bottom-sheet-handle="true" className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-foreground/15" aria-hidden="true" />
           <header className="grid shrink-0 grid-cols-[44px_1fr_44px] items-center">
-            <button type="button" aria-label="Close previous budget" onClick={onClose} className="flex size-11 items-center justify-center rounded-[10px] text-expense hover:bg-expense-soft"><X aria-hidden="true" className="size-5" /></button>
+            <button type="button" data-luna-bottom-sheet-close="true" aria-label="Close previous budget" onClick={onClose} className="flex size-11 items-center justify-center rounded-[10px] text-expense hover:bg-expense-soft"><X aria-hidden="true" className="size-5" /></button>
             <h2 id="previous-budget-title" className="text-center text-[17px] font-semibold">Previous {periodLabel.toLowerCase()} plan</h2>
             <span />
           </header>

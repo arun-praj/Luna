@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { loginPathFor, refreshSessionIfNeeded, safeReturnPath } from "@/lib/auth-client";
+import { isAuthRedirectExemptPath, loginPathFor, refreshSessionIfNeeded, safeReturnPath } from "@/lib/auth-client";
 
 export function AuthRedirectListener() {
   const pathname = usePathname();
@@ -10,7 +10,7 @@ export function AuthRedirectListener() {
 
   useEffect(() => {
     function handleAuthExpired(event: Event) {
-      if (["/login", "/signup", "/forgot-password", "/reset-password", "/terms", "/privacy"].includes(pathname)) return;
+      if (isAuthRedirectExemptPath(pathname)) return;
       const returnTo = (event as CustomEvent<{ returnTo?: string }>).detail?.returnTo;
       router.replace(loginPathFor(safeReturnPath(returnTo, pathname)));
     }
@@ -19,7 +19,7 @@ export function AuthRedirectListener() {
   }, [pathname, router]);
 
   useEffect(() => {
-    if (["/login", "/signup", "/forgot-password", "/reset-password", "/terms", "/privacy"].includes(pathname)) return;
+    if (isAuthRedirectExemptPath(pathname)) return;
 
     const refreshIfNeeded = () => {
       if (document.visibilityState === "visible") void refreshSessionIfNeeded();

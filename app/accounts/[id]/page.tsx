@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
 import { DatePicker, type AppliedPeriod } from "@/components/home/date-picker";
 import { authenticatedFetch } from "@/lib/auth-client";
@@ -258,33 +259,11 @@ export default function AccountActivityPage({
       <div className="mx-auto w-full max-w-[720px] px-4 pb-28 sm:px-5">
         <div className="-mx-4 sm:-mx-5" style={{ backgroundColor: accountAccent }}>
           <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <Link
-                  href={backHref}
-                  aria-label="Back"
-                  className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                >
-                  <ArrowLeft aria-hidden="true" className="size-5" />
-                </Link>
-                <div className="min-w-0">
-                  <h1 className="truncate text-[24px] font-semibold tracking-[-0.04em]">
-                    {account.name}
-                  </h1>
-                  <p className="mt-0.5 truncate text-xs font-medium text-muted-foreground">
-                    {typeLabels[account.type]}
-                    {account.isDefault ? " · Default" : ""}
-                  </p>
-                </div>
-              </div>
-              <Link
-                href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)}
-                aria-label="Edit account"
-                className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-              >
-                <Edit3 aria-hidden="true" className="size-[18px]" />
-              </Link>
-            </div>
+            <PageHeader
+              leading={<Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
+              title={<div className="min-w-0"><h1 className="break-words text-[24px] font-semibold tracking-[-0.04em]">{account.name}</h1><p className="mt-0.5 break-words text-xs font-medium text-muted-foreground">{typeLabels[account.type]}{account.isDefault ? " · Default" : ""}</p></div>}
+              actions={<Link href={withReturnTo(`/accounts/${account.id}/edit`, currentRoute)} aria-label="Edit account" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Edit3 aria-hidden="true" className="size-[18px]" /></Link>}
+            />
           </StickyPageHeader>
           <section
             aria-label="Current account balance"

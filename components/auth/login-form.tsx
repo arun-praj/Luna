@@ -5,7 +5,7 @@ import { AlertCircle, Eye, EyeOff, Info, LoaderCircle, LockKeyhole, Mail } from 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PublicUserProfile } from "@/backend/auth/profile";
-import { authenticatedFetch, clearApiCache, primeApiCache, safeReturnPath, setAccessToken, setPendingRegistrationToken } from "@/lib/auth-client";
+import { authenticatedFetch, clearApiCache, emailVerificationPath, primeApiCache, safeReturnPath, setAccessToken, setPendingRegistrationToken, shouldApplySessionProbeRedirect } from "@/lib/auth-client";
 
 export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -25,7 +25,9 @@ export function LoginForm() {
       .then(async (response) => {
         if (!response.ok) return;
         const result = (await response.json()) as { user?: { onboardingCompleted?: boolean; emailVerifiedAt?: string | null } };
-        if (active) router.replace(result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`);
+        if (shouldApplySessionProbeRedirect(active, controller.signal)) {
+          router.replace(result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -55,7 +57,7 @@ export function LoginForm() {
         }),
       });
       const responseText = await response.text();
-      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string; verificationToken?: string; emailVerificationRequired?: boolean; user?: PublicUserProfile } = {};
+      let result: { accessToken?: string; error?: string; twoFactorRequired?: boolean; challengeToken?: string; verificationToken?: string; emailVerificationRequired?: boolean; verificationEmailSent?: boolean; verificationEmailDelivery?: "sent" | "queued" | "failed" | "unavailable"; user?: PublicUserProfile } = {};
       try {
         result = responseText.trim()
             ? (JSON.parse(responseText) as {
@@ -79,10 +81,12 @@ export function LoginForm() {
         return;
       }
       if (result.emailVerificationRequired && result.verificationToken) {
-        setPendingRegistrationToken(result.verificationToken);
+        if (!setPendingRegistrationToken(result.verificationToken)) {
+          throw new Error("Unable to keep the verification step ready.");
+        }
         setMessage("Please verify your email before signing in.");
         setMessageTone("info");
-        router.push(`/verify-email?next=${encodeURIComponent(returnPath)}`);
+        router.replace(emailVerificationPath(returnPath, result.verificationEmailDelivery));
         return;
       }
       if (!result.accessToken)

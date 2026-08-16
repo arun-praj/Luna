@@ -1,104 +1,115 @@
 "use client";
 
 import { useEffect } from "react";
+import {
+  animateBottomSheet,
+  getSheetDragOffset,
+  setBottomSheetPosition,
+  shouldDismissSheet,
+  stopBottomSheetAnimation,
+} from "@/components/layout/bottom-sheet-motion";
 
-const HANDLE_HEIGHT = 36;
-const MIN_FLING_DISTANCE = 28;
-const DISMISS_DISTANCE = 88;
-const DISMISS_VELOCITY = 0.55;
-
+type Position = { y: number; time: number };
 type DragState = {
   pointerId: number;
   sheet: HTMLElement;
+  handle: HTMLElement;
   startY: number;
-  lastY: number;
-  lastTime: number;
+  startOffset: number;
+  sheetHeight: number;
+  history: Position[];
 };
 
-function findBottomDrawer(target: EventTarget | null, clientY: number) {
+function findOptedInSheet(target: EventTarget | null) {
   if (!(target instanceof Element)) return null;
-  const sheet = target.closest<HTMLElement>('[class*="rounded-t-"]');
-  if (!sheet) return null;
-  const rect = sheet.getBoundingClientRect();
-  if (rect.bottom < window.innerHeight - 4 || clientY > rect.top + HANDLE_HEIGHT) return null;
-  return sheet;
+  const handle = target.closest<HTMLElement>("[data-luna-bottom-sheet-handle]");
+  const sheet = handle?.closest<HTMLElement>("[data-luna-bottom-sheet]");
+  if (!handle || !sheet) return null;
+  return { handle, sheet };
 }
 
-function closeDrawer(sheet: HTMLElement) {
-  const closeButton = sheet.querySelector<HTMLButtonElement>('button[aria-label^="Close" i]');
-  if (closeButton) {
-    closeButton.click();
+function releasePointerCapture(handle: HTMLElement, pointerId: number) {
+  if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+}
+
+function dismissSheet(sheet: HTMLElement) {
+  const closeTarget = sheet.querySelector<HTMLElement>("[data-luna-bottom-sheet-close]");
+  if (closeTarget) {
+    closeTarget.click();
     return;
   }
-  const backdrop = sheet.parentElement;
-  if (backdrop instanceof HTMLElement) backdrop.click();
+  sheet.dispatchEvent(new CustomEvent("luna:bottom-sheet-dismiss", { bubbles: true }));
 }
 
 export function DrawerInteractions() {
   useEffect(() => {
     let drag: DragState | null = null;
-    let resetTimer: number | null = null;
 
-    function clearSheetStyle(sheet: HTMLElement) {
-      sheet.style.removeProperty("transition");
-      sheet.style.removeProperty("transform");
-      sheet.style.removeProperty("will-change");
-    }
-
-    function onPointerDown(event: PointerEvent) {
+    const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === "mouse" && event.button !== 0) return;
-      const sheet = findBottomDrawer(event.target, event.clientY);
-      if (!sheet) return;
-      if (resetTimer !== null) window.clearTimeout(resetTimer);
+      const match = findOptedInSheet(event.target);
+      if (!match) return;
+
+      const { handle, sheet } = match;
+      const startOffset = stopBottomSheetAnimation(sheet);
+      sheet.dataset.lunaBottomSheetSettled = "true";
+      sheet.style.willChange = "transform, opacity";
+      try {
+        handle.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is not available in a few embedded webviews; window listeners still continue the gesture.
+      }
+      event.preventDefault();
       drag = {
         pointerId: event.pointerId,
         sheet,
+        handle,
         startY: event.clientY,
-        lastY: event.clientY,
-        lastTime: event.timeStamp,
+        startOffset,
+        sheetHeight: Math.max(1, sheet.getBoundingClientRect().height),
+        history: [{ y: event.clientY, time: event.timeStamp }],
       };
-      sheet.style.willChange = "transform";
-      sheet.style.transition = "none";
-    }
+    };
 
-    function onPointerMove(event: PointerEvent) {
+    const onPointerMove = (event: PointerEvent) => {
       if (!drag || event.pointerId !== drag.pointerId) return;
-      const distance = Math.max(0, event.clientY - drag.startY);
-      if (distance > 0) event.preventDefault();
-      drag.sheet.style.transform = `translate3d(0, ${distance}px, 0)`;
-      drag.lastY = event.clientY;
-      drag.lastTime = event.timeStamp;
-    }
+      const rawOffset = drag.startOffset + event.clientY - drag.startY;
+      const offset = getSheetDragOffset(rawOffset, drag.sheetHeight);
+      setBottomSheetPosition(drag.sheet, offset, drag.sheetHeight);
+      drag.history.push({ y: event.clientY, time: event.timeStamp });
+      if (drag.history.length > 6) drag.history.shift();
+      event.preventDefault();
+    };
 
-    function finishDrag(event: PointerEvent) {
+    const finishDrag = (event: PointerEvent) => {
       if (!drag || event.pointerId !== drag.pointerId) return;
       const current = drag;
       drag = null;
-      const distance = Math.max(0, event.clientY - current.startY);
-      const elapsed = Math.max(1, event.timeStamp - current.lastTime);
-      const velocity = Math.max(0, event.clientY - current.lastY) / elapsed;
-      const shouldDismiss = distance >= DISMISS_DISTANCE || (distance >= MIN_FLING_DISTANCE && velocity >= DISMISS_VELOCITY);
+      const last = current.history[current.history.length - 1] ?? { y: event.clientY, time: event.timeStamp };
+      const first = current.history[Math.max(0, current.history.length - 5)] ?? last;
+      const elapsedSeconds = Math.max(0.001, (last.time - first.time) / 1000);
+      const velocity = (last.y - first.y) / elapsedSeconds;
+      const rawOffset = current.startOffset + event.clientY - current.startY;
+      const offset = getSheetDragOffset(rawOffset, current.sheetHeight);
+      const dismiss = event.type !== "pointercancel" && shouldDismissSheet({ offset, velocity, sheetHeight: current.sheetHeight });
 
-      if (shouldDismiss) {
-        clearSheetStyle(current.sheet);
-        closeDrawer(current.sheet);
-        return;
+      releasePointerCapture(current.handle, current.pointerId);
+      if (dismiss) {
+        animateBottomSheet(current.sheet, current.sheetHeight, {
+          initialVelocity: Math.max(0, velocity),
+          momentum: velocity >= 700,
+          onComplete: () => dismissSheet(current.sheet),
+        });
+      } else {
+        animateBottomSheet(current.sheet, 0, { initialVelocity: velocity });
       }
-
-      current.sheet.style.transition = "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)";
-      current.sheet.style.transform = "translate3d(0, 0, 0)";
-      resetTimer = window.setTimeout(() => {
-        clearSheetStyle(current.sheet);
-        resetTimer = null;
-      }, 190);
-    }
+    };
 
     window.addEventListener("pointerdown", onPointerDown, { capture: true });
     window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
     window.addEventListener("pointerup", finishDrag, { capture: true });
     window.addEventListener("pointercancel", finishDrag, { capture: true });
     return () => {
-      if (resetTimer !== null) window.clearTimeout(resetTimer);
       window.removeEventListener("pointerdown", onPointerDown, { capture: true });
       window.removeEventListener("pointermove", onPointerMove, { capture: true });
       window.removeEventListener("pointerup", finishDrag, { capture: true });

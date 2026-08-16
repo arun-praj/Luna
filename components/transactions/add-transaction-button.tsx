@@ -231,7 +231,7 @@ export function AddTransactionButton() {
       {balanceFlowError ? <button type="button" onClick={() => setBalanceFlowError("")} className="fixed bottom-24 left-1/2 z-[80] -translate-x-1/2 rounded-[11px] bg-expense px-4 py-3 text-xs font-semibold text-white shadow-lg" role="alert">{balanceFlowError}</button> : null}
       <VerifyBalanceEditor account={selectedBalanceAccount} accounts={balanceAccounts} open={balanceEditorOpen} onAccountChange={(account) => setSelectedBalanceAccount(balanceAccounts.find((item) => item.id === account.id) ?? null)} onClose={() => setBalanceEditorOpen(false)} onSaved={(account) => { setSelectedBalanceAccount((current) => current ? { ...current, ...account } : current); setBalanceEditorOpen(false); notifyTransactionsChanged(); }} />
 
-      <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-50 size-14 sm:right-[max(1.25rem,calc((100vw-720px)/2+1.25rem))]">
+      <div className="luna-add-transaction-trigger fixed right-4 z-50 size-14 sm:right-[max(1.25rem,calc((100vw-720px)/2+1.25rem))]">
         <button
           ref={triggerRef}
           type="button"

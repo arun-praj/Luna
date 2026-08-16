@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/backend/db/client";
 import { pendingRegistrations, users } from "@/backend/db/schema";
-import { createPendingRegistrationToken } from "@/backend/auth/tokens";
+import { createEmailVerificationToken, createPendingRegistrationToken } from "@/backend/auth/tokens";
 import { errorResponse } from "@/backend/auth/http";
-import { hashPassword } from "@/backend/auth/password";
+import { hashPassword, verifyPassword } from "@/backend/auth/password";
 import { signupInput } from "@/backend/auth/validation";
-import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/email";
 import { newVerificationCode, pendingRegistrationCodeHash, pendingRegistrationExpiry, removeExpiredPendingRegistrations, PENDING_REGISTRATION_MINUTES } from "@/backend/auth/pending-registration";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
+import { deliverVerificationEmail, issueUserEmailVerification } from "@/backend/auth/verification-delivery";
+import { verificationEmailResponse } from "@/backend/auth/email-delivery-policy";
+import { canRecoverUnverifiedSignup } from "@/backend/auth/signup-recovery";
 
 export const runtime = "nodejs";
 
@@ -23,12 +25,43 @@ export async function POST(request: Request) {
   const now = new Date();
   await removeExpiredPendingRegistrations(now);
   const [existingUser, existingPending] = await Promise.all([
-    db.select({ id: users.id }).from(users).where(eq(users.email, parsed.data.email)).limit(1),
-    db.select({ id: pendingRegistrations.id }).from(pendingRegistrations).where(and(eq(pendingRegistrations.email, parsed.data.email), gt(pendingRegistrations.verificationExpiresAt, now.toISOString()))).limit(1),
+    db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1),
+    db.select().from(pendingRegistrations).where(and(eq(pendingRegistrations.email, parsed.data.email), gt(pendingRegistrations.verificationExpiresAt, now.toISOString()))).limit(1),
   ]);
-  // Keep account existence and pending-registration state intentionally
-  // indistinguishable to callers. No normal session is issued here.
-  if (existingUser.length || existingPending.length) return errorResponse("Unable to create account with those details", 409);
+
+  const [user] = existingUser;
+  if (user) {
+    // A correctly-authenticated but unverified account can recover through
+    // the same OTP screen. Verified accounts and incorrect passwords retain
+    // the generic duplicate response.
+    if (canRecoverUnverifiedSignup(user, await verifyPassword(parsed.data.password, user.passwordHash))) {
+      const verificationLimit = await checkRateLimit(request, "email-verification", { limit: 5, windowMs: 15 * 60 * 1000 }, user.id);
+      if (!verificationLimit.allowed) return NextResponse.json({ error: "Too many verification requests. Try again later." }, { status: 429, headers: rateLimitHeaders(verificationLimit.retryAfterSeconds) });
+      const verification = await issueUserEmailVerification({ id: user.id, email: user.email });
+      return NextResponse.json({ emailVerificationRequired: true, verificationToken: await createEmailVerificationToken(user.id), ...verificationEmailResponse(verification.delivery), message: "Please verify your email before signing in." }, { status: 202 });
+    }
+    return errorResponse("Unable to create account with those details", 409);
+  }
+
+  const [pendingExisting] = existingPending;
+  if (pendingExisting) {
+    if (!(await verifyPassword(parsed.data.password, pendingExisting.passwordHash))) return errorResponse("Unable to create account with those details", 409);
+    const pendingVerificationLimit = await checkRateLimit(request, "pending-email-verification", { limit: 5, windowMs: 15 * 60 * 1000 }, pendingExisting.id);
+    if (!pendingVerificationLimit.allowed) return NextResponse.json({ error: "Too many verification requests. Try again later." }, { status: 429, headers: rateLimitHeaders(pendingVerificationLimit.retryAfterSeconds) });
+    const code = newVerificationCode();
+    const timestamp = now.toISOString();
+    const [updatedPending] = await db.update(pendingRegistrations).set({
+      verificationCodeHash: pendingRegistrationCodeHash(pendingExisting.id, code),
+      verificationAttemptCount: 0,
+      verificationExpiresAt: pendingRegistrationExpiry(now),
+      verificationClaimedAt: null,
+      verificationClaimId: null,
+      updatedAt: timestamp,
+    }).where(and(eq(pendingRegistrations.id, pendingExisting.id), isNull(pendingRegistrations.verificationClaimId))).returning({ id: pendingRegistrations.id, email: pendingRegistrations.email });
+    if (!updatedPending) return errorResponse("Unable to create account with those details", 409);
+    const delivery = await deliverVerificationEmail({ to: updatedPending.email, code, expiresMinutes: PENDING_REGISTRATION_MINUTES });
+    return NextResponse.json({ emailVerificationRequired: true, pendingToken: await createPendingRegistrationToken(updatedPending.id), ...verificationEmailResponse(delivery), message: "Please verify your email before signing in." }, { status: 202 });
+  }
 
   const id = randomUUID();
   const code = newVerificationCode();
@@ -47,18 +80,12 @@ export async function POST(request: Request) {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
-  await db.insert(pendingRegistrations).values(pending);
-
-  let verificationEmailSent = false;
-  if (isSmtpConfigured()) {
-    try {
-      await sendEmailVerificationEmail({ to: pending.email, code, expiresMinutes: PENDING_REGISTRATION_MINUTES });
-      verificationEmailSent = true;
-    } catch {
-      // Keep the pending record. It contains only a password hash and a
-      // hashed code; the user may retry delivery without creating duplicates.
-    }
+  try {
+    await db.insert(pendingRegistrations).values(pending);
+  } catch {
+    return errorResponse("Unable to create account with those details", 409);
   }
 
-  return NextResponse.json({ pendingToken: await createPendingRegistrationToken(id), emailVerificationRequired: true, verificationEmailSent }, { status: 201 });
+  const delivery = await deliverVerificationEmail({ to: pending.email, code, expiresMinutes: PENDING_REGISTRATION_MINUTES });
+  return NextResponse.json({ pendingToken: await createPendingRegistrationToken(id), emailVerificationRequired: true, ...verificationEmailResponse(delivery) }, { status: 201 });
 }
