@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createElement, useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   ChevronRight,
   Layers3,
@@ -340,6 +340,9 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                     type: transaction.destinationAccountType,
                     color: transaction.destinationAccountColor,
                   };
+              const transactionDescription = transaction.merchantName
+                ? `${transaction.merchantName}${transaction.notes ? ` · ${transaction.notes}` : ""}`
+                : transaction.notes;
               return (
                 <div
                   role="link"
@@ -353,10 +356,10 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                     }
                   }}
                   key={`transaction:${transaction.id}`}
-                  className={`group flex min-h-[76px] cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
+                  className={`group flex min-h-[76px] cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
                 >
                   <span
-                    className="flex size-10 shrink-0 items-center justify-center rounded-[10px]"
+                    className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[10px]"
                     style={{
                       backgroundColor: categoryColor,
                       color: getCategoryForeground(categoryColor),
@@ -372,28 +375,27 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <h4 className="truncate text-[15px] font-semibold">
+                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+                      <h4 className="transaction-list-title-clamp min-w-0 break-words text-[15px] font-semibold leading-5 sm:truncate">
                         {transaction.title ||
                           transaction.categoryName ||
                           meta.label}
                       </h4>
                       <p
-                        className={`shrink-0 text-[14px] font-semibold tabular-nums ${meta.amountClassName}`}
+                        className={`max-w-full break-words text-[14px] font-semibold leading-5 tabular-nums sm:shrink-0 sm:whitespace-nowrap sm:text-right ${meta.amountClassName}`}
                       >
                         {formatAmount(transaction)}
                       </p>
                     </div>
-                    <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      {transaction.merchantName || transaction.notes ? (
-                        <span className="min-w-0 flex-1 truncate">
-                          {transaction.merchantName ? `${transaction.merchantName}${transaction.notes ? ` · ${transaction.notes}` : ""}` : transaction.notes}
+                    <div className="mt-1.5 flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-1.5">
+                      {transactionDescription ? (
+                        <span className="transaction-list-description-clamp min-w-0 break-words leading-4 sm:flex-1 sm:truncate">
+                          {transactionDescription}
                         </span>
-                      ) : (
-                        <span className="min-w-0 flex-1" />
-                      )}
+                      ) : null}
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 sm:contents">
                       {transaction.splits.length ? (
-                        <span className="flex max-w-32 shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
+                        <span className="flex w-fit max-w-full shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
                           <Layers3 aria-hidden="true" className="size-3 shrink-0" />
                           {transaction.splits.length} categories
                         </span>
@@ -414,12 +416,12 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                               if (transaction.categoryId) router.push(withReturnTo(`/categories/${transaction.categoryId}`, getCurrentRoute()));
                             }
                           }}
-                          className="flex max-w-32 shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold"
+                          className="flex min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-0 text-[11px] font-medium [background-color:transparent] [border-color:transparent] sm:max-w-32 sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[10px] sm:font-semibold sm:[background-color:var(--category-background)] sm:[border-color:var(--category-border)]"
                           style={{
-                            backgroundColor: `${categoryColor}88`,
-                            borderColor: `${categoryColor}cc`,
+                            "--category-background": `${categoryColor}88`,
+                            "--category-border": `${categoryColor}cc`,
                             color: getCategoryForeground(categoryColor),
-                          }}
+                          } as CSSProperties}
                         >
                           {createElement(CategoryIcon, {
                             "aria-hidden": true,
@@ -429,6 +431,9 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                             {transaction.categoryName}
                           </span>
                         </span>
+                      ) : null}
+                      {!transaction.splits.length && transaction.categoryName ? (
+                        <span aria-hidden="true" className="text-[10px] text-muted-foreground sm:hidden">·</span>
                       ) : null}
                       {(() => {
                         const accountColor = getAccountBackgroundColor(transaction.accountColor, transaction.accountType);
@@ -450,12 +455,12 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                             router.push(`/accounts/${transaction.accountId}`);
                           }
                         }}
-                        className="flex max-w-[min(11rem,45vw)] shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold text-foreground"
+                        className="flex min-w-0 max-w-full shrink-0 items-center gap-1 rounded-none border-0 px-0 py-0 text-[11px] font-medium text-foreground [background-color:transparent] [border-color:transparent] sm:max-w-[min(11rem,45vw)] sm:rounded-full sm:border sm:px-2 sm:py-1 sm:text-[10px] sm:font-semibold sm:[background-color:var(--account-background)] sm:[border-color:var(--account-border)]"
                         style={{
-                          backgroundColor: `${accountColor}88`,
-                          borderColor: `${accountColor}cc`,
+                          "--account-background": `${accountColor}88`,
+                          "--account-border": `${accountColor}cc`,
                           color: accountForeground,
-                        }}
+                        } as CSSProperties}
                       >
                         {hasDestinationAccount ? (
                           <span className="flex min-w-0 items-center gap-1">
@@ -492,12 +497,13 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                       </span>
                         );
                       })()}
-                      <ChevronRight
-                        aria-hidden="true"
-                        className="size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
-                      />
+                      </span>
                     </div>
                   </div>
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="mt-1 size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+                  />
                 </div>
               );
             })}

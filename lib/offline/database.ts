@@ -23,6 +23,7 @@ import type {
 } from "@/lib/offline/types";
 
 export const ACTIVE_OFFLINE_USER_KEY = "cocomelon.offline-active-user";
+export const PENDING_OFFLINE_CHANGES_KEY = "cocomelon.offline-pending-changes";
 export const OFFLINE_DATA_CHANGED_EVENT = "cocomelon:offline-data-changed";
 const OFFLINE_DATABASE_NAME = "cocomelon_offline_v1";
 
@@ -292,6 +293,32 @@ export function notifyOfflineDataChanged() {
   window.dispatchEvent(new CustomEvent(OFFLINE_DATA_CHANGED_EVENT));
 }
 
+export function markOfflineChangesPending() {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PENDING_OFFLINE_CHANGES_KEY, "1");
+}
+
+export function clearOfflineChangesPending() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(PENDING_OFFLINE_CHANGES_KEY);
+}
+
+export function hasPendingOfflineChangesHint() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(PENDING_OFFLINE_CHANGES_KEY) === "1";
+}
+
+export async function hasPendingOfflineChanges() {
+  const userId = getActiveOfflineUserId();
+  if (!userId) return false;
+  const database = await getOfflineDatabase();
+  const [transactions, budgetMutations] = await Promise.all([
+    database.transactions.find({ selector: { userId, syncStatus: { $in: ["pending", "failed"] } } }).exec(),
+    database.budgetMutations.find({ selector: { userId, status: { $in: ["pending", "failed"] } } }).exec(),
+  ]);
+  return transactions.length > 0 || budgetMutations.length > 0;
+}
+
 export function getOfflineDatabase() {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("The offline database is only available in the browser."));
@@ -361,6 +388,7 @@ export async function clearOfflineDatabase() {
   if (typeof window === "undefined") return;
 
   setActiveOfflineUserId(null);
+  clearOfflineChangesPending();
   const currentDatabase = databasePromise;
   databasePromise = null;
 

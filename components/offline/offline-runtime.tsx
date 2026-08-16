@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 import { ONLINE_DATA_CHANGED_EVENT } from "@/lib/auth-client";
 
@@ -16,6 +16,7 @@ const AUTH_PATHS = new Set([
   "/privacy",
 ]);
 const RETURN_PATH_KEY = "cocomelon.offline-return-path";
+const RECONNECT_RETRY_DELAY_MS = 5_000;
 
 type RouteCheckOptions = {
   redirectIfOffline?: boolean;
@@ -24,18 +25,25 @@ type RouteCheckOptions = {
 
 export function OfflineRuntime() {
   const pathname = usePathname();
-  const router = useRouter();
   const running = useRef<Promise<boolean> | null>(null);
   const backgroundReconciliation = useRef<Promise<boolean> | null>(null);
   const reconciliationTimer = useRef<number | null>(null);
   const reconciliationIdleCallback = useRef<number | null>(null);
   const pathnameRef = useRef(pathname);
+  const scheduleReconciliationRef = useRef<(delayMs: number, routeAfterSuccess: boolean) => void>(() => undefined);
 
   useEffect(() => {
     pathnameRef.current = pathname;
   }, [pathname]);
 
-  const scheduleReconciliation = useCallback((delayMs = 8_000) => {
+  const leaveOffline = useCallback(() => {
+    const savedPath = window.sessionStorage.getItem(RETURN_PATH_KEY);
+    const returnPath = savedPath && savedPath.startsWith("/") && !savedPath.startsWith("//") ? savedPath : "/";
+    window.sessionStorage.removeItem(RETURN_PATH_KEY);
+    window.location.replace(returnPath);
+  }, []);
+
+  const scheduleReconciliation = useCallback((delayMs = 8_000, routeAfterSuccess = false) => {
     if (
       backgroundReconciliation.current ||
       reconciliationTimer.current !== null ||
@@ -50,10 +58,16 @@ export function OfflineRuntime() {
         requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       };
       const reconcile = () => {
+        reconciliationTimer.current = null;
         reconciliationIdleCallback.current = null;
         const task = import("@/lib/offline/sync")
           .then(({ reconcileOfflineData }) => reconcileOfflineData())
           .catch(() => false)
+          .then((success) => {
+            if (success && routeAfterSuccess && pathnameRef.current === "/offline") leaveOffline();
+            if (!success) scheduleReconciliationRef.current(RECONNECT_RETRY_DELAY_MS, routeAfterSuccess);
+            return success;
+          })
           .finally(() => {
             backgroundReconciliation.current = null;
           });
@@ -68,7 +82,11 @@ export function OfflineRuntime() {
     };
 
     reconciliationTimer.current = window.setTimeout(begin, delayMs);
-  }, []);
+  }, [leaveOffline]);
+
+  useEffect(() => {
+    scheduleReconciliationRef.current = scheduleReconciliation;
+  }, [scheduleReconciliation]);
 
   const checkAndRoute = useCallback(async ({
     redirectIfOffline = true,
@@ -111,19 +129,20 @@ export function OfflineRuntime() {
       }
 
       if (pathnameRef.current === "/offline") {
-        // Connectivity is enough to leave the offline shell. Reconciliation
-        // is best-effort and continues in the shared runtime; one failed API
-        // request must not trap the user on /offline after the network returns.
-        void import("@/lib/offline/sync")
+        // Keep the offline shell mounted until the queued writes have had an
+        // opportunity to reach the server and the fresh snapshot is cached.
+        // This prevents navigation from aborting the authenticated sync fetch.
+        const reconciled = await import("@/lib/offline/sync")
           .then(({ reconcileOfflineData }) => reconcileOfflineData())
           .catch(() => false);
-        router.replace("/");
-        router.refresh();
-        return true;
+        if (reconciled) leaveOffline();
+        else scheduleReconciliation(RECONNECT_RETRY_DELAY_MS, true);
+        return reconciled;
       }
       // RxDB remains available for offline writes and reconciliation, but it
       // must not compete with the first protected home-page requests.
-      if (forceReconciliation || offlineSnapshotNeedsRefresh()) {
+      const { hasPendingOfflineChangesHint } = await import("@/lib/offline/database");
+      if (forceReconciliation || offlineSnapshotNeedsRefresh() || hasPendingOfflineChangesHint()) {
         scheduleReconciliation(forceReconciliation ? 1_000 : 8_000);
       }
       return true;
@@ -132,7 +151,7 @@ export function OfflineRuntime() {
     });
     running.current = task;
     return task;
-  }, [router, scheduleReconciliation]);
+  }, [leaveOffline, scheduleReconciliation]);
 
   useEffect(() => {
     // Probe connectivity after the first paint. Actual RxDB reconciliation is
@@ -206,7 +225,7 @@ export function OfflineRuntime() {
       document.removeEventListener("visibilitychange", handleVisibility);
       navigator.serviceWorker?.removeEventListener("message", handleWorkerMessage);
     };
-  }, [checkAndRoute, router]);
+  }, [checkAndRoute]);
 
   return null;
 }

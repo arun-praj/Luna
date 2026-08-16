@@ -28,7 +28,7 @@ export function AccountAvatar({
       className="flex shrink-0 items-center justify-center overflow-hidden rounded-[inherit] font-bold tracking-[0.04em]"
       style={{ width: size, height: size, backgroundColor: background, color: getAccountForeground(background, type), fontSize: Math.max(10, Math.round(size * 0.28)) }}
     >
-      {source ? <AuthenticatedImage src={source} alt="" aria-hidden="true" width={size} height={size} className="block size-full object-cover" unoptimized /> : initialsFor(name)}
+      {source ? <AuthenticatedImage src={source} alt="" aria-hidden="true" width={size} height={size} className="block size-full object-cover" fallback={initialsFor(name)} unoptimized /> : initialsFor(name)}
     </span>
   );
 }

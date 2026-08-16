@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { r2Configured } from "@/backend/storage/r2";
 import { isUploadQuotaError, putUserUpload } from "@/backend/storage/upload-lifecycle";
-import { MAX_UPLOAD_BYTES } from "@/backend/storage/upload-policy";
+import { MAX_UPLOAD_BYTES, uploadUrl } from "@/backend/storage/upload-policy";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       extension: extensions[file.type]!,
       cacheControl: "public, max-age=31536000, immutable",
     });
-    return NextResponse.json({ key, url: `/api/uploads/account-images/${key.split("/").map(encodeURIComponent).join("/")}` }, { status: 201 });
+    return NextResponse.json({ key, url: uploadUrl("account-images", key) }, { status: 201 });
   } catch (error) {
     if (isUploadQuotaError(error)) return errorResponse(error.message, 413);
     return errorResponse("Could not upload image", 502);

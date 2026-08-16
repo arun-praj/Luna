@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { r2Configured } from "@/backend/storage/r2";
 import { isUploadQuotaError, putUserUpload } from "@/backend/storage/upload-lifecycle";
-import { MAX_UPLOAD_BYTES } from "@/backend/storage/upload-policy";
+import { MAX_UPLOAD_BYTES, uploadUrl } from "@/backend/storage/upload-policy";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
 export const runtime = "nodejs";
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       cacheControl: "private, max-age=31536000, immutable",
     });
     return NextResponse.json(
-      { key, url: `/api/uploads/transaction-receipts/${key.split("/").map(encodeURIComponent).join("/")}` },
+      { key, url: uploadUrl("transaction-receipts", key) },
       { status: 201 },
     );
   } catch (error) {

@@ -1735,7 +1735,7 @@ export function TransactionDetail({
                     return (
                       <button
                         type="button"
-                        key={optionName}
+                        key={categoryOption?.id ?? optionName}
                         aria-pressed={selected}
                         onClick={() => {
                           if (picker === "category") {

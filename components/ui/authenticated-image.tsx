@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { authenticatedFetch } from "@/lib/auth-client";
 
@@ -17,12 +17,14 @@ type AuthenticatedImageProps = {
   width: number;
   height: number;
   className?: string;
+  fallback?: ReactNode;
   unoptimized?: boolean;
   "aria-hidden"?: boolean | "true" | "false";
 };
 
-export function AuthenticatedImage({ src, alt, width, height, className, unoptimized, "aria-hidden": ariaHidden }: AuthenticatedImageProps) {
+export function AuthenticatedImage({ src, alt, width, height, className, fallback, unoptimized, "aria-hidden": ariaHidden }: AuthenticatedImageProps) {
   const [loadedImage, setLoadedImage] = useState<{ source: string; url: string } | null>(null);
+  const [failedImage, setFailedImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isProtectedUpload(src)) return;
@@ -31,11 +33,16 @@ export function AuthenticatedImage({ src, alt, width, height, className, unoptim
     let objectUrl: string | null = null;
     void authenticatedFetch(src, { signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) return;
+        if (!response.ok) {
+          setFailedImage(src);
+          return;
+        }
         objectUrl = URL.createObjectURL(await response.blob());
         setLoadedImage({ source: src, url: objectUrl });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) setFailedImage(src);
+      });
 
     return () => {
       controller.abort();
@@ -49,6 +56,9 @@ export function AuthenticatedImage({ src, alt, width, height, className, unoptim
       ? loadedImage.url
       : null
     : src;
+  const loadFailed = failedImage === src;
+
+  if (loadFailed && fallback) return <>{fallback}</>;
 
   if (!resolvedSrc) {
     return <span aria-hidden="true" className={`${className ?? ""} bg-surface-subtle`} style={{ width, height }} />;

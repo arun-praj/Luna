@@ -11,6 +11,16 @@ export type UploadObject = { key: string; size: number; uploaded?: Date };
 type UploadListPage = { objects: UploadObject[]; truncated: boolean; cursor?: string };
 export type UploadBatchStatement = Parameters<typeof db.batch>[0][number];
 
+/**
+ * Keep a Drizzle query builder from being assimilated as a thenable when it is
+ * returned from an async helper. D1's batch API can prepare the delegated
+ * builder, while the wrapper itself remains a plain, non-thenable value.
+ */
+function preserveBatchStatement(statement: UploadBatchStatement): UploadBatchStatement {
+  const query = statement as UploadBatchStatement & { _prepare: () => unknown };
+  return { _prepare: () => query._prepare() } as unknown as UploadBatchStatement;
+}
+
 function listPage(options: { prefix: string; cursor?: string }): Promise<UploadListPage> { return r2Bucket().list(options) as Promise<UploadListPage>; }
 
 export async function listUserUploadObjects(userId: string) {
@@ -97,21 +107,27 @@ export async function prepareStoredObjectAttachment(userId: string, kind: Upload
     return null;
   }
   const statement = db.update(storedObjects).set({ status: "attached", entityType, entityId, deleteAfter: null, updatedAt: new Date().toISOString() }).where(and(eq(storedObjects.id, stored.id), eq(storedObjects.userId, userId), eq(storedObjects.status, "uploaded"), isNull(storedObjects.entityType), isNull(storedObjects.entityId)));
-  return statement as unknown as UploadBatchStatement;
+  return preserveBatchStatement(statement as unknown as UploadBatchStatement);
 }
 
 /** Prepare the old attachment transition for the same batch as a replacement or deletion. */
 export async function prepareStoredObjectDetachment(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string): Promise<UploadBatchStatement | null> {
   const key = ownedUploadKey(kind, userId, reference);
   if (!key) return null;
-  const statement = db.update(storedObjects).set({ status: "delete_pending", deleteAfter: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(
+  const [stored] = await db.select({ id: storedObjects.id }).from(storedObjects).where(and(
     eq(storedObjects.userId, userId),
     eq(storedObjects.objectKey, key),
     eq(storedObjects.status, "attached"),
     eq(storedObjects.entityType, entityType),
     eq(storedObjects.entityId, entityId),
+  )).limit(1);
+  if (!stored) return null;
+  const statement = db.update(storedObjects).set({ status: "delete_pending", deleteAfter: new Date().toISOString(), updatedAt: new Date().toISOString() }).where(and(
+    eq(storedObjects.id, stored.id),
+    eq(storedObjects.userId, userId),
+    eq(storedObjects.status, "attached"),
   ));
-  return statement as unknown as UploadBatchStatement;
+  return preserveBatchStatement(statement as unknown as UploadBatchStatement);
 }
 
 export async function attachStoredObject(userId: string, kind: UploadKind, reference: string | null | undefined, entityType: string, entityId: string) {

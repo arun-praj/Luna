@@ -7,8 +7,11 @@ import {
 } from "@/lib/offline/connectivity";
 import {
   getActiveOfflineUserId,
+  hasPendingOfflineChanges,
   getOfflineDatabase,
   localDocumentId,
+  clearOfflineChangesPending,
+  markOfflineChangesPending,
   notifyOfflineDataChanged,
   setActiveOfflineUserId,
 } from "@/lib/offline/database";
@@ -25,6 +28,7 @@ import type {
 } from "@/lib/offline/types";
 import { budgetPeriodBounds, withBudgetProgress, type Budget, type BudgetAllocationKind, type BudgetPeriod } from "@/lib/budgets";
 import { normalizeMoney } from "@/lib/money";
+import { createReconciliationCoordinator } from "@/lib/offline/reconcile-orchestrator";
 
 const SYNC_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -369,6 +373,7 @@ export async function queueOfflineTransaction(input: OfflineTransactionInput) {
     updatedAt: timestamp,
   };
   await db.transactions.insert(transaction);
+  markOfflineChangesPending();
   notifyOfflineDataChanged();
 
   if ("serviceWorker" in navigator) {
@@ -494,6 +499,7 @@ export async function queueOfflineBudgetCreate(input: OfflineBudgetInput) {
   };
   const mutation: OfflineBudgetMutation = { id: mutationId, userId, budgetId: id, operation: "create", ...input, kind, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp };
   await Promise.all([database.budgets.insert(budget), database.budgetMutations.insert(mutation)]);
+  markOfflineChangesPending();
   notifyOfflineDataChanged();
   return { budget, existing: false };
 }
@@ -522,6 +528,7 @@ export async function queueOfflineBudgetUpdate(budgetId: string, input: OfflineB
     const mutationId = window.crypto.randomUUID();
     await database.budgetMutations.insert({ id: mutationId, userId, budgetId, operation: "update", ...input, kind, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
   }
+  markOfflineChangesPending();
   notifyOfflineDataChanged();
   return document.toJSON();
 }
@@ -542,6 +549,7 @@ export async function queueOfflineBudgetDelete(budgetId: string) {
     await document.incrementalPatch({ deleted: true, syncStatus: "pending", syncError: null, updatedAt: timestamp });
     await database.budgetMutations.insert({ id: mutationId, userId, budgetId: current.serverId ?? current.id, operation: "delete", kind: current.kind ?? "expense", categoryId: current.categoryId, limitAmount: current.limitAmount, period: current.period, clientGeneratedId: mutationId, status: "pending", error: null, createdAt: timestamp, updatedAt: timestamp });
   }
+  markOfflineChangesPending();
   notifyOfflineDataChanged();
 }
 
@@ -582,10 +590,15 @@ export async function syncPendingBudgets() {
   return synced;
 }
 
+const reconciliationCoordinator = createReconciliationCoordinator({
+  probe: checkInternetConnection,
+  syncTransactions: syncPendingTransactions,
+  syncBudgets: syncPendingBudgets,
+  refreshSnapshot: refreshOfflineSnapshot,
+});
+
 export async function reconcileOfflineData() {
-  const online = await checkInternetConnection();
-  if (!online) return false;
-  await syncPendingTransactions();
-  await syncPendingBudgets();
-  return refreshOfflineSnapshot();
+  const result = await reconciliationCoordinator.reconcile();
+  if (result.ok && !(await hasPendingOfflineChanges())) clearOfflineChangesPending();
+  return result.ok;
 }

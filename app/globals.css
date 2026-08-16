@@ -355,6 +355,26 @@ body:has([aria-modal="true"]) {
   animation: tutorial-spotlight-pulse 2.4s ease-in-out infinite;
 }
 
+.transaction-list-title-clamp,
+.transaction-list-description-clamp {
+  overflow: hidden;
+}
+
+.transaction-list-title-clamp {
+  max-height: 2.5rem;
+}
+
+.transaction-list-description-clamp {
+  max-height: 2rem;
+}
+
+@media (min-width: 640px) {
+  .transaction-list-title-clamp,
+  .transaction-list-description-clamp {
+    max-height: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .onboarding-page-enter,
   .onboarding-step-enter,

@@ -421,6 +421,7 @@ export function OfflineHome() {
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState("");
   const [online, setOnline] = useState(false);
+  const [reconciled, setReconciled] = useState(false);
   const [balanceRevealed, setBalanceRevealed] = useState(false);
   const revealTimer = useRef<number | null>(null);
 
@@ -491,9 +492,11 @@ export function OfflineHome() {
     try {
       const connected = await reconcileOfflineData();
       setOnline(connected);
-      if (!connected) setNotice("Still offline. Check Wi-Fi or mobile data, then try again.");
+      setReconciled(connected);
+      if (!connected) setNotice("Sync could not finish yet. Your local transaction is safe and Luna will retry automatically.");
     } catch (reason) {
       setOnline(false);
+      setReconciled(false);
       setNotice(
         reason instanceof Error
           ? `Connected, but local data could not refresh: ${reason.message}`
@@ -510,20 +513,6 @@ export function OfflineHome() {
     window.sessionStorage.removeItem("cocomelon.offline-return-path");
     window.location.replace(returnPath);
   };
-
-  useEffect(() => {
-    if (!online) return;
-    if (
-      process.env.NODE_ENV === "development" &&
-      new URLSearchParams(window.location.search).get("preview") === "1"
-    ) return;
-
-    // Do not leave someone trapped in the offline shell after the authoritative
-    // same-origin probe has recovered. A document navigation also replaces any
-    // stale service-worker navigation response with the live application.
-    const redirect = window.setTimeout(goOnline, 400);
-    return () => window.clearTimeout(redirect);
-  }, [online]);
 
   return (
     <>
@@ -593,7 +582,7 @@ export function OfflineHome() {
               {checking ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="size-4" />}
               {checking ? "Checking connection…" : online ? failedCount ? "Retry failed sync" : "Sync cached data" : "Try to get online"}
             </button>
-            {online && !checking ? (
+            {online && reconciled && !checking ? (
               <button type="button" onClick={goOnline} className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[11px] bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-sm">
                 <ArrowRight aria-hidden="true" className="size-4" />
                 Connection found — get online

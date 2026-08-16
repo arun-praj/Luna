@@ -13,6 +13,26 @@ export function uploadPrefix(kind: UploadKind, userId: string) {
   return `${kind}/${userId}/`;
 }
 
+export function uploadUrl(kind: UploadKind, key: string) {
+  const prefix = `${kind}/`;
+  const relativeKey = key.startsWith(prefix) ? key.slice(prefix.length) : key;
+  return `/api/uploads/${kind}/${relativeKey.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** Resolves both the current user/file URL and the legacy full-key URL. */
+export function resolveUploadRouteKey(kind: UploadKind, userId: string, parts: string[]) {
+  let decoded: string;
+  try {
+    decoded = parts.map(decodeURIComponent).join("/");
+  } catch {
+    return null;
+  }
+  if (decoded.includes("..")) return null;
+  if (decoded.startsWith(`${userId}/`)) return `${kind}/${decoded}`;
+  if (decoded.startsWith(uploadPrefix(kind, userId))) return decoded;
+  return null;
+}
+
 /**
  * Returns a key only when the reference is an internal upload owned by the
  * authenticated user. External images and malformed paths are rejected.
@@ -25,12 +45,14 @@ export function ownedUploadKey(kind: UploadKind, userId: string, reference: stri
   if (!isApiReference && !isR2Key) return null;
   const raw = isApiReference ? reference.slice(apiPrefix.length) : reference;
   const parts = raw.split("/");
-  if (parts.length !== (isApiReference ? 2 : 3) || (isR2Key && parts[0] !== kind)) return null;
+  if (isR2Key && (parts.length !== 3 || parts[0] !== kind)) return null;
+  if (isApiReference && !(parts.length === 2 || (parts.length === 3 && parts[0] === kind))) return null;
   let owner: string;
   let filename: string;
   try {
-    owner = decodeURIComponent(parts[isApiReference ? 0 : 1] ?? "");
-    filename = decodeURIComponent(parts[isApiReference ? 1 : 2] ?? "");
+    const offset = isApiReference && parts.length === 3 ? 1 : 0;
+    owner = decodeURIComponent(parts[isR2Key ? 1 : offset] ?? "");
+    filename = decodeURIComponent(parts[isR2Key ? 2 : offset + 1] ?? "");
   } catch {
     return null;
   }

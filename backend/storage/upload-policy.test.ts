@@ -8,17 +8,28 @@ import {
   MAX_UPLOAD_BYTES,
   ownedUploadKey,
   ORPHAN_UPLOAD_GRACE_MS,
+  resolveUploadRouteKey,
   staleOrphanUploadKeys,
   UploadQuotaExceededError,
+  uploadUrl,
   USER_UPLOAD_QUOTA_BYTES,
 } from "./upload-policy.ts";
 
 test("owned upload references cannot escape the user's prefix", () => {
   assert.equal(ownedUploadKey("account-images", "user-1", "/api/uploads/account-images/user-1/avatar.png"), "account-images/user-1/avatar.png");
+  assert.equal(ownedUploadKey("account-images", "user-1", "/api/uploads/account-images/account-images/user-1/avatar.png"), "account-images/user-1/avatar.png");
   assert.equal(ownedUploadKey("account-images", "user-1", "account-images/user-1/avatar.png"), "account-images/user-1/avatar.png");
   assert.equal(ownedUploadKey("account-images", "user-1", "/api/uploads/account-images/user-2/avatar.png"), null);
   assert.equal(ownedUploadKey("account-images", "user-1", "/api/uploads/account-images/user-1/../other.png"), null);
   assert.equal(ownedUploadKey("account-images", "user-1", "https://example.com/avatar.png"), null);
+});
+
+test("upload routes resolve canonical and legacy image URLs", () => {
+  assert.equal(uploadUrl("account-images", "account-images/user-1/avatar.png"), "/api/uploads/account-images/user-1/avatar.png");
+  assert.equal(resolveUploadRouteKey("account-images", "user-1", ["user-1", "avatar.png"]), "account-images/user-1/avatar.png");
+  assert.equal(resolveUploadRouteKey("account-images", "user-1", ["account-images", "user-1", "avatar.png"]), "account-images/user-1/avatar.png");
+  assert.equal(resolveUploadRouteKey("account-images", "user-1", ["user-2", "avatar.png"]), null);
+  assert.equal(resolveUploadRouteKey("account-images", "user-1", ["user-1", "..", "other.png"]), null);
 });
 
 test("upload policy rejects oversized files and cumulative quota overflow", () => {

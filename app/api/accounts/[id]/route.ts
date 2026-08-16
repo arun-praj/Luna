@@ -37,7 +37,9 @@ export async function PATCH(request: Request, { params }: Context) {
   const updates = input;
   let attachmentStatement;
   try {
-    attachmentStatement = await prepareStoredObjectAttachment(userId, "account-images", updates.icon, "account", id);
+    attachmentStatement = Object.prototype.hasOwnProperty.call(updates, "icon") && current.icon !== updates.icon
+      ? await prepareStoredObjectAttachment(userId, "account-images", updates.icon, "account", id)
+      : null;
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Invalid account image", 400);
   }

@@ -107,11 +107,9 @@ export default function ProfilePage() {
   const [isSavingCurrency, setIsSavingCurrency] = useState(false);
   const [isSavingBalancePrivacy, setIsSavingBalancePrivacy] = useState(false);
   const [balancePrivacyMessage, setBalancePrivacyMessage] = useState("");
-  const [isLeaving, setIsLeaving] = useState(false);
   const avatarCloseTimer = useRef<number | null>(null);
   const accountEditorCloseTimer = useRef<number | null>(null);
   const currencyCloseTimer = useRef<number | null>(null);
-  const routeCloseTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -142,9 +140,6 @@ export default function ProfilePage() {
       }
       if (currencyCloseTimer.current !== null) {
         window.clearTimeout(currencyCloseTimer.current);
-      }
-      if (routeCloseTimer.current !== null) {
-        window.clearTimeout(routeCloseTimer.current);
       }
     };
   }, []);
@@ -311,13 +306,7 @@ export default function ProfilePage() {
   }
 
   function navigateBack() {
-    if (isLeaving) return;
-    document.body.dataset.routeTransition = "return";
-    setIsLeaving(true);
-    routeCloseTimer.current = window.setTimeout(() => {
-      router.push("/");
-      routeCloseTimer.current = null;
-    }, 300);
+    router.push("/");
   }
 
   if (isLoading || !user) {
@@ -326,7 +315,7 @@ export default function ProfilePage() {
 
   return (
     <main
-      className={`min-h-screen bg-background ${isLeaving ? "profile-route-exit" : "profile-route-enter"}`}
+      className="profile-route-enter min-h-screen bg-background"
     >
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">

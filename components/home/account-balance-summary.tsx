@@ -2,7 +2,7 @@
 
 import { Fragment, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDownLeft, ArrowLeftRight, ArrowRight, Check, ChevronRight, Clock3, HandCoins, SkipForward, Tags, Target, WalletCards, X } from "lucide-react";
 
 import { authenticatedFetch, getAccessTokenSubject, notifyTransactionsChanged } from "@/lib/auth-client";
@@ -83,6 +83,7 @@ function writeCachedHomeAlerts(alerts: HomeInsight[]) {
 }
 
 export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (hasAlerts: boolean) => void }) {
+  const reduceMotion = useReducedMotion();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [displayCurrency, setDisplayCurrency] = useState("NPR");
   const [hideTotalBalance, setHideTotalBalance] = useState(false);
@@ -363,7 +364,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
       aria-labelledby="balance-heading"
       data-tour="total-balance"
       className={hasVisibleInsights ? "mt-8" : "mt-10"}
-      transition={{ layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }}
+      transition={reduceMotion ? { layout: { duration: 0 } } : { layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }}
     >
       <div className={hasVisibleInsights ? "flex items-center justify-between gap-3" : ""}>
         <div className="min-w-0">
@@ -396,7 +397,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
 
       <AnimatePresence initial={false}>
         {!isLoading && visibleInsights.length ? (
-          <motion.section key="money-reminders" aria-label="Money reminders" initial={{ opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: "auto", marginTop: 16 }} exit={{ opacity: 0, height: 0, marginTop: 0 }} transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }} className="relative overflow-visible">
+          <motion.section key="money-reminders" aria-label="Money reminders" initial={reduceMotion ? false : { opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: "auto", marginTop: 16 }} exit={{ opacity: reduceMotion ? 1 : 0, height: 0, marginTop: 0 }} transition={reduceMotion ? { duration: 0 } : { duration: 0.38, ease: [0.22, 1, 0.36, 1] }} className="relative overflow-visible">
           <AnimatePresence initial={false}>
             {groupedInsights.map((insight, index) => {
               const Icon = insight.icon;
@@ -424,7 +425,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               if (insight.kind === "goal") {
                 return (
                   <Fragment key={insight.id}>
-                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-primary/20 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
+                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={reduceMotion ? false : { opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: reduceMotion ? 1 : 0 }} transition={reduceMotion ? { duration: 0, layout: { duration: 0 } } : { type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: reduceMotion ? 0 : isExiting ? exitMotion.x : swipeOffset.x, y: reduceMotion ? 0 : isExiting ? exitMotion.y : swipeOffset.y, rotate: reduceMotion ? 0 : isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-primary/20 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
                       <div className="p-3">
                       <div className="flex items-start gap-3">
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-primary-soft text-primary"><Icon aria-hidden="true" className="size-[19px]" /></span>
@@ -451,7 +452,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               if (insight.kind === "recurring") {
                 return (
                   <Fragment key={insight.id}>
-                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-border/80 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
+                    <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={reduceMotion ? false : { opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: reduceMotion ? 1 : 0 }} transition={reduceMotion ? { duration: 0, layout: { duration: 0 } } : { type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: reduceMotion ? 0 : isExiting ? exitMotion.x : swipeOffset.x, y: reduceMotion ? 0 : isExiting ? exitMotion.y : swipeOffset.y, rotate: reduceMotion ? 0 : isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[16px] border border-border/80 bg-card shadow-[0_8px_24px_rgb(23_32_29_/_0.04)] ${stackPositionClass} ${stackOverlapClass}`}>
                       <div className="p-3">
                       <div className="flex items-start gap-3">
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-info text-primary-foreground"><ArrowLeftRight aria-hidden="true" className="size-[19px]" /></span>
@@ -476,7 +477,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
               }
               return (
                 <Fragment key={insight.id}>
-                  <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={{ opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: isExiting ? exitMotion.x : swipeOffset.x, y: isExiting ? exitMotion.y : swipeOffset.y, rotate: isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[14px] border transition-colors hover:brightness-[0.985] ${style.card} ${stackPositionClass} ${stackOverlapClass}`}>
+                  <motion.article layout onPointerDown={(event) => beginSwipe(insight.id, event)} onPointerMove={(event) => moveSwipe(insight.id, event)} onPointerUp={(event) => finishSwipe(insight.id, event)} onPointerCancel={() => cancelSwipe(insight.id)} data-home-alert-id={insight.id} initial={reduceMotion ? false : { opacity: isPromoted ? 0.92 : 0, y: isPromoted ? 12 : 0, scale: isPromoted ? 0.98 : 1 }} animate={{ opacity: isExiting ? 0 : 1, y: 0, scale: 1 }} exit={{ opacity: reduceMotion ? 1 : 0 }} transition={reduceMotion ? { duration: 0, layout: { duration: 0 } } : { type: isExiting ? "tween" : isDragging ? "tween" : "spring", stiffness: isExiting ? undefined : 420, damping: isExiting ? undefined : 32, mass: isExiting ? undefined : 0.85, duration: isExiting ? 0.38 : 0.24, ease: isExiting ? [0.22, 1, 0.36, 1] : undefined, layout: { duration: 0.42, ease: [0.22, 1, 0.36, 1] } }} style={{ zIndex: 30 - stackOffset, x: reduceMotion ? 0 : isExiting ? exitMotion.x : swipeOffset.x, y: reduceMotion ? 0 : isExiting ? exitMotion.y : swipeOffset.y, rotate: reduceMotion ? 0 : isExiting ? exitMotion.rotate : swipeOffset.rotate }} className={`touch-pan-y overflow-hidden rounded-[14px] border transition-colors hover:brightness-[0.985] ${style.card} ${stackPositionClass} ${stackOverlapClass}`}>
                     <Link href={insight.href} className="block min-w-0 p-3 pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
                       <span className="flex min-w-0 items-start gap-3">
                         <span className={`flex size-9 shrink-0 items-center justify-center rounded-[9px] ${style.soft} ${style.text}`}><Icon aria-hidden="true" className="size-[17px]" /></span>
