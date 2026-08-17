@@ -8,6 +8,13 @@ export default defineConfig(async () => {
     server: {
       allowedHosts: ["luna-dev.arunprajapati.com"],
     },
+    environments: {
+      client: {
+        optimizeDeps: {
+          exclude: ["lucide-react"],
+        },
+      },
+    },
     plugins: [vinext(), sites(), cloudflare({ viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] } })],
   };
 });
