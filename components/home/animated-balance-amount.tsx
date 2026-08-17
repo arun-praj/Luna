@@ -57,7 +57,7 @@ export function AnimatedBalanceAmount({
         <Link
           href={href}
           aria-label="View accounts"
-          className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+          className="relative z-10 inline-flex max-w-full items-baseline rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
         >
           {balanceText}
         </Link>

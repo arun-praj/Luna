@@ -19,6 +19,7 @@ export function TransactionTypeForm({
   open,
   selectedType,
   hasError,
+  locked = false,
   onToggle,
   onSelect,
 }: {
@@ -26,6 +27,7 @@ export function TransactionTypeForm({
   open: boolean;
   selectedType?: SelectedTransactionType;
   hasError: boolean;
+  locked?: boolean;
   onToggle: () => void;
   onSelect: (value: Transaction["kind"]) => void;
 }) {
@@ -34,15 +36,17 @@ export function TransactionTypeForm({
       {selectedType ? <selectedType.icon aria-hidden="true" className={`pointer-events-none absolute left-3 top-1/2 size-[18px] -translate-y-1/2 ${selectedType.foregroundClassName}`} /> : null}
       <button
         type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-haspopup={locked ? undefined : "listbox"}
+        aria-expanded={locked ? undefined : open}
+        aria-label={locked ? `${selectedType?.label ?? "Transaction"} transaction type` : undefined}
+        disabled={locked}
         onClick={onToggle}
-        className={`h-11 w-full rounded-[11px] border bg-card pl-10 pr-9 text-left text-[15px] font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/20 ${selectedType?.foregroundClassName ?? "text-muted-foreground"} ${hasError ? "border-expense" : open ? "border-primary" : "border-border"}`}
+        className={`h-11 w-full rounded-[11px] border bg-card pl-10 ${locked ? "cursor-default pr-4" : "pr-9"} text-left text-[15px] font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/20 ${selectedType?.foregroundClassName ?? "text-muted-foreground"} ${hasError ? "border-expense" : open ? "border-primary" : "border-border"}`}
       >
         {selectedType?.label ?? "Choose type"}
       </button>
-      <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      {open ? (
+      {!locked ? <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} /> : null}
+      {open && !locked ? (
         <div role="listbox" aria-label="Transaction type" className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-40 overflow-hidden rounded-[14px] border border-border bg-card p-1.5 shadow-[0_16px_44px_rgb(23_32_29_/_0.16)]">
           {transactionTypes.map((type) => {
             const Icon = type.icon;

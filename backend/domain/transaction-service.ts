@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/backend/db/client";
 import { accounts, categories, goals, recurringTemplates, savingsInstruments, transactionHistory, transactions } from "@/backend/db/schema";
-import { savingsInstrumentReferenceError, transactionCategoryReferenceError } from "@/backend/domain/transaction-semantics";
+import { savingsInstrumentReferenceError } from "@/backend/domain/transaction-semantics";
 import type { z } from "zod";
 import { transactionInput } from "@/backend/domain/validation";
 import { addMoney, normalizeMoney, subtractMoney } from "@/lib/money";
@@ -150,13 +150,10 @@ async function assertReferences(tx: DatabaseExecutor, userId: string, input: Tra
   if (input.categoryId) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, input.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
     if (!category) throw new Error("Category not found");
-    const categoryReferenceError = transactionCategoryReferenceError(input.type, category.type);
-    if (categoryReferenceError) throw new Error(categoryReferenceError);
   }
   for (const split of input.splits ?? []) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, split.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
     if (!category) throw new Error("Split category not found");
-    if (category.type !== input.type) throw new Error(`Choose ${input.type} categories for every split`);
   }
   if (input.recurringTemplateId) {
     const [template] = await tx.select().from(recurringTemplates).where(and(eq(recurringTemplates.id, input.recurringTemplateId), eq(recurringTemplates.userId, userId))).limit(1);

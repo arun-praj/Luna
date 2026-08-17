@@ -60,7 +60,7 @@ export function HomeContent() {
             <section aria-labelledby="activity-heading" data-tour="activity" className={`${hasHomeAlerts ? "mt-8" : "mt-10"} transition-[margin] duration-300`}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[13px] font-medium text-muted-foreground">{period.mode === "month" ? "This month" : period.label}</p>
+                  <p className="text-[13px] font-medium text-muted-foreground">{period.label}</p>
                   <h2 id="activity-heading" className="mt-1 text-[22px] font-semibold tracking-[-0.03em]">Activity</h2>
                 </div>
                 <div className="flex flex-col items-end">

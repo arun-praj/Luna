@@ -26,6 +26,14 @@ export type TransactionDraftAction =
   | { type: "toggle-tag"; value: string }
   | { type: "reset"; value: TransactionDraftState };
 
+export function localDateValue(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function localTimeValue(date = new Date()) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 export function transactionDraftReducer(state: TransactionDraftState, action: TransactionDraftAction): TransactionDraftState {
   switch (action.type) {
     case "set-field":
@@ -53,7 +61,7 @@ export function createTransactionDraftState(values: Partial<TransactionDraftStat
     title: values.title,
     description: values.description,
     date: values.date,
-    time: values.time ?? "12:00",
+    time: values.time ?? localTimeValue(),
     kind: values.kind,
     category: values.category ?? "",
     categoryId: values.categoryId ?? null,

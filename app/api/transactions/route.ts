@@ -73,8 +73,8 @@ export async function GET(request: Request) {
     )` as never);
   }
   const rows = await db.select().from(transactions).where(and(...filters)).orderBy(
-    desc(transactions.transactionAt),
     desc(transactions.date),
+    desc(transactions.transactionAt),
     desc(transactions.createdAt),
     desc(transactions.id),
   );

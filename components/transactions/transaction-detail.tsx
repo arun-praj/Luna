@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  HandCoins,
   Layers3,
   LoaderCircle,
   Menu,
@@ -71,13 +72,17 @@ import {
   sortTransactionAccounts,
   transferTitle,
 } from "./transaction-detail/selectors";
+import { orderCategoryOptions } from "./transaction-detail/category-ordering";
 import {
   createTransactionDraftState,
+  localDateValue,
+  localTimeValue,
   transactionDraftReducer,
   type TransactionDraftAction,
   type TransactionDraftState,
 } from "./transaction-detail/reducer";
 import { LoadingBlock, SavingsInstrumentAvatar } from "./transaction-detail/presentation";
+import { isLoanTransaction } from "./transaction-detail/presentation-rules";
 import { TransactionTypeForm, type SelectedTransactionType } from "./transaction-detail/transaction-type-forms";
 
 export function TransactionDetail({
@@ -181,12 +186,20 @@ export function TransactionDetail({
   const [saveAttempted, setSaveAttempted] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
   const [transactionLoading, setTransactionLoading] = React.useState(!isNew);
+  const [loanContext, setLoanContext] = React.useState<Pick<ApiTransaction, "loanId" | "loanComponent">>({ loanId: null, loanComponent: null });
   const titleInputRef = React.useRef<HTMLInputElement>(null);
   const receiptInputRef = React.useRef<HTMLInputElement>(null);
   const splitSnapshotRef = React.useRef<SplitDraft[]>([]);
   const initialDraftRef = React.useRef<string | null>(null);
   const [hasUserEdited, setHasUserEdited] = React.useState(false);
   const hasUserEditedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!isNew || hasUserEditedRef.current) return;
+    const now = new Date();
+    dispatchDraft({ type: "set-field", field: "date", value: localDateValue(now) });
+    dispatchDraft({ type: "set-field", field: "time", value: localTimeValue(now) });
+  }, [isNew]);
 
   const markUserEdited = React.useCallback(() => {
     hasUserEditedRef.current = true;
@@ -247,7 +260,7 @@ export function TransactionDetail({
           const loadedMerchantName = record.merchantName ?? "";
           const loadedDescription = record.notes ?? "";
           const loadedReceiptImageUrl = record.receiptImageUrl ?? null;
-          const loadedTime = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(record.transactionAt || `${record.date}T12:00:00.000Z`));
+          const loadedTime = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(record.transactionAt || record.createdAt || `${record.date}T12:00:00.000Z`));
           const loadedSplits = (record.splits ?? []).map((split) => ({
             id: window.crypto.randomUUID(),
             categoryId: split.categoryId,
@@ -273,6 +286,7 @@ export function TransactionDetail({
           setTransferToAccountId(loadedTransferToAccountId);
           setSavingsInstrumentId(loadedSavingsInstrumentId);
           setAmount(loadedAmount);
+          setLoanContext({ loanId: record.loanId, loanComponent: record.loanComponent });
           const loadedDraft = serializeTransactionDraft({ title: loadedTitle, description: loadedDescription, date: record.date, time: loadedTime, kind: record.type, category: record.categoryName ?? "", categoryId: record.categoryId, splits: loadedSplits, merchantName: loadedMerchantName, tags: loadedTags, accountId: record.accountId, savingsInstrumentId: loadedSavingsInstrumentId, transferToAccountId: loadedTransferToAccountId, amount: loadedAmount, receiptImageUrl: loadedReceiptImageUrl, receiptFileKey: null });
           initialDraftRef.current = loadedDraft;
           setTransactionLoading(false);
@@ -436,8 +450,11 @@ export function TransactionDetail({
   const { requestDiscard, discardDialog } = useUnsavedChangesGuard(isDirty());
   const receiptSource = receiptPreviewUrl ?? receiptImageUrl;
 
+  const loanTransaction = isLoanTransaction(loanContext);
   const amountTone =
-    kind === "income"
+    loanTransaction
+      ? "text-primary"
+      : kind === "income"
       ? "text-income"
       : kind === "expense"
         ? "text-expense"
@@ -449,7 +466,16 @@ export function TransactionDetail({
           ? "text-info"
           : "text-foreground";
   const selectedType: SelectedTransactionType | undefined =
-    transactionTypes.find((type) => type.value === kind) ??
+    loanTransaction
+      ? {
+          value: kind || "transfer",
+          label: "Loan",
+          description: "Recorded from loan activity",
+          icon: HandCoins,
+          iconClassName: "bg-primary-soft text-primary",
+          foregroundClassName: "text-primary",
+        }
+      : transactionTypes.find((type) => type.value === kind) ??
     (kind === "adjust_balance"
       ? {
           value: "adjust_balance" as const,
@@ -481,6 +507,14 @@ export function TransactionDetail({
   const categoryIcon = getCategoryIcon(selectedCategory?.icon, selectedCategory?.name);
   const titleFocusMode = guidedNew && Boolean(categoryId || splits.length) && !title.trim();
   const guidedPickerHandoff = guidedNew && amountOpen && picker === "category";
+  const categoryPickerOptions = React.useMemo(() => {
+    const selectedCategoryId = splitCategoryIndex === null ? categoryId : splits[splitCategoryIndex]?.categoryId ?? null;
+    const search = categorySearch.trim().toLocaleLowerCase();
+    const visibleOptions = categoryOptions.filter((option) =>
+      option.name.toLocaleLowerCase().includes(search),
+    );
+    return orderCategoryOptions(visibleOptions, selectedCategoryId, kind);
+  }, [categoryId, categoryOptions, categorySearch, kind, splitCategoryIndex, splits]);
 
   async function createTag() {
     const name = newTag.trim();
@@ -513,7 +547,6 @@ export function TransactionDetail({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        type: kind === "income" ? "income" : "expense",
         icon: newCategoryIcon,
         color: colors[categoryOptions.length % colors.length],
       }),
@@ -900,6 +933,7 @@ export function TransactionDetail({
             open={typeOpen}
             selectedType={selectedType}
             hasError={Boolean(saveAttempted && validationErrors.type)}
+            locked={loanTransaction}
             onToggle={() => setTypeOpen((current) => !current)}
             onSelect={(nextKind) => {
               setKind(nextKind);
@@ -996,15 +1030,17 @@ export function TransactionDetail({
               className={`flex min-h-11 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${
                 saveAttempted && validationErrors.category
                   ? "border-expense bg-expense-soft text-expense"
-                  : kind === "transfer" ? "cursor-default border-info/25 bg-info-soft text-info" : "border-transparent bg-primary-soft text-primary"
+                  : loanTransaction ? "cursor-default border-primary/25 bg-primary-soft text-primary" : kind === "transfer" ? "cursor-default border-info/25 bg-info-soft text-info" : "border-transparent bg-primary-soft text-primary"
               }`}
             >
-              {kind === "transfer"
-                ? <ArrowLeftRight aria-hidden="true" className="size-[18px]" />
+              {loanTransaction
+                ? <HandCoins aria-hidden="true" className="size-[18px]" />
+                : kind === "transfer"
+                  ? <ArrowLeftRight aria-hidden="true" className="size-[18px]" />
                 : splits.length
                   ? <Layers3 aria-hidden="true" className="size-[18px]" />
                   : React.createElement(categoryIcon, { "aria-hidden": true, className: "size-[18px]" })}
-              {kind === "transfer" ? "Transfer" : splits.length ? `Split across ${splits.length} categories` : category || "Choose category"}
+              {loanTransaction ? "Loan" : kind === "transfer" ? "Transfer" : splits.length ? `Split across ${splits.length} categories` : category || "Choose category"}
               {kind === "transfer" ? null : <ChevronRight aria-hidden="true" className="size-4" />}
             </button>
             <button
@@ -1711,7 +1747,7 @@ export function TransactionDetail({
               ) : null}
               <div className="mt-3 grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto overscroll-contain pb-[calc(1rem+env(safe-area-inset-bottom))] pr-0.5">
                 {(picker === "category"
-                  ? categoryOptions.filter((option) => (splitCategoryIndex === null || option.type === kind) && option.name.toLocaleLowerCase().includes(categorySearch.trim().toLocaleLowerCase()))
+                  ? categoryPickerOptions
                   : picker === "merchant"
                     ? merchantOptions.filter((merchant) => merchant.name.toLocaleLowerCase().includes(merchantSearch.trim().toLocaleLowerCase()))
                     : [...tagOptions, ...savedTagOptions.filter((tag) => !tagOptions.includes(tag))]

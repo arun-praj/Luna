@@ -34,6 +34,9 @@ export type CategoryOption = {
   type: "expense" | "income";
   icon: string | null;
   color: string | null;
+  usageFrequency?: number;
+  usageFrequencyByType?: Partial<Record<TransactionKind, number>>;
+  lastUsedAt?: string | null;
 };
 
 export type SplitDraft = {

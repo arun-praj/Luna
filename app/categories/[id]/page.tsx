@@ -203,8 +203,8 @@ export default function CategoryActivityPage({
           <StickyPageHeader className="!w-full px-4 pb-3 sm:px-5">
             <PageHeader
               leading={<Link href={backHref} aria-label="Back" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><ArrowLeft aria-hidden="true" className="size-5" /></Link>}
-              title={<div className="min-w-0"><h1 className="break-words text-[24px] font-semibold tracking-[-0.04em]">{category.name}</h1><p className="mt-0.5 break-words text-xs font-medium capitalize text-muted-foreground">{category.type} category</p></div>}
-              actions={<div className="flex shrink-0 items-center gap-1.5"><DatePicker initialMode="month" initialLabel={period.label} onApply={setPeriod} /><Link href={withReturnTo(`/categories/${category.id}/edit`, currentRoute)} aria-label="Edit category" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Edit3 aria-hidden="true" className="size-[18px]" /></Link></div>}
+              title={<div className="min-w-0"><h1 className="break-words text-[22px] font-semibold leading-tight tracking-[-0.04em]">{category.name}</h1><p className="mt-0.5 break-words text-xs font-medium capitalize text-muted-foreground">{category.type} category</p></div>}
+              actions={<Link href={withReturnTo(`/categories/${category.id}/edit`, currentRoute)} aria-label="Edit category" className="flex size-11 shrink-0 items-center justify-center rounded-[11px] border border-primary/20 bg-primary-soft text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"><Edit3 aria-hidden="true" className="size-[18px]" /></Link>}
             />
           </StickyPageHeader>
           <section
@@ -256,6 +256,7 @@ export default function CategoryActivityPage({
                 Transactions
               </h2>
             </div>
+            <DatePicker initialMode="month" initialLabel={period.label} onApply={setPeriod} />
           </div>
           {error ? (
             <div

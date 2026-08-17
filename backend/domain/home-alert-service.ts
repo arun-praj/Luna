@@ -419,7 +419,7 @@ export async function getActivityHomeAlerts(userId: string, options?: { now?: Da
     or(isNull(homeAlerts.expiresAt), gte(homeAlerts.expiresAt, timestamp)),
     isNull(homeAlerts.resolvedAt),
     eq(homeAlerts.aiSuppressed, false),
-  )).orderBy(desc(homeAlerts.hardUrgency), desc(homeAlerts.deterministicRank), desc(homeAlerts.showAt)).limit(40);
+  )).orderBy(desc(homeAlerts.showAt), desc(homeAlerts.createdAt), desc(homeAlerts.id)).limit(40);
   const seenSources = new Set<string>();
   const activityAlerts = [];
   for (const row of rows) {

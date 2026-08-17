@@ -1,29 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { count, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { categories, transactions } from "@/backend/db/schema";
+import { aggregateCategoryUsage, dedupeCategoriesByName, emptyCategoryUsageFrequencyByType } from "@/backend/domain/category-usage";
 import { categoryInput } from "@/backend/domain/validation";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401);
-  const [categoryRows, usageRows] = await Promise.all([
+  const [categoryRows, transactionRows] = await Promise.all([
     db.select().from(categories).where(or(eq(categories.userId, userId), isNull(categories.userId))),
-    db.select({ categoryId: transactions.categoryId, frequency: count(transactions.id) })
+    db.select({ categoryId: transactions.categoryId, type: transactions.type, splits: transactions.splits, transactionAt: transactions.transactionAt })
       .from(transactions)
-      .where(eq(transactions.userId, userId))
-      .groupBy(transactions.categoryId),
+      .where(and(eq(transactions.userId, userId), or(isNotNull(transactions.categoryId), ne(transactions.splits, "[]")))),
   ]);
-  const usageFrequency = new Map<string, number>();
-  for (const row of usageRows) {
-    if (row.categoryId) usageFrequency.set(row.categoryId, Number(row.frequency));
-  }
-  const rankedCategories = categoryRows
-    .map((category) => ({ ...category, usageFrequency: usageFrequency.get(category.id) ?? 0 }))
-    .sort((left, right) => right.usageFrequency - left.usageFrequency || left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
+  const usageByCategory = aggregateCategoryUsage(transactionRows);
+  const rankedCategories = dedupeCategoriesByName(categoryRows.map((category) => {
+    const usage = usageByCategory.get(category.id);
+    return { ...category, usageFrequency: usage?.usageFrequency ?? 0, usageFrequencyByType: usage?.usageFrequencyByType ?? emptyCategoryUsageFrequencyByType(), lastUsedAt: usage?.lastUsedAt ?? null };
+  }), userId).sort((left, right) => right.usageFrequency - left.usageFrequency || left.name.localeCompare(right.name));
   return NextResponse.json({ categories: rankedCategories });
 }
 

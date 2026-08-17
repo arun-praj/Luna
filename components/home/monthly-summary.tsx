@@ -170,7 +170,7 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
 
   if (compact) {
     return (
-      <div className="mt-4 grid min-w-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-[12px] border border-border bg-card" aria-label="Monthly overview" data-tour="monthly-overview">
+      <div className="mt-6 grid min-w-0 grid-cols-3 divide-x divide-border overflow-hidden rounded-[12px] border border-border bg-card" aria-label="Monthly overview" data-tour="monthly-overview">
         {overview.map((item) => {
           const Icon = item.icon;
           const values = currencyEntries(
