@@ -343,6 +343,9 @@ export function TransactionList({ limit, searchable = false, period, includeAler
               const transactionDescription = transaction.merchantName
                 ? `${transaction.merchantName}${transaction.notes ? ` · ${transaction.notes}` : ""}`
                 : transaction.notes;
+              const transactionSurfaceClass = transaction.type === "adjust_balance"
+                ? "border-l-2 border-primary/45 bg-primary-soft/55 hover:bg-primary-soft/70"
+                : "hover:bg-surface-subtle";
               return (
                 <div
                   role="link"
@@ -356,7 +359,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                     }
                   }}
                   key={`transaction:${transaction.id}`}
-                  className={`group flex min-h-[76px] cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
+                  className={`group flex min-h-[76px] cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors ${transactionSurfaceClass} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${showTransactionDivider ? "border-t border-border" : ""}`}
                 >
                   <span
                     className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[10px]"

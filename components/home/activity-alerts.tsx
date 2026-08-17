@@ -129,11 +129,11 @@ export function ActivityAlertRow({ alert }: { alert: ActivityAlert }) {
         <Icon aria-hidden="true" className="size-[18px]" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-baseline justify-between gap-3">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[15px] font-semibold text-foreground">{alert.label}</span>
+        <span className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+          <span className="transaction-list-title-clamp min-w-0 break-words text-[15px] font-semibold leading-5 text-foreground sm:flex-1 sm:truncate">
+            {alert.label}
           </span>
-          <span className={`shrink-0 text-[14px] font-semibold tabular-nums ${appearance.valueClass}`}>
+          <span className={`max-w-full break-words text-[14px] font-semibold leading-5 tabular-nums sm:shrink-0 sm:whitespace-nowrap sm:text-right ${appearance.valueClass}`}>
             {showProgress ? `${percentage}%` : alert.value}
           </span>
         </span>
@@ -146,9 +146,9 @@ export function ActivityAlertRow({ alert }: { alert: ActivityAlert }) {
             {details.context ? <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{details.context}</span> : null}
           </>
         ) : (
-          <span className="mt-1.5 flex min-w-0 items-baseline justify-between gap-3 text-xs text-muted-foreground">
-            <span className="truncate">{alert.kind === "budget" ? budgetScope(alert.detail) : alert.detail}</span>
-            {alert.kind === "budget" ? <span className="shrink-0 font-semibold tabular-nums text-foreground" aria-label={`Spent and limit ${alert.value}`} title="Spent / limit">{alert.value}</span> : null}
+          <span className="mt-1.5 flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+            <span className="transaction-list-description-clamp min-w-0 break-words leading-4 sm:flex-1 sm:truncate">{alert.kind === "budget" ? budgetScope(alert.detail) : alert.detail}</span>
+            {alert.kind === "budget" ? <span className="max-w-full break-words font-semibold leading-4 tabular-nums text-foreground sm:shrink-0 sm:whitespace-nowrap sm:text-right" aria-label={`Spent and limit ${alert.value}`} title="Spent / limit">{alert.value}</span> : null}
           </span>
         )}
         {showProgress ? (

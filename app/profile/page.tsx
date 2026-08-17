@@ -305,10 +305,6 @@ export default function ProfilePage() {
     }, 320);
   }
 
-  function navigateBack() {
-    router.push("/");
-  }
-
   if (isLoading || !user) {
     return <PageDataSkeleton label="Loading profile" />;
   }
@@ -319,14 +315,13 @@ export default function ProfilePage() {
     >
       <div className="mx-auto w-full max-w-[720px] px-4 pb-12 sm:px-5">
         <StickyPageHeader className="-mx-4 flex items-center gap-3 px-4 pb-3 sm:-mx-5 sm:px-5">
-          <button
-            type="button"
-            onClick={navigateBack}
+          <Link
+            href="/"
             aria-label="Back to home"
             className="flex size-11 items-center justify-center rounded-[10px] border border-border bg-card text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
           >
             <ArrowLeft aria-hidden="true" className="size-5" />
-          </button>
+          </Link>
           <h1 className="text-[24px] font-semibold tracking-[-0.035em]">
             Profile
           </h1>
