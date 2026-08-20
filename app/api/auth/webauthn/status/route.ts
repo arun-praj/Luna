@@ -4,7 +4,6 @@ import { db } from "@/backend/db/client";
 import { users, webauthnCredentials } from "@/backend/db/schema";
 import { errorResponse, requireBaseAccessToken } from "@/backend/auth/http";
 
-export const runtime = "nodejs";
 export async function GET(request: Request) {
   const userId = await requireBaseAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);

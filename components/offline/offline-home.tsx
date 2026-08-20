@@ -143,9 +143,7 @@ function OfflineTransactionComposer({
   const preferredAccount = accounts.find((account) => account.isDefault) ?? accounts[0];
   const effectiveAccountId = accountId || preferredAccount?.serverId || "";
 
-  const visibleCategories = categories.filter((category) =>
-    type === "income" ? category.type === "income" : category.type === "expense",
-  );
+  const visibleCategories = categories;
   const numericAmount = Number(amount);
   const selectedAccount = accounts.find((account) => account.serverId === effectiveAccountId);
   const destinationAccount = accounts.find((account) => account.serverId === destinationAccountId);
@@ -258,7 +256,6 @@ function OfflineTransactionComposer({
                 aria-pressed={selected}
                 onClick={() => {
                   setType(option.type);
-                  setCategoryId(null);
                 }}
                 className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[12px] border px-1 py-2.5 text-[11px] font-semibold transition-all ${selected ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-border bg-card text-muted-foreground"}`}
               >
@@ -357,8 +354,7 @@ function OfflineTransactionComposer({
           </fieldset>
         ) : null}
 
-        {type === "expense" || type === "income" ? (
-          <fieldset className="mt-4 min-w-0">
+        <fieldset className="mt-4 min-w-0">
             <legend className="text-xs font-semibold text-muted-foreground">Category</legend>
             <div className="mt-2 min-w-0 max-w-full overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <div className="flex w-max min-w-max gap-1.5">
@@ -379,8 +375,7 @@ function OfflineTransactionComposer({
               </div>
             </div>
             {attempted && errors.category ? <p className="mt-1 text-xs font-medium text-expense">{errors.category}</p> : null}
-          </fieldset>
-        ) : null}
+        </fieldset>
 
         {type === "savings" ? (
           <label className="mt-4 block">

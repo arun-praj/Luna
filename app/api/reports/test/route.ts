@@ -6,7 +6,6 @@ import { db } from "@/backend/db/client";
 import { reportDeliveries, users } from "@/backend/db/schema";
 import { isSmtpConfigured } from "@/backend/auth/email";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);

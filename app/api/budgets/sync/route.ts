@@ -6,7 +6,6 @@ import { BudgetConflictError, createBudget, deleteBudget, listBudgets, updateBud
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { budgetInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 const mutation = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), mutationId: z.string().uuid(), budgetId: z.string().uuid(), input: budgetInput }),
   z.object({ operation: z.literal("update"), mutationId: z.string().uuid(), budgetId: z.string().uuid(), input: budgetInput.partial() }),

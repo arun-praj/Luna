@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { cacheLife } from "next/cache";
 import "./globals.css";
 import { PwaRuntime } from "@/components/pwa/pwa-runtime";
 import { AuthRedirectListener } from "@/components/auth/auth-redirect-listener";
@@ -25,11 +26,14 @@ export const viewport: Viewport = {
   themeColor: "#356b68",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  "use cache";
+  cacheLife("max");
+
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col overflow-x-clip">

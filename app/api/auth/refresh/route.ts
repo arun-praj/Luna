@@ -3,7 +3,6 @@ import { clearRefreshTokenCookie, errorResponse, getRefreshTokenCookie, setRefre
 import { RefreshTokenReuseError, getUserById, rotateRefreshToken } from "@/backend/auth/tokens";
 import { toPublicUserProfile } from "@/backend/auth/profile";
 
-export const runtime = "nodejs";
 
 export async function POST() {
   const rawToken = await getRefreshTokenCookie();

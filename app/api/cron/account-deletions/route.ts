@@ -5,7 +5,6 @@ import { accountDeletionRequests } from "@/backend/db/schema";
 import { deleteUserData } from "@/backend/privacy/delete-user-data";
 import { requireR2Bucket } from "@/backend/storage/r2";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const authorization = request.headers.get("authorization");

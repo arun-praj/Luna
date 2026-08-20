@@ -8,7 +8,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { deleteUserData } from "@/backend/privacy/delete-user-data";
 import { requireR2Bucket } from "@/backend/storage/r2";
 
-export const runtime = "nodejs";
 
 const input = z.object({ mode: z.enum(["immediate", "after_30_days", "cancel"]) });
 

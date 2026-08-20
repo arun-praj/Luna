@@ -10,7 +10,6 @@ import { buildReport, getPeriodBounds, REPORT_PERIODS, type ReportData, type Rep
 import { buildReportPdf } from "@/backend/reports/report-pdf";
 import { readCachedReport, writeReportCache } from "@/backend/reports/report-cache";
 
-export const runtime = "nodejs";
 
 function requestedPeriod(value: string | null): ReportPeriod {
   return REPORT_PERIODS.includes(value as ReportPeriod) ? value as ReportPeriod : "monthly";

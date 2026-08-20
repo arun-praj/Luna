@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { getBudgetIncomeSummary, getBudgetOnboardingStatus, replaceBudgetIncomeSources } from "@/backend/domain/budget-income-service";
 import { budgetIncomeSourcesInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

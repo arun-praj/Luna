@@ -7,7 +7,6 @@ import { db } from "@/backend/db/client";
 import { transactions, userTags } from "@/backend/db/schema";
 import { tagInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

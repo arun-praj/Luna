@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
-  ArrowLeftRight,
   AlertCircle,
   Banknote,
   CalendarDays,
@@ -54,12 +53,12 @@ import type {
   MerchantOption,
   SavingsInstrumentOption,
   SplitDraft,
+  TransactionOptionMemory,
   TransactionKind,
 } from "./transaction-detail/types";
 import {
   BUDGET_PERIODS,
   INCOME_GOALS_PER_PAGE,
-  LAST_ACCOUNT_KEY,
   tagOptions,
   transactionTypes,
 } from "./transaction-detail/types";
@@ -67,8 +66,8 @@ import {
   budgetProgressColor,
   categoryForeground,
   displayAccountName,
+  rankTransactionOptions,
   serializeTransactionDraft,
-  sortTransactionAccounts,
   transferTitle,
 } from "./transaction-detail/selectors";
 import {
@@ -172,6 +171,7 @@ export function TransactionDetail({
   const [goalsPage, setGoalsPage] = React.useState(0);
   const [allocationGoalId, setAllocationGoalId] = React.useState<string | null>(null);
   const [savingsOptions, setSavingsOptions] = React.useState<SavingsInstrumentOption[]>([]);
+  const [optionMemory, setOptionMemory] = React.useState<TransactionOptionMemory>({ accounts: [], categories: [], savingsInstruments: [] });
   const [amountOpen, setAmountOpen] = React.useState(false);
   const [dateOpen, setDateOpen] = React.useState(false);
   const dateTransition = useAnimatedVisibility(dateOpen);
@@ -210,13 +210,14 @@ export function TransactionDetail({
     let active = true;
     const load = async () => {
       try {
-        const [accountResponse, categoryResponse, tagResponse, merchantResponse, savingsResponse, goalResponse] = await Promise.all([
+        const [accountResponse, categoryResponse, tagResponse, merchantResponse, savingsResponse, goalResponse, memoryResponse] = await Promise.all([
           authenticatedFetch("/api/accounts"),
           authenticatedFetch("/api/categories"),
           authenticatedFetch("/api/tags"),
           authenticatedFetch("/api/merchants"),
           authenticatedFetch("/api/savings/instruments"),
           authenticatedFetch("/api/goals"),
+          initialKind ? authenticatedFetch(`/api/transaction-option-memory?type=${encodeURIComponent(initialKind)}`) : Promise.resolve(null),
         ]);
         const accountResult = (await accountResponse.json()) as { accounts?: Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean }> };
         const categoryResult = (await categoryResponse.json()) as { categories?: CategoryOption[] };
@@ -224,9 +225,11 @@ export function TransactionDetail({
         const merchantResult = merchantResponse.ok ? (await merchantResponse.json()) as { merchants?: Array<{ name: string | null; lastUsedAt: string; usageCount: number | string }> } : { merchants: [] };
         const savingsResult = savingsResponse.ok ? (await savingsResponse.json()) as { instruments?: SavingsInstrumentOption[] } : { instruments: [] };
         const goalResult = goalResponse.ok ? (await goalResponse.json()) as { goals?: IncomeGoalOption[] } : { goals: [] };
+        const memoryResult = memoryResponse?.ok ? (await memoryResponse.json()) as { memory?: TransactionOptionMemory } : null;
         if (!active) return;
-        const storedAccountId = isNew ? window.localStorage.getItem(LAST_ACCOUNT_KEY) : null;
-        const orderedAccounts = sortTransactionAccounts(accountResult.accounts ?? [], storedAccountId);
+        const initialMemory = memoryResult?.memory ?? { accounts: [], categories: [], savingsInstruments: [] };
+        const orderedAccounts = rankTransactionOptions(accountResult.accounts ?? [], initialMemory.accounts);
+        setOptionMemory(initialMemory);
         setAccountOptions(orderedAccounts);
         setCategoryOptions(categoryResult.categories ?? []);
         setSavedTagOptions(tagResult.tags?.map((tag) => tag.name) ?? []);
@@ -299,6 +302,22 @@ export function TransactionDetail({
 
   React.useEffect(() => {
     let active = true;
+    if (!kind) {
+      return () => { active = false; };
+    }
+    void authenticatedFetch(`/api/transaction-option-memory?type=${encodeURIComponent(kind)}`)
+      .then(async (response) => response.ok ? await response.json() as { memory?: TransactionOptionMemory } : null)
+      .then((result) => {
+        if (active) setOptionMemory(result?.memory ?? { accounts: [], categories: [], savingsInstruments: [] });
+      })
+      .catch(() => {
+        if (active) setOptionMemory({ accounts: [], categories: [], savingsInstruments: [] });
+      });
+    return () => { active = false; };
+  }, [kind]);
+
+  React.useEffect(() => {
+    let active = true;
     if (kind !== "expense") {
       return () => { active = false; };
     }
@@ -326,8 +345,11 @@ export function TransactionDetail({
     return () => URL.revokeObjectURL(receiptPreviewUrl);
   }, [receiptPreviewUrl]);
 
-  const selectedAccount = accountOptions.find((account) => account.id === accountId);
-  const destinationAccount = accountOptions.find((account) => account.id === transferToAccountId);
+  const rankedAccountOptions = React.useMemo(() => rankTransactionOptions(accountOptions, optionMemory.accounts), [accountOptions, optionMemory.accounts]);
+  const rankedCategoryOptions = React.useMemo(() => rankTransactionOptions(categoryOptions, optionMemory.categories), [categoryOptions, optionMemory.categories]);
+  const rankedSavingsOptions = React.useMemo(() => rankTransactionOptions(savingsOptions, optionMemory.savingsInstruments), [optionMemory.savingsInstruments, savingsOptions]);
+  const selectedAccount = rankedAccountOptions.find((account) => account.id === accountId);
+  const destinationAccount = rankedAccountOptions.find((account) => account.id === transferToAccountId);
   const incomeAmount = kind === "income" ? Math.max(0, Number(amount) || 0) : 0;
   const incomeAllocationEntries = Object.entries(incomeAllocations)
     .map(([goalId, value]) => ({ goalId, amount: Number(value) }))
@@ -678,7 +700,6 @@ export function TransactionDetail({
 
   const selectTransferSource = (nextAccountId: string) => {
     setAccountId(nextAccountId);
-    window.localStorage.setItem(LAST_ACCOUNT_KEY, nextAccountId);
     if (transferToAccountId === nextAccountId) setTransferToAccountId("");
   };
 
@@ -687,8 +708,6 @@ export function TransactionDetail({
   };
 
   const applyTransferMetadata = (nextAmount: string) => {
-    setCategory("Transfer");
-    setCategoryId(null);
     setTitle(transferTitle(nextAmount, selectedAccount?.name, destinationAccount?.name, selectedAccount?.currency ?? "NPR"));
   };
 
@@ -733,7 +752,7 @@ export function TransactionDetail({
         {kind === "income" ? "Add money to" : kind === "savings" ? "Set money aside from" : "Pay money from"}
       </p>
       <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {accountOptions.map((option) => {
+        {rankedAccountOptions.map((option) => {
           const selected = accountId === option.id;
           const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
           const accountForeground = getAccountForeground(accountColor, option.type);
@@ -744,7 +763,6 @@ export function TransactionDetail({
               aria-pressed={selected}
               onClick={() => {
                 setAccountId(option.id);
-                window.localStorage.setItem(LAST_ACCOUNT_KEY, option.id);
               }}
               style={{
                 backgroundColor: selected ? accountColor : undefined,
@@ -770,7 +788,7 @@ export function TransactionDetail({
           <p className="mb-2 text-xs font-semibold text-muted-foreground">Saving instrument</p>
           {saveAttempted && validationErrors.savingsInstrument ? <p className="mb-2 text-xs font-medium text-expense">{validationErrors.savingsInstrument}</p> : null}
           <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {savingsOptions.map((option) => {
+            {rankedSavingsOptions.map((option) => {
               const selected = savingsInstrumentId === option.id;
               return <button type="button" key={`amount-${option.id}`} aria-pressed={selected} onClick={() => setSavingsInstrumentId(option.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "border-primary bg-primary-soft text-primary shadow-sm" : "border-border bg-background hover:border-primary/50"}`}><SavingsInstrumentAvatar icon={option.icon} /><span className="max-w-[150px] truncate">{option.name}</span>{option.typeName ? <span className="max-w-[120px] truncate text-xs font-medium text-muted-foreground">· {option.typeName}</span> : null}</button>;
             })}
@@ -786,7 +804,7 @@ export function TransactionDetail({
       <div>
         <p className="mb-2 text-xs font-semibold text-muted-foreground">Move money from</p>
         <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {accountOptions.map((option) => {
+          {rankedAccountOptions.map((option) => {
             const selected = accountId === option.id;
             const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
             const accountForeground = getAccountForeground(accountColor, option.type);
@@ -810,7 +828,7 @@ export function TransactionDetail({
       <div className="border-t border-border pt-3">
         <p className="mb-2 text-xs font-semibold text-muted-foreground">Move money to</p>
         <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {accountOptions.filter((option) => option.id !== accountId).map((option) => {
+          {rankedAccountOptions.filter((option) => option.id !== accountId).map((option) => {
             const selected = transferToAccountId === option.id;
             const incompatibleCurrency = Boolean(selectedAccount && selectedAccount.currency !== option.currency);
             const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
@@ -989,23 +1007,19 @@ export function TransactionDetail({
           <div className="mt-5 flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => {
-                if (kind !== "transfer") openCategoryPicker();
-              }}
+              onClick={() => openCategoryPicker()}
               style={selectedCategory?.color ? { backgroundColor: selectedCategory.color, color: getCategoryForeground(selectedCategory.color), borderColor: `${getCategoryForeground(selectedCategory.color)}55` } : undefined}
               className={`flex min-h-11 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${
                 saveAttempted && validationErrors.category
                   ? "border-expense bg-expense-soft text-expense"
-                  : kind === "transfer" ? "cursor-default border-info/25 bg-info-soft text-info" : "border-transparent bg-primary-soft text-primary"
+                  : "border-transparent bg-primary-soft text-primary"
               }`}
             >
-              {kind === "transfer"
-                ? <ArrowLeftRight aria-hidden="true" className="size-[18px]" />
-                : splits.length
-                  ? <Layers3 aria-hidden="true" className="size-[18px]" />
-                  : React.createElement(categoryIcon, { "aria-hidden": true, className: "size-[18px]" })}
-              {kind === "transfer" ? "Transfer" : splits.length ? `Split across ${splits.length} categories` : category || "Choose category"}
-              {kind === "transfer" ? null : <ChevronRight aria-hidden="true" className="size-4" />}
+              {splits.length
+                ? <Layers3 aria-hidden="true" className="size-[18px]" />
+                : React.createElement(categoryIcon, { "aria-hidden": true, className: "size-[18px]" })}
+              {splits.length ? `Split across ${splits.length} categories` : category || "Choose category"}
+              <ChevronRight aria-hidden="true" className="size-4" />
             </button>
             <button
               type="button"
@@ -1059,7 +1073,7 @@ export function TransactionDetail({
             </div>
           ) : (
           <div className="flex gap-2 overflow-x-auto px-4 pb-4 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {accountOptions.map((option) => {
+            {rankedAccountOptions.map((option) => {
               const selected = accountId === option.id;
               const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
               const accountForeground = getAccountForeground(accountColor, option.type);
@@ -1070,7 +1084,6 @@ export function TransactionDetail({
                   aria-pressed={selected}
                   onClick={() => {
                     setAccountId(option.id);
-                    window.localStorage.setItem(LAST_ACCOUNT_KEY, option.id);
                   }}
                   style={{
                     backgroundColor: selected ? accountColor : undefined,
@@ -1103,7 +1116,7 @@ export function TransactionDetail({
             <div className="border-t border-border px-4 pb-4 pt-3">
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Move money to</p>
               <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {accountOptions.filter((option) => option.id !== accountId).map((option) => {
+                {rankedAccountOptions.filter((option) => option.id !== accountId).map((option) => {
                   const selected = transferToAccountId === option.id;
                   const incompatibleCurrency = Boolean(selectedAccount && selectedAccount.currency !== option.currency);
                   const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
@@ -1144,7 +1157,7 @@ export function TransactionDetail({
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Saving instrument</p>
               {saveAttempted && validationErrors.savingsInstrument ? <p className="mb-2 text-xs font-medium text-expense">{validationErrors.savingsInstrument}</p> : null}
               <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {savingsOptions.map((option) => {
+                {rankedSavingsOptions.map((option) => {
                   const selected = savingsInstrumentId === option.id;
                   return <button type="button" key={option.id} aria-pressed={selected} onClick={() => setSavingsInstrumentId(option.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-[11px] border px-3.5 text-sm font-semibold transition-colors ${selected ? "border-primary bg-primary-soft text-primary shadow-sm" : "border-border bg-background hover:border-primary/50"}`}><SavingsInstrumentAvatar icon={option.icon} /><span className="max-w-[150px] truncate">{option.name}</span>{option.typeName ? <span className="max-w-[120px] truncate text-xs font-medium text-muted-foreground">· {option.typeName}</span> : null}</button>;
                 })}
@@ -1711,7 +1724,7 @@ export function TransactionDetail({
               ) : null}
               <div className="mt-3 grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto overscroll-contain pb-[calc(1rem+env(safe-area-inset-bottom))] pr-0.5">
                 {(picker === "category"
-                  ? categoryOptions.filter((option) => (splitCategoryIndex === null || option.type === kind) && option.name.toLocaleLowerCase().includes(categorySearch.trim().toLocaleLowerCase()))
+                  ? rankedCategoryOptions.filter((option) => option.name.toLocaleLowerCase().includes(categorySearch.trim().toLocaleLowerCase()))
                   : picker === "merchant"
                     ? merchantOptions.filter((merchant) => merchant.name.toLocaleLowerCase().includes(merchantSearch.trim().toLocaleLowerCase()))
                     : [...tagOptions, ...savedTagOptions.filter((tag) => !tagOptions.includes(tag))]

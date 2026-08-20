@@ -5,7 +5,6 @@ import { dataExports, users } from "@/backend/db/schema";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { createPortableExport } from "@/backend/domain/data-portability";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);

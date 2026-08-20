@@ -8,7 +8,6 @@ import { createBiometricUnlockGrant } from "@/backend/auth/tokens";
 import { errorResponse, requireBaseAccessToken } from "@/backend/auth/http";
 import { base64UrlToBytes, webAuthnConfig } from "@/backend/auth/webauthn";
 
-export const runtime = "nodejs";
 export async function POST(request: Request) {
   const userId = await requireBaseAccessToken(request);
   if (!userId) return errorResponse("Authentication required", 401);

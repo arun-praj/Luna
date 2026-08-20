@@ -6,7 +6,6 @@ import { budgetInput } from "@/backend/domain/validation";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import type { BudgetPeriod } from "@/lib/budgets";
 
-export const runtime = "nodejs";
 const periods = new Set<BudgetPeriod>(["weekly", "monthly", "yearly"]);
 
 export async function GET(request: Request) {

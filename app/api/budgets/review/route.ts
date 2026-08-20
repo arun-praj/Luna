@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { getBudgetReview } from "@/backend/domain/budget-service";
 import type { BudgetPeriod } from "@/lib/budgets";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

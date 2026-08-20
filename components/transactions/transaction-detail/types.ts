@@ -26,7 +26,6 @@ export const transactionTypes = [
 export const tagOptions = ["Recurring", "Personal", "Work", "Reimbursable"];
 export const BUDGET_PERIODS: BudgetPeriod[] = ["weekly", "monthly", "yearly"];
 export const INCOME_GOALS_PER_PAGE = 4;
-export const LAST_ACCOUNT_KEY = "cocomelon.last-transaction-account";
 
 export type CategoryOption = {
   id: string;
@@ -55,6 +54,18 @@ export type SavingsInstrumentOption = {
   typeName?: string;
   currentBalance: number;
   icon?: string | null;
+};
+
+export type TransactionOptionMemoryEntry = {
+  optionId: string;
+  frequency: number;
+  lastUsedAt: string;
+};
+
+export type TransactionOptionMemory = {
+  accounts: TransactionOptionMemoryEntry[];
+  categories: TransactionOptionMemoryEntry[];
+  savingsInstruments: TransactionOptionMemoryEntry[];
 };
 
 export type CategoryBudgetPreview = {

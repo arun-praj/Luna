@@ -7,7 +7,6 @@ import { passwordResetTokens, refreshTokens, users, webauthnUnlockGrants } from 
 import { errorResponse } from "@/backend/auth/http";
 import { hashPassword } from "@/backend/auth/password";
 
-export const runtime = "nodejs";
 const input = z.object({ token: z.string().min(20).max(200), password: z.string().min(8).max(128) });
 
 function addResetCommitGuard(statements: Array<Parameters<typeof db.batch>[0][number]>, tokenId: string) {

@@ -9,7 +9,6 @@ import { decryptSecret, encryptSecret } from "@/backend/auth/crypto";
 import { createTotp, createTotpSecret, verifyTotp } from "@/backend/auth/totp";
 import { consumeBackupCode, createBackupCodes, parseBackupCodeHashes } from "@/backend/auth/two-factor";
 
-export const runtime = "nodejs";
 
 const codeInput = z.object({ code: z.string().trim().min(6).max(20) });
 

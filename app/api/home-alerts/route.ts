@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { getActivityHomeAlerts, getHomeAlerts } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

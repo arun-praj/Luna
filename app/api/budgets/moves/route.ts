@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { listBudgetMoves, moveBudgetMoney } from "@/backend/domain/budget-service";
 import { budgetMoveInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

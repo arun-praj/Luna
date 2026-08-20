@@ -9,7 +9,6 @@ import { createBalanceAdjustment } from "@/backend/domain/transaction-service";
 import { deleteUploadIfUnreferenced, prepareStoredObjectAttachment, prepareStoredObjectDetachment, type UploadBatchStatement } from "@/backend/storage/upload-lifecycle";
 import { normalizeMoney } from "@/lib/money";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, { params }: Context) {

@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { setupFiftyThirtyTwenty } from "@/backend/domain/budget-service";
 import { budgetTemplateInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);

@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { getBudgetCategoryBuckets, saveBudgetCategoryBuckets } from "@/backend/domain/budget-service";
 import { budgetBucketInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

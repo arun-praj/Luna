@@ -14,7 +14,6 @@ import { createEmailVerificationToken } from "@/backend/auth/tokens";
 import { and, isNull } from "drizzle-orm";
 import { otpCodes } from "@/backend/db/schema";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const parsed = loginInput.safeParse(await request.json().catch(() => null));

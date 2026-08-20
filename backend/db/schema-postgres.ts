@@ -5,6 +5,7 @@ import {
   integer,
   index,
   pgTable,
+  primaryKey,
   real,
   text,
   uniqueIndex,
@@ -411,6 +412,24 @@ export const categories = pgTable(
     color: text("color"),
   },
   (table) => [index("categories_user_idx").on(table.userId)],
+);
+
+export const transactionOptionMemory = pgTable(
+  "transaction_option_memory",
+  {
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    transactionType: text("transaction_type", { enum: ["expense", "income", "savings", "transfer", "adjust_balance", "goal_spend"] }).notNull(),
+    optionKind: text("option_kind", { enum: ["account", "category", "savings_instrument"] }).notNull(),
+    optionId: text("option_id").notNull(),
+    frequency: integer("frequency").notNull().default(0),
+    lastUsedAt: isoTimestamp("last_used_at"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.transactionType, table.optionKind, table.optionId], name: "transaction_option_memory_pk" }),
+    index("transaction_option_memory_rank_idx").on(table.userId, table.transactionType, table.optionKind, table.lastUsedAt, table.frequency),
+  ],
 );
 
 export const budgetIncomeSources = pgTable(

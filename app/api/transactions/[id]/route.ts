@@ -8,7 +8,7 @@ import { deleteTransaction, serializeTransaction, updateTransaction } from "@/ba
 import { transactionInput } from "@/backend/domain/validation";
 import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 
-export const runtime = "nodejs"; type Context = { params: Promise<{ id: string }> };
+type Context = { params: Promise<{ id: string }> };
 
 function receiptReferenceFromBody(body: unknown) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;

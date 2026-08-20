@@ -4,7 +4,6 @@ import { db } from "@/backend/db/client";
 import { users } from "@/backend/db/schema";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

@@ -6,7 +6,6 @@ import { db } from "@/backend/db/client";
 import { savingsInstrumentTypes } from "@/backend/db/schema";
 import { instrumentTypeInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 const DEFAULT_INSTRUMENT_TYPES = [
   ["00000000-0000-4000-8000-000000000001", "Pension"],

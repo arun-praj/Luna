@@ -7,7 +7,6 @@ import { dataImports } from "@/backend/db/schema";
 import { importPortableData, MAX_IMPORT_BYTES, PortabilityLimitError } from "@/backend/domain/data-portability";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
-export const runtime = "nodejs";
 
 async function readBodyWithinLimit(request: Request) {
   if (!request.body) return { body: "", bytes: 0 };

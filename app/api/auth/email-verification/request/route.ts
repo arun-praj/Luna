@@ -10,7 +10,6 @@ import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/ema
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 import { newVerificationCode, pendingRegistrationCodeHash, pendingRegistrationExpiry } from "@/backend/auth/pending-registration";
 
-export const runtime = "nodejs";
 const input = z.object({ pendingToken: z.string().min(20).max(400).optional(), verificationToken: z.string().min(20).max(400).optional() });
 
 export async function POST(request: Request) {

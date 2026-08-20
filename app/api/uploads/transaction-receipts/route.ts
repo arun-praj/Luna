@@ -6,7 +6,6 @@ import { isUploadQuotaError, putUserUpload } from "@/backend/storage/upload-life
 import { MAX_UPLOAD_BYTES, uploadUrl } from "@/backend/storage/upload-policy";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
-export const runtime = "nodejs";
 
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const extensions: Record<string, string> = {

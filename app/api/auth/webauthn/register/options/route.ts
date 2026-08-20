@@ -7,7 +7,6 @@ import { users, webauthnChallenges, webauthnCredentials } from "@/backend/db/sch
 import { errorResponse, requireFreshReauthentication } from "@/backend/auth/http";
 import { webAuthnConfig } from "@/backend/auth/webauthn";
 
-export const runtime = "nodejs";
 export async function POST(request: Request) {
   const userId = await requireFreshReauthentication(request);
   if (!userId) return errorResponse("Authentication required", 401);

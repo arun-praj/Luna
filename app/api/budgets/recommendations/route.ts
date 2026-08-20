@@ -4,7 +4,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { applyBudgetRecommendations, getBudgetRecommendations } from "@/backend/domain/budget-service";
 import type { BudgetPeriod } from "@/lib/budgets";
 
-export const runtime = "nodejs";
 
 function periodFrom(request: Request): BudgetPeriod {
   return new URL(request.url).searchParams.get("period") === "monthly" ? "monthly" : "monthly";

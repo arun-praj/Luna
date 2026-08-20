@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { checkAccountBalanceConsistency } from "@/backend/domain/account-consistency";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;

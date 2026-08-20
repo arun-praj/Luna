@@ -5,7 +5,6 @@ import { createTransaction, serializeTransaction } from "@/backend/domain/transa
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { transactionInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 const syncInput = z.object({ transactions: z.array(transactionInput).max(500) });
 
 export async function POST(request: Request) {

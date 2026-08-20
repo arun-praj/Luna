@@ -5,7 +5,6 @@ import { BudgetConflictError, BudgetDeleteConflictError, deleteBudget, getBudget
 import { budgetInput } from "@/backend/domain/validation";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, { params }: Context) {

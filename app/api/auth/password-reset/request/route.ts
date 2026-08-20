@@ -8,7 +8,6 @@ import { isSmtpConfigured, sendPasswordResetEmail } from "@/backend/auth/email";
 import { z } from "zod";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
-export const runtime = "nodejs";
 
 const input = z.object({ email: z.string().trim().toLowerCase().pipe(z.email()).optional() });
 

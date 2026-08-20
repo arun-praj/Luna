@@ -8,7 +8,6 @@ import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 import { transactionInput } from "@/backend/domain/validation";
 import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 
-export const runtime = "nodejs";
 
 function receiptReferenceFromBody(body: unknown) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;

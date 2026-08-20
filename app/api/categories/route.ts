@@ -6,7 +6,6 @@ import { db } from "@/backend/db/client";
 import { categories, transactions } from "@/backend/db/schema";
 import { categoryInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request); if (!userId) return errorResponse("Authentication required", 401);

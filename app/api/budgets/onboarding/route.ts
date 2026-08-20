@@ -5,7 +5,6 @@ import { completeBudgetOnboarding, getBudgetOnboardingStatus } from "@/backend/d
 import { budgetOnboardingInput } from "@/backend/domain/validation";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

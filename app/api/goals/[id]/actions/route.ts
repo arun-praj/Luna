@@ -6,7 +6,6 @@ import { contributeToGoal, spendFromGoal, withdrawFromGoal } from "@/backend/dom
 import { positiveMoneyInput } from "@/backend/domain/validation";
 import { resolveHomeAlert, scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
 const actionInput = z.object({

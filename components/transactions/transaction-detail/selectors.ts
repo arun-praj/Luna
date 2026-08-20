@@ -1,16 +1,11 @@
 import { formatMoney } from "@/components/money/money-editor";
 import type { SplitDraft, TransactionKind } from "./types";
 
+export { rankTransactionOptions } from "@/lib/transaction-option-memory";
+
 export function budgetProgressColor(percentage: number) {
   const capped = Math.min(100, Math.max(0, percentage));
   return `hsl(${Math.round(120 - capped * 1.2)} 72% 42%)`;
-}
-
-export function sortTransactionAccounts<T extends { id: string; isDefault?: boolean }>(accounts: T[], preferredId: string | null) {
-  const preferred = preferredId
-    ? accounts.find((account) => account.id === preferredId)
-    : accounts.find((account) => account.isDefault);
-  return preferred ? [preferred, ...accounts.filter((account) => account.id !== preferred.id)] : accounts;
 }
 
 const categoryForegrounds: Record<string, string> = {

@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { reverseBudgetMove } from "@/backend/domain/budget-service";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireAccessToken(request);

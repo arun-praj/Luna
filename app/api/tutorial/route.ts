@@ -6,7 +6,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { users } from "@/backend/db/schema";
 
-export const runtime = "nodejs";
 
 const tutorialAction = z.object({
   action: z.enum(["start", "complete"]),

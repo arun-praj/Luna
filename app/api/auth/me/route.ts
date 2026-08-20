@@ -8,7 +8,6 @@ import { toPublicUserProfile } from "@/backend/auth/profile";
 import { isAvatarPreset } from "@/lib/avatar";
 import { z } from "zod";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireBaseAccessToken(request);

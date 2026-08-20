@@ -3,7 +3,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { updateLoanPayment } from "@/backend/domain/loan-service";
 import { loanPaymentUpdateInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string; paymentId: string }> };
 
 export async function PATCH(request: Request, { params }: Context) {

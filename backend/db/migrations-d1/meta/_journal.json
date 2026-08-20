@@ -183,6 +183,13 @@
       "when": 1786646400000,
       "tag": "0025_stored_object_attachment_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1786947038754,
+      "tag": "0026_fantastic_doorman",
+      "breakpoints": true
     }
   ]
 }

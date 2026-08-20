@@ -11,7 +11,6 @@ import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 import { consumeTwoFactorChallenge, createSession, recordTwoFactorChallengeAttempt, verifyTwoFactorChallengeToken } from "@/backend/auth/tokens";
 import { toPublicUserProfile } from "@/backend/auth/profile";
 
-export const runtime = "nodejs";
 
 const input = z.object({ challengeToken: z.string().min(20), code: z.string().trim().min(6).max(20), deviceLabel: z.string().trim().max(100).optional() });
 

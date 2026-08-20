@@ -5,7 +5,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { copyPreviousBudgetPeriod, previewPreviousBudgetPeriod } from "@/backend/domain/budget-service";
 import { scheduleHomeAlertRepair } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 const input = z.object({ period: z.enum(["weekly", "monthly", "yearly"]) });
 
 async function getPeriod(request: Request) {

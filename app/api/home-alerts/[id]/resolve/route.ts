@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { resolveHomeAlert } from "@/backend/domain/home-alert-service";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, { params }: Context) {

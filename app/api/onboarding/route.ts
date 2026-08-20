@@ -9,7 +9,6 @@ import { z } from "zod";
 import { isAvatarPreset } from "@/lib/avatar";
 import { hasDuplicateAccountNames } from "@/backend/domain/account-rules";
 
-export const runtime = "nodejs";
 
 const onboardingInput = z.object({
   name: z.string().trim().min(1).max(100),

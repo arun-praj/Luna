@@ -9,7 +9,6 @@ import { hasDuplicateAccountName } from "@/backend/domain/account-rules";
 import { normalizeMoney } from "@/lib/money";
 import { prepareStoredObjectAttachment, type UploadBatchStatement } from "@/backend/storage/upload-lifecycle";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const userId = await requireAccessToken(request);

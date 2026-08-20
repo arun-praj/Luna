@@ -5,7 +5,6 @@ import { errorResponse, requireAccessToken } from "@/backend/auth/http";
 import { db } from "@/backend/db/client";
 import { notificationSettings } from "@/backend/db/schema";
 
-export const runtime = "nodejs";
 
 const notificationSettingsInput = z.object({
   goalMilestonesEnabled: z.boolean().optional(),

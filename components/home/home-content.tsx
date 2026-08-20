@@ -49,6 +49,7 @@ export function HomeContent() {
           <header className="-mx-4 flex items-center justify-between gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:-mx-5 sm:px-5 sm:pt-10">
             <Link
               href="/profile"
+              prefetch
               aria-label="Open your profile"
               className="group flex min-w-0 items-center gap-3 rounded-[12px] pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
             >

@@ -10,7 +10,6 @@ import { verifyEmailVerificationCode } from "@/backend/auth/email-verification";
 import { claimPendingRegistration, recordPendingVerificationFailure, PENDING_REGISTRATION_MAX_ATTEMPTS } from "@/backend/auth/pending-registration";
 import { toPublicUserProfile } from "@/backend/auth/profile";
 
-export const runtime = "nodejs";
 
 const input = z.object({
   code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code"),

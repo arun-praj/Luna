@@ -5,7 +5,6 @@ import { db } from "@/backend/db/client";
 import { categories } from "@/backend/db/schema";
 import { categoryInput } from "@/backend/domain/validation";
 
-export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, { params }: Context) {

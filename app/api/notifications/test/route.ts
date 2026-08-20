@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { requireAccessToken } from "@/backend/auth/http";
 import { sendTestNotification } from "@/backend/notifications/scheduler";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const userId = await requireAccessToken(request);

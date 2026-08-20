@@ -11,7 +11,6 @@ import { isSmtpConfigured, sendEmailVerificationEmail } from "@/backend/auth/ema
 import { newVerificationCode, pendingRegistrationCodeHash, pendingRegistrationExpiry, removeExpiredPendingRegistrations, PENDING_REGISTRATION_MINUTES } from "@/backend/auth/pending-registration";
 import { checkRateLimit, rateLimitHeaders } from "@/backend/auth/rate-limit";
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const parsed = signupInput.safeParse(await request.json().catch(() => null));

@@ -4,7 +4,6 @@ import { db } from "@/backend/db/client";
 import { users, webauthnChallenges, webauthnCredentials, webauthnUnlockGrants } from "@/backend/db/schema";
 import { errorResponse, requireFreshReauthentication } from "@/backend/auth/http";
 
-export const runtime = "nodejs";
 export async function DELETE(request: Request) {
   const userId = await requireFreshReauthentication(request);
   if (!userId) return errorResponse("Authentication required", 401);

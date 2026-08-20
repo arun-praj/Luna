@@ -5,7 +5,6 @@ import { r2Bucket, r2Configured } from "@/backend/storage/r2";
 import { deleteUploadIfUnreferenced } from "@/backend/storage/upload-lifecycle";
 import { resolveUploadRouteKey } from "@/backend/storage/upload-policy";
 
-export const runtime = "nodejs";
 
 export async function GET(
   request: Request,

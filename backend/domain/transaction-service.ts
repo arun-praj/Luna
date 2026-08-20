@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/backend/db/client";
-import { accounts, categories, goals, recurringTemplates, savingsInstruments, transactionHistory, transactions } from "@/backend/db/schema";
-import { savingsInstrumentReferenceError, transactionCategoryReferenceError } from "@/backend/domain/transaction-semantics";
+import { accounts, categories, goals, recurringTemplates, savingsInstruments, transactionHistory, transactionOptionMemory, transactions } from "@/backend/db/schema";
+import { savingsInstrumentReferenceError } from "@/backend/domain/transaction-semantics";
 import type { z } from "zod";
 import { transactionInput } from "@/backend/domain/validation";
 import { addMoney, normalizeMoney, subtractMoney } from "@/lib/money";
 import { prepareStoredObjectAttachment, prepareStoredObjectDetachment } from "@/backend/storage/upload-lifecycle";
+import { getNewTransactionOptionAssociations, getTransactionOptionAssociations, type TransactionOptionAssociation } from "@/backend/domain/transaction-option-memory";
 
 export type TransactionInput = z.infer<typeof transactionInput>;
 type DatabaseExecutor = typeof db;
@@ -150,13 +151,10 @@ async function assertReferences(tx: DatabaseExecutor, userId: string, input: Tra
   if (input.categoryId) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, input.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
     if (!category) throw new Error("Category not found");
-    const categoryReferenceError = transactionCategoryReferenceError(input.type, category.type);
-    if (categoryReferenceError) throw new Error(categoryReferenceError);
   }
   for (const split of input.splits ?? []) {
     const [category] = await tx.select().from(categories).where(and(eq(categories.id, split.categoryId), or(eq(categories.userId, userId), isNull(categories.userId)))).limit(1);
     if (!category) throw new Error("Split category not found");
-    if (category.type !== input.type) throw new Error(`Choose ${input.type} categories for every split`);
   }
   if (input.recurringTemplateId) {
     const [template] = await tx.select().from(recurringTemplates).where(and(eq(recurringTemplates.id, input.recurringTemplateId), eq(recurringTemplates.userId, userId))).limit(1);
@@ -360,6 +358,27 @@ async function getBalanceAdjustmentCategory(userId: string) {
   return existing;
 }
 
+function buildTransactionOptionMemoryStatement(userId: string, associations: TransactionOptionAssociation[], timestamp: string) {
+  if (!associations.length) return null;
+  return db.insert(transactionOptionMemory).values(associations.map((association) => ({
+    userId,
+    transactionType: association.transactionType,
+    optionKind: association.optionKind,
+    optionId: association.optionId,
+    frequency: 1,
+    lastUsedAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }))).onConflictDoUpdate({
+    target: [transactionOptionMemory.userId, transactionOptionMemory.transactionType, transactionOptionMemory.optionKind, transactionOptionMemory.optionId],
+    set: {
+      frequency: sql`${transactionOptionMemory.frequency} + 1`,
+      lastUsedAt: sql`excluded.last_used_at`,
+      updatedAt: timestamp,
+    },
+  });
+}
+
 async function commitCreatedTransaction(userId: string, row: TransactionRow, changes: TransactionChange[], goalActions = new Map<string, SQL>(), categoryToCreate?: typeof categories.$inferInsert, attachmentStatement?: BatchStatement | null) {
   const snapshots = await getSnapshots(userId);
   const timestamp = row.updatedAt;
@@ -369,6 +388,8 @@ async function commitCreatedTransaction(userId: string, row: TransactionRow, cha
   statements.push(db.insert(transactions).values(row));
   addAtomicGuard(statements, row.id, userId, sql`changes() = 1`, timestamp);
   buildEffectStatements(statements, row.id, userId, timestamp, changes, snapshots, goalActions);
+  const memoryStatement = buildTransactionOptionMemoryStatement(userId, getTransactionOptionAssociations(row), timestamp);
+  if (memoryStatement) statements.push(memoryStatement);
   statements.push(db.insert(transactionHistory).values({
     id: randomUUID(),
     transactionId: row.id,
@@ -490,6 +511,8 @@ export async function updateTransaction(userId: string, id: string, input: Trans
     transactionAt: next.transactionAt, updatedAt: next.updatedAt,
   }).where(transactionCas(old, userId)));
   if (detachmentStatement) statements.push(detachmentStatement);
+  const memoryStatement = buildTransactionOptionMemoryStatement(userId, getNewTransactionOptionAssociations(old, next), timestamp);
+  if (memoryStatement) statements.push(memoryStatement);
   addAtomicGuard(statements, id, userId, sql`changes() = 1`, timestamp);
   statements.push(db.insert(transactionHistory).values({
     id: randomUUID(), transactionId: id, changedBy: userId, changeType: "updated",
