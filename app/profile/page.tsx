@@ -48,6 +48,29 @@ type ProfileUser = {
   emailVerifiedAt: string | null;
 };
 
+const PROFILE_CACHE_KEY = "cocomelon.profile-cache";
+
+function readCachedProfile(): ProfileUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(PROFILE_CACHE_KEY) ?? "null") as ProfileUser | null;
+    return value && typeof value.id === "string" && typeof value.name === "string" && typeof value.email === "string"
+      ? value
+      : null;
+  } catch {
+    window.sessionStorage.removeItem(PROFILE_CACHE_KEY);
+    return null;
+  }
+}
+
+function writeCachedProfile(profile: ProfileUser) {
+  try {
+    window.sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+  } catch {
+    // Profile caching is an optimization; storage may be unavailable.
+  }
+}
+
 const CURRENCY_CODES =
   typeof Intl.supportedValuesOf === "function"
     ? Intl.supportedValuesOf("currency")
@@ -89,8 +112,8 @@ function formatLocalDateTime(value: string | null) {
 
 export default function ProfilePage() {
   const router = useRouter();
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<ProfileUser | null>(readCachedProfile);
+  const [isLoading, setIsLoading] = useState(() => !readCachedProfile());
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
   const [isAvatarPickerClosing, setIsAvatarPickerClosing] = useState(false);
@@ -121,7 +144,10 @@ export default function ProfilePage() {
           return;
         }
         const result = (await response.json()) as { user: ProfileUser };
-        if (active) setUser(result.user);
+        if (active) {
+          setUser(result.user);
+          writeCachedProfile(result.user);
+        }
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -161,6 +187,7 @@ export default function ProfilePage() {
     if (response.ok) {
       const result = (await response.json()) as { user: ProfileUser };
       setUser(result.user);
+      writeCachedProfile(result.user);
       window.localStorage.setItem(
         "cocomelon.avatar-preset",
         result.user.avatarPreset,
@@ -239,6 +266,7 @@ export default function ProfilePage() {
     if (response.ok) {
       const result = (await response.json()) as { user: ProfileUser };
       setUser(result.user);
+      writeCachedProfile(result.user);
       setIsEditingName(false);
       setNameMessage("Saved");
     } else {
@@ -257,6 +285,7 @@ export default function ProfilePage() {
     if (response.ok) {
       const result = (await response.json()) as { user: ProfileUser };
       setUser(result.user);
+      writeCachedProfile(result.user);
       closeCurrencyPicker();
       setCurrencySearch("");
     }
@@ -278,6 +307,7 @@ export default function ProfilePage() {
     if (response.ok) {
       const result = (await response.json()) as { user: ProfileUser };
       setUser(result.user);
+      writeCachedProfile(result.user);
       updateCachedBalancePrivacy(getAccessTokenSubject(), result.user.hideTotalBalance);
     } else {
       setUser((current) => current ? { ...current, hideTotalBalance: previousValue } : current);
