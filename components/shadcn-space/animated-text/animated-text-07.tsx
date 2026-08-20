@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 type TextMorphProps = {
@@ -9,6 +10,7 @@ type TextMorphProps = {
   interval?: number;
   className?: string;
   activeIndex?: number;
+  animate?: boolean;
 };
 
 const defaultWords = ["blocks", "components", "templates"];
@@ -18,7 +20,9 @@ export function TextMorph({
   interval = 2500,
   className,
   activeIndex,
+  animate = true,
 }: TextMorphProps) {
+  const reduceMotion = useReducedMotion();
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -41,23 +45,23 @@ export function TextMorph({
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       <motion.span
-        key={currentIndex}
+        key={`${currentIndex}:${words[currentIndex] ?? ""}`}
         className={cn("flex items-baseline gap-0.25 overflow-hidden", className)}
-        initial={{ opacity: 0, y: 5 }}
+        initial={reduceMotion || !animate ? false : { opacity: 0, y: 5 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -5 }}
-        transition={{ duration: 0.4 }}
+        exit={reduceMotion || !animate ? undefined : { opacity: 0, y: -5 }}
+        transition={reduceMotion || !animate ? { duration: 0 } : { duration: 0.4 }}
       >
         {chars.map((char, i) => (
           <motion.span
-            key={`${currentIndex}-${i}`}
+            key={`${currentIndex}:${words[currentIndex] ?? ""}-${i}`}
             className="inline-block"
-            initial={{ opacity: 0, y: 5, filter: "blur(5px)" }}
+            initial={reduceMotion || !animate ? false : { opacity: 0, y: 5, filter: "blur(5px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -5, filter: "blur(5px)" }}
+            exit={reduceMotion || !animate ? undefined : { opacity: 0, y: -5, filter: "blur(5px)" }}
             transition={{
-              delay: i * 0.03,
-              duration: 0.3,
+              delay: reduceMotion || !animate ? 0 : i * 0.03,
+              duration: reduceMotion || !animate ? 0 : 0.3,
             }}
           >
             {char === " " ? "\u00A0" : char}

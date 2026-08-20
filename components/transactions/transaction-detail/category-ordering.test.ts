@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { orderCategoryOptions } from "./category-ordering.ts";
+import { mostRecentCategoryId, orderCategoryOptions } from "./category-ordering.ts";
 
 test("category ordering keeps the selected category first", () => {
   const result = orderCategoryOptions([
@@ -20,6 +20,23 @@ test("category ordering pins one recent category then ranks by active transactio
   ], null, "income");
 
   assert.deepEqual(result.map((category) => category.id), ["salary", "gifts", "food"]);
+});
+
+test("category ordering exposes the category shown as recently used", () => {
+  assert.equal(
+    mostRecentCategoryId([
+      { id: "food", name: "Food", lastUsedAt: "2026-08-01T08:00:00.000Z" },
+      { id: "salary", name: "Salary", lastUsedAt: "2026-08-03T08:00:00.000Z" },
+    ]),
+    "salary",
+  );
+  assert.equal(
+    mostRecentCategoryId([
+      { id: "food", name: "Food", lastUsedAt: "2026-08-03T08:00:00.000Z" },
+      { id: "salary", name: "Salary", lastUsedAt: "2026-08-01T08:00:00.000Z" },
+    ], "food"),
+    "salary",
+  );
 });
 
 test("same-name API rows render once", () => {

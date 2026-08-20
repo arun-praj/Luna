@@ -132,12 +132,14 @@ export function MoneyEditor({
       cancelLabel={cancelLabel}
       dismissOnBackdrop={dismissOnBackdrop}
       closeOnEscape={closeOnEscape}
+      open={open}
       isClosing={isClosing}
     />
   );
 }
 
 function MoneyEditorPanel({
+  open,
   value,
   onCancel,
   onSet,
@@ -158,6 +160,7 @@ function MoneyEditorPanel({
   closeOnEscape,
   isClosing,
 }: {
+  open: boolean;
   value: string;
   onCancel: () => void;
   onSet: (value: string) => void;
@@ -244,6 +247,8 @@ function MoneyEditorPanel({
   }, [freshEntry]);
 
   React.useEffect(() => {
+    if (!open) return;
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
@@ -286,7 +291,7 @@ function MoneyEditorPanel({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [chooseOperator, closeOnEscape, deleteLastDigit, equals, inputDigit, onCancel]);
+  }, [chooseOperator, closeOnEscape, deleteLastDigit, equals, inputDigit, onCancel, open]);
 
   return createPortal((
     <div

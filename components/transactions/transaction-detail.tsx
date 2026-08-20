@@ -72,7 +72,7 @@ import {
   sortTransactionAccounts,
   transferTitle,
 } from "./transaction-detail/selectors";
-import { orderCategoryOptions } from "./transaction-detail/category-ordering";
+import { mostRecentCategoryId, orderCategoryOptions } from "./transaction-detail/category-ordering";
 import {
   createTransactionDraftState,
   localDateValue,
@@ -170,14 +170,15 @@ export function TransactionDetail({
   const [newTag, setNewTag] = React.useState("");
   const [tagError, setTagError] = React.useState("");
   const [picker, setPicker] = React.useState<"category" | "merchant" | "tags" | null>(null);
-  const [accountOptions, setAccountOptions] = React.useState<Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean }>>([]);
+  const [accountOptions, setAccountOptions] = React.useState<Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean; usageCount?: number; lastUsedAt?: string | null }>>([]);
+  const [accountsLoading, setAccountsLoading] = React.useState(true);
   const [goalOptions, setGoalOptions] = React.useState<IncomeGoalOption[]>([]);
   const [incomeAllocations, setIncomeAllocations] = React.useState<Record<string, string>>({});
   const [goalsExpanded, setGoalsExpanded] = React.useState(false);
   const [goalsPage, setGoalsPage] = React.useState(0);
   const [allocationGoalId, setAllocationGoalId] = React.useState<string | null>(null);
   const [savingsOptions, setSavingsOptions] = React.useState<SavingsInstrumentOption[]>([]);
-  const [amountOpen, setAmountOpen] = React.useState(false);
+  const [amountOpen, setAmountOpen] = React.useState(() => guidedNew && isNew && Boolean(initialKind));
   const [dateOpen, setDateOpen] = React.useState(false);
   const dateTransition = useAnimatedVisibility(dateOpen);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
@@ -191,7 +192,6 @@ export function TransactionDetail({
   const receiptInputRef = React.useRef<HTMLInputElement>(null);
   const splitSnapshotRef = React.useRef<SplitDraft[]>([]);
   const initialDraftRef = React.useRef<string | null>(null);
-  const [hasUserEdited, setHasUserEdited] = React.useState(false);
   const hasUserEditedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -203,7 +203,6 @@ export function TransactionDetail({
 
   const markUserEdited = React.useCallback(() => {
     hasUserEditedRef.current = true;
-    setHasUserEdited(true);
   }, []);
 
   const titleLabel =
@@ -231,7 +230,7 @@ export function TransactionDetail({
           authenticatedFetch("/api/savings/instruments"),
           authenticatedFetch("/api/goals"),
         ]);
-        const accountResult = (await accountResponse.json()) as { accounts?: Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean }> };
+        const accountResult = (await accountResponse.json()) as { accounts?: Array<{ id: string; name: string; type: string; currency: string; icon: string | null; backgroundColor: string | null; currentBalance: number; allowNegativeBalance: boolean; isDefault?: boolean; usageCount?: number; lastUsedAt?: string | null }> };
         const categoryResult = (await categoryResponse.json()) as { categories?: CategoryOption[] };
         const tagResult = tagResponse.ok ? (await tagResponse.json()) as { tags?: Array<{ name: string }> } : { tags: [] };
         const merchantResult = merchantResponse.ok ? (await merchantResponse.json()) as { merchants?: Array<{ name: string | null; lastUsedAt: string; usageCount: number | string }> } : { merchants: [] };
@@ -241,6 +240,7 @@ export function TransactionDetail({
         const storedAccountId = isNew ? window.localStorage.getItem(LAST_ACCOUNT_KEY) : null;
         const orderedAccounts = sortTransactionAccounts(accountResult.accounts ?? [], storedAccountId);
         setAccountOptions(orderedAccounts);
+        setAccountsLoading(false);
         setCategoryOptions(categoryResult.categories ?? []);
         setSavedTagOptions(tagResult.tags?.map((tag) => tag.name) ?? []);
         setMerchantOptions(merchantResult.merchants?.flatMap((merchant) => merchant.name ? [{ name: merchant.name, lastUsedAt: merchant.lastUsedAt, usageCount: Number(merchant.usageCount) || 0 }] : []) ?? []);
@@ -271,6 +271,7 @@ export function TransactionDetail({
           const loadedTransferToAccountId = record.transferToAccountId ?? "";
           const loadedSavingsInstrumentId = record.savingsInstrumentId ?? null;
           const loadedAmount = String(record.amount);
+          setAccountOptions(sortTransactionAccounts(orderedAccounts, record.accountId));
           setTitle(loadedTitle);
           setMerchantName(loadedMerchantName);
           setDescription(loadedDescription);
@@ -291,18 +292,13 @@ export function TransactionDetail({
           initialDraftRef.current = loadedDraft;
           setTransactionLoading(false);
         } else {
-          if (initialKind) {
-            setKind(initialKind);
-            if (guidedNew && orderedAccounts[0]) {
-              setAccountId(orderedAccounts[0].id);
-              setAmountOpen(true);
-            }
-          }
+          if (initialKind && orderedAccounts[0]) setAccountId(orderedAccounts[0].id);
           setTransactionLoading(false);
         }
       } catch {
         if (active) {
           setTransactionLoading(false);
+          setAccountsLoading(false);
           setLoadError("We could not load this transaction. Please try again.");
         }
       }
@@ -444,10 +440,10 @@ export function TransactionDetail({
 
   const draftSnapshot = serializeTransactionDraft({ title, description, date, time, kind, category, categoryId, splits, merchantName, tags, accountId, savingsInstrumentId, transferToAccountId, amount, receiptImageUrl, receiptFileKey: receiptFile ? `${receiptFile.name}:${receiptFile.size}:${receiptFile.lastModified}` : null });
   const isDirty = React.useCallback(
-    () => hasUserEditedRef.current || hasUserEdited || (initialDraftRef.current !== null && draftSnapshot !== initialDraftRef.current),
-    [draftSnapshot, hasUserEdited],
+    () => hasUserEditedRef.current || (initialDraftRef.current !== null && draftSnapshot !== initialDraftRef.current),
+    [draftSnapshot],
   );
-  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(isDirty());
+  const { requestDiscard, discardDialog } = useUnsavedChangesGuard(isDirty(), { blockBeforeUnload: false });
   const receiptSource = receiptPreviewUrl ?? receiptImageUrl;
 
   const loanTransaction = isLoanTransaction(loanContext);
@@ -515,6 +511,10 @@ export function TransactionDetail({
     );
     return orderCategoryOptions(visibleOptions, selectedCategoryId, kind);
   }, [categoryId, categoryOptions, categorySearch, kind, splitCategoryIndex, splits]);
+  const mostRecentPickerCategoryId = React.useMemo(() => {
+    const selectedCategoryId = splitCategoryIndex === null ? categoryId : splits[splitCategoryIndex]?.categoryId ?? null;
+    return mostRecentCategoryId(categoryOptions, selectedCategoryId);
+  }, [categoryId, categoryOptions, splitCategoryIndex, splits]);
 
   async function createTag() {
     const name = newTag.trim();
@@ -766,7 +766,12 @@ export function TransactionDetail({
         {kind === "income" ? "Add money to" : kind === "savings" ? "Set money aside from" : "Pay money from"}
       </p>
       <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {accountOptions.map((option) => {
+        {accountsLoading ? (
+          <>
+            <LoadingBlock className="h-14 w-44 shrink-0 rounded-[12px]" />
+            <LoadingBlock className="h-14 w-44 shrink-0 rounded-[12px]" />
+          </>
+        ) : accountOptions.map((option) => {
           const selected = accountId === option.id;
           const accountColor = getAccountBackgroundColor(option.backgroundColor, option.type);
           const accountForeground = getAccountForeground(accountColor, option.type);
@@ -791,7 +796,7 @@ export function TransactionDetail({
               </span>
               <span className="flex min-w-0 flex-col items-start leading-tight">
                 <span className="max-w-[130px] truncate">{option.name.replace(" Wallet", "").replace(" account", "")}</span>
-                <span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency}</span>
+                <span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency} · {option.usageCount ?? 0} {option.usageCount === 1 ? "use" : "uses"}</span>
               </span>
               {selected ? <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Check aria-hidden="true" className="size-3.5 stroke-[3]" /></span> : null}
             </button>
@@ -833,7 +838,7 @@ export function TransactionDetail({
                 className="flex min-h-14 shrink-0 items-center gap-2 rounded-[12px] border bg-background px-3 text-left text-sm font-semibold transition-colors hover:brightness-[0.98]"
               >
                 <span className="flex size-9 shrink-0 overflow-hidden rounded-[9px]"><AccountAvatar icon={option.icon} name={option.name} type={option.type} backgroundColor={accountColor} size={36} /></span>
-                <span className="flex min-w-0 flex-col items-start leading-tight"><span className="max-w-[130px] truncate">{displayAccountName(option.name)}</span><span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency}</span></span>
+                <span className="flex min-w-0 flex-col items-start leading-tight"><span className="max-w-[130px] truncate">{displayAccountName(option.name)}</span><span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency} · {option.usageCount ?? 0} {option.usageCount === 1 ? "use" : "uses"}</span></span>
                 {selected ? <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Check aria-hidden="true" className="size-3.5 stroke-[3]" /></span> : null}
               </button>
             );
@@ -860,7 +865,7 @@ export function TransactionDetail({
                 className="flex min-h-14 shrink-0 items-center gap-2 rounded-[12px] border bg-background px-3 text-left text-sm font-semibold transition-colors hover:brightness-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <span className="flex size-9 shrink-0 overflow-hidden rounded-[9px]"><AccountAvatar icon={option.icon} name={option.name} type={option.type} backgroundColor={accountColor} size={36} /></span>
-                <span className="flex min-w-0 flex-col items-start leading-tight"><span className="max-w-[130px] truncate">{displayAccountName(option.name)}</span><span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency}</span></span>
+                <span className="flex min-w-0 flex-col items-start leading-tight"><span className="max-w-[130px] truncate">{displayAccountName(option.name)}</span><span className="mt-1 text-[11px] font-medium tabular-nums opacity-75">{formatMoney(String(option.currentBalance))} {option.currency} · {option.usageCount ?? 0} {option.usageCount === 1 ? "use" : "uses"}</span></span>
                 {selected ? <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-white/90 text-foreground"><Check aria-hidden="true" className="size-3.5 stroke-[3]" /></span> : null}
               </button>
             );
@@ -1759,6 +1764,7 @@ export function TransactionDetail({
                     const optionId = isCategory && typeof option !== "string" ? (option as CategoryOption).id : null;
                     const categoryOption = isCategory && typeof option !== "string" ? option as CategoryOption : null;
                     const merchantOption = isMerchant && typeof option !== "string" ? option as MerchantOption : null;
+                    const recentlyUsed = Boolean(categoryOption && categoryOption.id === mostRecentPickerCategoryId);
                     const budgetPreview = optionId ? categoryBudgetPreviews.get(optionId) : undefined;
                     const selected =
                       picker === "category"
@@ -1811,6 +1817,7 @@ export function TransactionDetail({
                         ) : null}
                         <span className="min-w-0 flex-1">
                           <span className="block min-w-0 truncate">{optionName}</span>
+                          {recentlyUsed ? <span className={`mt-0.5 block truncate text-[10px] font-medium leading-tight ${selected ? "text-primary-foreground/75" : "text-muted-foreground"}`}>Recently used</span> : null}
                           {merchantOption ? <span className={`mt-0.5 block truncate text-[10px] font-medium ${selected ? "text-primary-foreground/75" : "text-muted-foreground"}`}>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(merchantOption.lastUsedAt))} · {merchantOption.usageCount} {merchantOption.usageCount === 1 ? "use" : "uses"}</span> : null}
                         </span>
                         {selected ? <Check aria-hidden="true" className="size-4 shrink-0 text-white" strokeWidth={2.5} /> : null}

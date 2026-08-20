@@ -25,7 +25,8 @@ import {
 } from "lucide-react";
 
 import { AVATAR_PRESETS, avatarForPreset, randomAvatarPreset } from "@/lib/avatar";
-import { authenticatedFetch, loginPathFor, signOut } from "@/lib/auth-client";
+import { authenticatedFetch, getAccessTokenSubject, loginPathFor, signOut } from "@/lib/auth-client";
+import { updateCachedBalancePrivacy } from "@/lib/home-snapshot-cache";
 import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { NotificationSettingsCard } from "@/components/notifications/notification-settings";
 import { SecuritySettingsCard } from "@/components/profile/security-settings";
@@ -268,6 +269,7 @@ export default function ProfilePage() {
     setIsSavingBalancePrivacy(true);
     setBalancePrivacyMessage("");
     setUser((current) => current ? { ...current, hideTotalBalance } : current);
+    if (hideTotalBalance) updateCachedBalancePrivacy(getAccessTokenSubject(), true);
     const response = await authenticatedFetch("/api/auth/me", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -276,8 +278,10 @@ export default function ProfilePage() {
     if (response.ok) {
       const result = (await response.json()) as { user: ProfileUser };
       setUser(result.user);
+      updateCachedBalancePrivacy(getAccessTokenSubject(), result.user.hideTotalBalance);
     } else {
       setUser((current) => current ? { ...current, hideTotalBalance: previousValue } : current);
+      updateCachedBalancePrivacy(getAccessTokenSubject(), previousValue);
       setBalancePrivacyMessage("Could not save this preference");
     }
     setIsSavingBalancePrivacy(false);

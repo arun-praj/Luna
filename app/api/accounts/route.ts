@@ -43,6 +43,20 @@ export async function GET(request: Request) {
     ))
     .groupBy(transactions.accountId, transactions.type)
     ;
+  const usageRows = await db
+    .select({
+      accountId: transactions.accountId,
+      usageCount: sql<number>`count(*)`,
+      lastUsedAt: sql<string>`max(${transactions.transactionAt})`,
+    })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .groupBy(transactions.accountId)
+    ;
+  const usageByAccount = new Map(usageRows.map((row) => [row.accountId, {
+    usageCount: Number(row.usageCount ?? 0),
+    lastUsedAt: row.lastUsedAt ?? null,
+  }]));
   const monthlyByAccount = new Map<string, { monthlyIncome: number; monthlyExpense: number }>();
   for (const row of monthlyRows) {
     if (!row.accountId || (row.type !== "income" && row.type !== "expense")) continue;
@@ -56,6 +70,7 @@ export async function GET(request: Request) {
     accounts: accountRows.map((account) => ({
       ...account,
       currentBalance: normalizeMoney(account.currentBalance),
+      ...(usageByAccount.get(account.id) ?? { usageCount: 0, lastUsedAt: null }),
       ...(monthlyByAccount.get(account.id) ?? { monthlyIncome: 0, monthlyExpense: 0 }),
     })),
   });

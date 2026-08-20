@@ -92,8 +92,8 @@ export function LoginForm() {
       if (!result.accessToken)
         throw new Error("Login response was missing an access token.");
       clearApiCache();
-      if (result.user) primeApiCache("/api/auth/me", { user: result.user });
       setAccessToken(result.accessToken);
+      if (result.user) primeApiCache("/api/auth/me", { user: result.user });
       router.push(
         result.user?.emailVerifiedAt ? (result.user?.onboardingCompleted ? returnPath : "/onboarding") : `/verify-email?next=${encodeURIComponent(returnPath)}`,
       );

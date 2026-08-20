@@ -204,6 +204,13 @@
       "when": 1786646400000,
       "tag": "0028_stored_object_attachment_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787068992000,
+      "tag": "0029_notification_devices_and_due_time",
+      "breakpoints": true
     }
   ]
 }

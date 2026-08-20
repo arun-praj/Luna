@@ -6,11 +6,17 @@ export function budgetProgressColor(percentage: number) {
   return `hsl(${Math.round(120 - capped * 1.2)} 72% 42%)`;
 }
 
-export function sortTransactionAccounts<T extends { id: string; isDefault?: boolean }>(accounts: T[], preferredId: string | null) {
+export function sortTransactionAccounts<T extends { id: string; isDefault?: boolean; lastUsedAt?: string | null; usageCount?: number }>(accounts: T[], preferredId: string | null) {
   const preferred = preferredId
     ? accounts.find((account) => account.id === preferredId)
     : accounts.find((account) => account.isDefault);
-  return preferred ? [preferred, ...accounts.filter((account) => account.id !== preferred.id)] : accounts;
+  const remaining = accounts
+    .filter((account) => account.id !== preferred?.id)
+    .sort((left, right) => {
+      const lastUsed = (right.lastUsedAt ? Date.parse(right.lastUsedAt) : Number.NEGATIVE_INFINITY) - (left.lastUsedAt ? Date.parse(left.lastUsedAt) : Number.NEGATIVE_INFINITY);
+      return lastUsed || (right.usageCount ?? 0) - (left.usageCount ?? 0);
+    });
+  return preferred ? [preferred, ...remaining] : remaining;
 }
 
 const categoryForegrounds: Record<string, string> = {

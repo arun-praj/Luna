@@ -61,19 +61,20 @@ export function UnsavedChangesDialog({
   );
 }
 
-export function useUnsavedChangesGuard(isDirty: boolean) {
+export function useUnsavedChangesGuard(isDirty: boolean, options?: { blockBeforeUnload?: boolean }) {
   const [open, setOpen] = useState(false);
   const pendingAction = useRef<DiscardAction | null>(null);
+  const blockBeforeUnload = options?.blockBeforeUnload ?? true;
 
   useEffect(() => {
-    if (!isDirty) return;
+    if (!isDirty || !blockBeforeUnload) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
+  }, [blockBeforeUnload, isDirty]);
 
   const requestDiscard = useCallback((action: DiscardAction) => {
     if (!isDirty) {

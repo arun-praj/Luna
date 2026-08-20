@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { createElement, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   ChevronRight,
   HandCoins,
@@ -12,9 +12,11 @@ import {
   X,
 } from "lucide-react";
 
-import { authenticatedFetch } from "@/lib/auth-client";
+import { getAccessTokenSubject, getTransactionRefreshGeneration, revalidateAuthenticatedFetch } from "@/lib/auth-client";
+import { hasFreshDataChanged, useHomeSnapshot, writeHomeSnapshot } from "@/lib/home-snapshot-cache";
 import { getCurrentRoute, withReturnTo } from "@/lib/navigation";
 import type { AppliedPeriod } from "@/components/home/date-picker";
+import type { TransactionFilterState } from "@/components/transactions/transaction-filter-bar";
 import { AccountAvatar } from "@/components/accounts/account-avatar";
 import {
   getCategoryForeground,
@@ -26,6 +28,8 @@ import { transactionTypeMeta as typeMeta } from "@/components/transactions/trans
 import { ActivityAlertRow, useActivityAlerts, type ActivityAlert } from "@/components/home/activity-alerts";
 import { calendarDateFromTimestamp, compareTimelineItems } from "@/lib/timeline-order";
 import { isLoanTransaction, loanActivityLabel } from "@/components/transactions/transaction-detail/presentation-rules";
+import { formatCurrencyAmount } from "@/lib/currency";
+import { addMoney } from "@/lib/money";
 
 export type ApiTransaction = {
   id: string;
@@ -74,6 +78,7 @@ type TransactionListProps = {
   searchable?: boolean;
   period?: AppliedPeriod;
   includeAlerts?: boolean;
+  filters?: Partial<TransactionFilterState>;
 };
 
 type TimelineItem =
@@ -121,24 +126,115 @@ function formatAmount(transaction: ApiTransaction) {
   return `${prefix}${transaction.accountCurrency} ${Math.abs(transaction.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
+function netAmount(transaction: ApiTransaction) {
+  if (transaction.type === "transfer") return 0;
+  if (transaction.type === "income" || transaction.type === "adjust_balance") return transaction.amount;
+  return -Math.abs(transaction.amount);
+}
+
+function dailyNet(items: TimelineItem[]) {
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    if (item.kind !== "transaction") continue;
+    const currency = item.transaction.accountCurrency || "NPR";
+    totals.set(currency, addMoney(totals.get(currency) ?? 0, netAmount(item.transaction)));
+  }
+  return [...totals.entries()];
+}
+
+function formatDailyNet(items: TimelineItem[]) {
+  const totals = dailyNet(items);
+  if (totals.length !== 1) return totals.length > 1 ? "Mixed" : "0";
+  const [currency, amount] = totals[0];
+  if (amount === 0) return "0";
+  const sign = amount > 0 ? "+" : "−";
+  return `${sign}${currency} ${formatCurrencyAmount(Math.abs(amount))}`;
+}
+
+function dailyNetClassName(items: TimelineItem[]) {
+  const totals = dailyNet(items);
+  if (totals.length !== 1 || totals[0][1] === 0) return "text-foreground";
+  return totals[0][1] > 0 ? "text-income" : "text-expense";
+}
+
 function compactAccountName(account: string) {
   return account.replace(" Wallet", "").replace(" account", "");
 }
 
-export function TransactionList({ limit, searchable = false, period, includeAlerts = false }: TransactionListProps) {
+export function buildTransactionRequestPath({
+  searchable,
+  searchQuery,
+  period,
+  filters,
+}: {
+  searchable: boolean;
+  searchQuery: string;
+  period?: AppliedPeriod;
+  filters?: Partial<TransactionFilterState>;
+}) {
+  const params = new URLSearchParams();
+  if (searchable && searchQuery) params.set("q", searchQuery);
+  if (period?.mode !== "all" && period?.from && period.to) {
+    params.set("from", localDateKey(period.from));
+    params.set("to", localDateKey(period.to));
+  }
+  if (filters?.categoryId) params.set("categoryId", filters.categoryId);
+  if (filters?.tag) params.set("tag", filters.tag);
+  if (filters?.merchant) params.set("merchant", filters.merchant);
+  const query = params.toString();
+  return `/api/transactions${query ? `?${query}` : ""}`;
+}
+
+export function TransactionList({ limit, searchable = false, period, includeAlerts = false, filters }: TransactionListProps) {
   const activityAlerts = useActivityAlerts(includeAlerts);
+  const [authSubject, setAuthSubject] = useState<string | null>(getAccessTokenSubject);
   const [transactions, setTransactions] = useState<ApiTransaction[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshGeneration, setRefreshGeneration] = useState(() => getTransactionRefreshGeneration());
+  const [freshTransactionsKey, setFreshTransactionsKey] = useState<string | null>(null);
+  const categoryId = filters?.categoryId;
+  const tag = filters?.tag;
+  const merchant = filters?.merchant;
+  const requestPath = buildTransactionRequestPath({ searchable, searchQuery, period, filters: { categoryId, tag, merchant } });
+  const queryStart = requestPath.indexOf("?");
+  const scope = queryStart >= 0 ? requestPath.slice(queryStart + 1) : "all";
+  const userId = authSubject;
+  const scopeKey = `${userId ?? ""}:${scope}`;
+  const cached = useHomeSnapshot<ApiTransaction[]>("transactions", userId, scope, Array.isArray);
+  const [resolvedScopeKey, setResolvedScopeKey] = useState<string | null>(() => cached ? scopeKey : null);
+  const lastTransactionsScopeRef = useRef(scopeKey);
+  const lastTransactionsRef = useRef<ApiTransaction[] | null>(cached?.data ?? null);
+  const [freshChangedVersion, setFreshChangedVersion] = useState(0);
+  const [freshChangedScopeKey, setFreshChangedScopeKey] = useState<string | null>(null);
 
   useEffect(() => {
-    const refresh = () => {
-      setLoading(true);
-      setRefreshVersion((version) => version + 1);
+    const handleAuthChanged = () => {
+      const nextSubject = getAccessTokenSubject();
+      if (nextSubject === userId) return;
+      setAuthSubject(nextSubject);
+      setTransactions([]);
+      setSearch("");
+      setSearchQuery("");
+      setSearchLoading(false);
+      setRefreshGeneration(getTransactionRefreshGeneration());
+      setFreshTransactionsKey(null);
+      setFreshChangedScopeKey(null);
+      setFreshChangedVersion(0);
+      setResolvedScopeKey(null);
+    };
+    window.addEventListener("cocomelon:auth-changed", handleAuthChanged);
+    return () => window.removeEventListener("cocomelon:auth-changed", handleAuthChanged);
+  }, [userId]);
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const generation = event instanceof CustomEvent && typeof event.detail?.generation === "number"
+        ? event.detail.generation
+        : null;
+      setRefreshGeneration((current) => Math.max(current + 1, generation ?? getTransactionRefreshGeneration()));
     };
     window.addEventListener("cocomelon:transactions-changed", refresh);
     return () => window.removeEventListener("cocomelon:transactions-changed", refresh);
@@ -151,37 +247,54 @@ export function TransactionList({ limit, searchable = false, period, includeAler
   }, [search, searchable]);
 
   useEffect(() => {
-    let active = true;
-    const params = new URLSearchParams();
-    if (searchable && searchQuery) params.set("q", searchQuery);
-    if (period?.mode !== "all" && period?.from && period.to) {
-      params.set("from", localDateKey(period.from));
-      params.set("to", localDateKey(period.to));
+    if (lastTransactionsScopeRef.current !== scopeKey || (lastTransactionsRef.current === null && cached)) {
+      lastTransactionsScopeRef.current = scopeKey;
+      lastTransactionsRef.current = cached?.data ?? null;
     }
-    const query = params.toString() ? `?${params.toString()}` : "";
-    void authenticatedFetch(`/api/transactions${query}`)
+  }, [cached, scopeKey]);
+
+  useEffect(() => {
+    let active = true;
+    let confirmed = false;
+    void revalidateAuthenticatedFetch(requestPath, {}, { generation: refreshGeneration })
       .then(async (transactionsResponse) => {
         if (!transactionsResponse.ok) return;
         const result = (await transactionsResponse.json()) as {
           transactions?: ApiTransaction[];
         };
         if (active) {
-          setTransactions(result.transactions ?? []);
+          const nextTransactions = result.transactions ?? [];
+          const currentUserId = getAccessTokenSubject();
+          if (currentUserId && (!userId || userId === currentUserId)) {
+            writeHomeSnapshot("transactions", currentUserId, scope, nextTransactions);
+            const freshChanged = hasFreshDataChanged(lastTransactionsRef.current, nextTransactions);
+            lastTransactionsRef.current = nextTransactions;
+            confirmed = true;
+            setResolvedScopeKey(scopeKey);
+            setTransactions((current) => JSON.stringify(current) === JSON.stringify(nextTransactions) ? current : nextTransactions);
+            setFreshTransactionsKey(scopeKey);
+            if (freshChanged) {
+              setFreshChangedScopeKey(scopeKey);
+              setFreshChangedVersion((current) => current + 1);
+            }
+          }
         }
       })
       .catch(() => undefined)
       .finally(() => {
         if (active) {
-          setLoading(false);
+          if (!confirmed && !cached) setResolvedScopeKey(scopeKey);
           setSearchLoading(false);
         }
       });
     return () => {
       active = false;
     };
-  }, [period, refreshVersion, searchQuery, searchable]);
+  }, [cached, refreshGeneration, requestPath, scope, scopeKey, userId]);
 
-  const visibleTransactions = [...transactions]
+  const displayedTransactions = freshTransactionsKey === scopeKey ? transactions : cached?.data ?? [];
+  const displayedLoading = freshTransactionsKey !== scopeKey && !cached && resolvedScopeKey !== scopeKey;
+  const visibleTransactions = [...displayedTransactions]
     .sort((left, right) => compareTimelineItems(
       { id: left.id, date: left.date, timestamp: left.transactionAt, fallbackTimestamp: left.createdAt },
       { id: right.id, date: right.date, timestamp: right.transactionAt, fallbackTimestamp: right.createdAt },
@@ -209,6 +322,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
     for (const item of timeline) grouped.set(item.date, [...(grouped.get(item.date) ?? []), item]);
     return [...grouped.entries()];
   }, [activityAlerts, period, visibleTransactions]);
+  const timelineSignature = JSON.stringify(groups);
 
   const searchControls = searchable ? (
     <div className="mt-5">
@@ -246,22 +360,23 @@ export function TransactionList({ limit, searchable = false, period, includeAler
     </div>
   ) : null;
 
-  if (loading) {
+  if (displayedLoading) {
     return <>{searchControls}<ListDataSkeleton rows={3} /></>;
   }
 
-  if (!transactions.length && !activityAlerts.length) {
+  if (!displayedTransactions.length && !activityAlerts.length) {
+    const hasActiveFilters = Boolean(filters?.categoryId || filters?.tag || filters?.merchant);
     return (
       <>
         {searchControls}
-        <div className="route-data-reveal mt-5 rounded-[14px] border border-dashed border-border-strong bg-card px-5 py-10 text-center">
+        <div className={`${freshChangedScopeKey === scopeKey && freshChangedVersion ? "route-data-reveal" : ""} mt-5 rounded-[14px] border border-dashed border-border-strong bg-card px-5 py-10 text-center`}>
         <ReceiptText
           aria-hidden="true"
           className="mx-auto size-7 text-foreground-subtle"
         />
-        <p className="mt-3 text-sm font-semibold">No transactions yet</p>
+        <p className="mt-3 text-sm font-semibold">{hasActiveFilters ? "No matching transactions" : "No transactions yet"}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {searchQuery ? "Try a different search term." : "Your real activity will appear here after you add a transaction."}
+            {searchQuery ? "Try a different search term." : hasActiveFilters ? "Try clearing a filter or choosing another option." : "Your real activity will appear here after you add a transaction."}
           </p>
         </div>
       </>
@@ -271,16 +386,12 @@ export function TransactionList({ limit, searchable = false, period, includeAler
   return (
     <>
       {searchControls}
-      <div className="route-data-reveal mt-5 space-y-7">
+      <div key={`${timelineSignature}:${freshChangedScopeKey === scopeKey ? freshChangedVersion : 0}`} className={`${freshChangedScopeKey === scopeKey && freshChangedVersion ? "route-data-reveal" : ""} mt-5 space-y-7`}>
       {groups.map(([date, items]) => (
         <section aria-labelledby={`transaction-group-${date}`} key={date}>
           <div className="flex items-end justify-between gap-4 px-1">
-            <h3
-              id={`transaction-group-${date}`}
-              className="text-[15px] font-semibold"
-            >
-              {formatDateLabel(date)}
-            </h3>
+            <h3 id={`transaction-group-${date}`} className="text-[15px] font-semibold">{formatDateLabel(date)}</h3>
+            <p className={`text-[13px] font-semibold tabular-nums ${dailyNetClassName(items)}`}>{formatDailyNet(items)}</p>
           </div>
           <div className="mt-3 overflow-hidden rounded-[14px] border border-border bg-card">
             {items.map((timelineItem, index) => {
@@ -344,7 +455,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
               const categoryHref = transaction.categoryId
                 ? withReturnTo(`/categories/${transaction.categoryId}`, getCurrentRoute())
                 : null;
-              const categoryClassName = "flex min-h-9 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-[9px] border px-2.5 py-1 text-[0.6875rem] font-semibold [background-color:var(--category-background)] [border-color:var(--category-border)] sm:max-w-36";
+              const categoryClassName = "flex min-h-8 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-[8px] border px-2 py-0.5 text-[0.6875rem] font-semibold [background-color:var(--category-background)] [border-color:var(--category-border)] sm:max-w-36";
               const categoryStyle = {
                 "--category-background": `${categoryColor}88`,
                 "--category-border": `${categoryColor}cc`,
@@ -369,7 +480,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                   <Link
                     href={`/transactions/${transaction.id}`}
                     aria-label={`Open ${transactionName} ${loanTransaction ? "loan activity" : "transaction"}, ${formatAmount(transaction)}`}
-                    className="group flex min-h-11 min-w-0 items-start gap-3 rounded-[10px] p-1 focus-visible:outline-none before:absolute before:inset-0 before:rounded-[12px] focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-primary/45"
+                    className={`group flex min-w-0 items-start gap-3 rounded-[10px] p-1 focus-visible:outline-none before:absolute before:inset-0 before:rounded-[12px] focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-primary/45 ${transactionDescription ? "min-h-11" : "min-h-0"}`}
                   >
                     <span
                       className={`mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[11px] ${loanTransaction ? "bg-primary text-primary-foreground shadow-[0_5px_14px_rgb(31_112_104_/_0.18)]" : ""}`}
@@ -401,7 +512,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                           {transactionName}
                         </h4>
                         <p
-                          className={`max-w-full break-words text-[0.875rem] font-semibold leading-[1.35] tabular-nums sm:shrink-0 sm:whitespace-nowrap sm:text-right ${loanTransaction ? "text-primary" : meta.amountClassName}`}
+                          className={`max-w-full break-words text-[0.875rem] leading-[1.35] sm:shrink-0 sm:whitespace-nowrap sm:text-right ${loanTransaction ? "font-medium tracking-normal text-primary" : `font-semibold tabular-nums ${meta.amountClassName}`}`}
                         >
                           {formatAmount(transaction)}
                         </p>
@@ -417,9 +528,9 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                       className="mt-1 size-4 shrink-0 text-foreground-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-primary group-hover/row:translate-x-0.5 group-hover/row:text-primary"
                     />
                   </Link>
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pl-[3.25rem] text-xs text-muted-foreground">
+                  <div className={`flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pl-[3.25rem] text-xs text-muted-foreground ${transactionDescription ? "" : "-mt-0.5"}`}>
                     {transaction.splits.length ? (
-                        <span className="flex min-h-9 w-fit max-w-full shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-1 text-[0.625rem] font-semibold text-primary">
+                        <span className="flex min-h-8 w-fit max-w-full shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary-soft px-2 py-0.5 text-[0.625rem] font-semibold text-primary">
                         <Layers3 aria-hidden="true" className="size-3 shrink-0" />
                         {transaction.splits.length} categories
                       </span>
@@ -449,7 +560,7 @@ export function TransactionList({ limit, searchable = false, period, includeAler
                         <Link
                           href={`/accounts/${transaction.accountId}`}
                           aria-label={`Open ${transaction.accountName} account`}
-                          className="relative z-10 flex min-h-9 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-[9px] border px-2.5 py-1 text-[0.6875rem] font-semibold text-foreground [background-color:var(--account-background)] [border-color:var(--account-border)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:max-w-[min(16rem,55vw)]"
+                          className="relative z-10 flex min-h-8 min-w-0 max-w-full shrink-0 items-center gap-1 rounded-[8px] border px-2 py-0.5 text-[0.6875rem] font-semibold text-foreground [background-color:var(--account-background)] [border-color:var(--account-border)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:max-w-[min(16rem,55vw)]"
                           style={{
                             "--account-background": `${accountColor}88`,
                             "--account-border": `${accountColor}cc`,

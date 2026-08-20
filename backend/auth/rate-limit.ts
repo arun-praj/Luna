@@ -9,6 +9,7 @@ type RateLimitOptions = {
   limit: number;
   windowMs: number;
   keyBy?: "ip" | "identifier" | "ip-and-identifier";
+  cooldownSeconds?: (attempts: number) => number;
 };
 
 function clientAddress(request: Request) {
@@ -55,17 +56,23 @@ export async function checkRateLimit(
     .returning({
       windowStartedAt: authRateLimits.windowStartedAt,
       attempts: authRateLimits.attempts,
+      updatedAt: authRateLimits.updatedAt,
     });
 
-  if (!updated) return { allowed: true, retryAfterSeconds: 0 };
+  if (!updated) return { allowed: true, retryAfterSeconds: 0, attempts: 0 };
 
   const windowStartedAt = Date.parse(updated.windowStartedAt);
-  const retryAfterSeconds = Number.isFinite(windowStartedAt)
+  const windowRetryAfterSeconds = Number.isFinite(windowStartedAt)
     ? Math.max(1, Math.ceil((windowStartedAt + options.windowMs - now) / 1000))
     : Math.max(1, Math.ceil(options.windowMs / 1000));
+  const cooldownRetryAfterSeconds = options.cooldownSeconds
+    ? Math.max(0, Math.ceil((Date.parse(updated.updatedAt) + options.cooldownSeconds(updated.attempts) * 1000 - now) / 1000))
+    : 0;
+  const retryAfterSeconds = Math.max(cooldownRetryAfterSeconds, updated.attempts > options.limit ? windowRetryAfterSeconds : 0);
   return {
-    allowed: updated.attempts <= options.limit,
-    retryAfterSeconds: updated.attempts > options.limit ? retryAfterSeconds : 0,
+    allowed: updated.attempts <= options.limit && cooldownRetryAfterSeconds === 0,
+    retryAfterSeconds: updated.attempts <= options.limit && cooldownRetryAfterSeconds === 0 ? 0 : retryAfterSeconds,
+    attempts: updated.attempts,
   };
 }
 
@@ -97,11 +104,22 @@ export async function peekRateLimit(
     return { allowed: true, retryAfterSeconds: 0 };
   }
 
-  if (current.attempts < options.limit) return { allowed: true, retryAfterSeconds: 0 };
+  if (current.attempts < options.limit) {
+    const cooldownSeconds = options.cooldownSeconds?.(current.attempts) ?? 0;
+    const cooldownRetryAfterSeconds = cooldownSeconds
+      ? Math.max(0, Math.ceil((Date.parse(current.updatedAt) + cooldownSeconds * 1000 - now) / 1000))
+      : 0;
+    if (cooldownRetryAfterSeconds > 0) return { allowed: false, retryAfterSeconds: cooldownRetryAfterSeconds };
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
   return {
     allowed: false,
     retryAfterSeconds: Math.max(1, Math.ceil((windowStartedAt + options.windowMs - now) / 1000)),
   };
+}
+
+export function verificationResendCooldownSeconds(attempts: number) {
+  return Math.min(15 * 60, 30 * 2 ** Math.max(0, attempts - 1));
 }
 
 export function rateLimitHeaders(retryAfterSeconds: number) {

@@ -14,6 +14,7 @@ type AnimatedBalanceAmountProps = {
   onToggleVisibility: () => void;
   href?: string;
   className?: string;
+  animate?: boolean;
 };
 
 export function AnimatedBalanceAmount({
@@ -24,6 +25,7 @@ export function AnimatedBalanceAmount({
   onToggleVisibility,
   href,
   className,
+  animate = true,
 }: AnimatedBalanceAmountProps) {
   const isMasked = hideTotalBalance && !balanceRevealed;
   const words = hideTotalBalance ? ["****", amount] : [amount];
@@ -34,6 +36,7 @@ export function AnimatedBalanceAmount({
       <TextMorph
         words={words}
         activeIndex={activeIndex}
+        animate={animate}
         className={cn("inline-flex items-baseline font-bold tabular-nums", isMasked ? "text-foreground" : className)}
       />
     </span>

@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Check, ChevronDown, CloudOff, LoaderCircle, Mail, Smartphone } from "lucide-react";
 import {
   loadNotificationSettings,
+  forgetNotificationSubscriptionSync,
   notificationPermission,
   pushNotificationsConfigured,
+  reconcileNotificationSubscription,
   requestNotificationPermission,
   saveNotificationSettings,
-  subscribeToPush,
   type NotificationSettings,
 } from "@/lib/notifications";
 import { authenticatedFetch } from "@/lib/auth-client";
@@ -53,6 +54,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   const [isTestingNotification, setIsTestingNotification] = useState(false);
   const [message, setMessage] = useState("");
   const thresholdSaveTimer = useRef<number | null>(null);
+  const settingsLoaded = settings !== null;
 
   useEffect(() => {
     void loadNotificationSettings(userId).then(async (loaded) => {
@@ -67,24 +69,20 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   }, [userId]);
 
   useEffect(() => {
-    if (!settings || permission !== "granted" || isCurrentDeviceSubscribed) return;
+    if (!settingsLoaded || permission !== "granted") return;
     let cancelled = false;
 
-    void subscribeToPush().then(async (pushSubscription) => {
-      if (cancelled || !pushSubscription) return;
-      const result = await saveNotificationSettings(userId, { pushSubscription });
-      if (cancelled) return;
-      setSettings(result.settings);
+    void reconcileNotificationSubscription(userId).then((result) => {
+      if (cancelled || !result.subscription) return;
       setIsCurrentDeviceSubscribed(true);
-      if (!result.synced) {
+      if (!result.synced)
         setMessage("Background alerts are enabled on this device and will sync when you’re online.");
-      }
-    });
+    }).catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [isCurrentDeviceSubscribed, permission, settings, userId]);
+  }, [permission, settingsLoaded, userId]);
 
   useEffect(() => {
     function refreshPermission() {
@@ -112,6 +110,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
       void saveNotificationSettings(userId, {
         goalMilestonesEnabled: settings.goalMilestonesEnabled,
         recurringDueEnabled: settings.recurringDueEnabled,
+        recurringDueTime: settings.recurringDueTime,
         loanPaymentDueEnabled: settings.loanPaymentDueEnabled,
         recurringTransactionEnabled: settings.recurringTransactionEnabled,
         recurringTransactionTime: settings.recurringTransactionTime,
@@ -199,12 +198,11 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
     const nextPermission = await requestNotificationPermission();
     setPermission(nextPermission);
     if (nextPermission === "granted") {
-      const pushSubscription = await subscribeToPush();
-      if (pushSubscription) {
+      const result = await reconcileNotificationSubscription(userId);
+      if (result.subscription) {
         setIsCurrentDeviceSubscribed(true);
-        await update({ pushSubscription });
-      }
-      else setMessage(pushNotificationsConfigured()
+        if (!result.synced) setMessage("Background alerts are enabled on this device and will sync when you’re online.");
+      } else setMessage(pushNotificationsConfigured()
         ? "Background alerts could not be enabled. Check that this site is installed or open in a supported browser, then try again."
         : "Background alerts are not configured for this deployment yet. Add the VAPID public key, then reload Luna.");
     } else if (nextPermission === "denied") {
@@ -224,7 +222,10 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
       setMessage(response.ok
         ? "Test notification sent through Luna’s background delivery service."
         : result?.error ?? "Could not send the test notification.");
-      if (response.status === 410) setIsCurrentDeviceSubscribed(false);
+      if (response.status === 410) {
+        setIsCurrentDeviceSubscribed(false);
+        forgetNotificationSubscriptionSync(userId);
+      }
     } catch {
       setMessage("Could not reach Luna’s notification service.");
     } finally {
@@ -256,16 +257,23 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
           <Toggle label="Goal milestone notifications" checked={settings.goalMilestonesEnabled} onChange={(value) => void update({ goalMilestonesEnabled: value })} />
         </div>
         <div className="flex items-center gap-3 px-4 py-4">
-          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Recurring reminders</p><p className="mt-0.5 text-xs text-muted-foreground">Know when a recurring payment is due.</p></div>
+          <div className="min-w-0 flex-1"><p className="text-sm font-medium">Recurring payment due alerts</p><p className="mt-0.5 text-xs text-muted-foreground">Know when a recurring payment is due.</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">Delivery time for due-payment alerts, separate from the add-recurring reminder below.</p></div>
           <Toggle label="Recurring payment notifications" checked={settings.recurringDueEnabled} onChange={(value) => void update({ recurringDueEnabled: value })} />
         </div>
+        {settings.recurringDueEnabled ? (
+          <div className="px-4 pb-4 pt-0">
+            <label className="block text-xs font-medium text-muted-foreground">Due-payment delivery time
+              <input type="time" value={settings.recurringDueTime} onChange={(event) => setSettings({ ...settings, recurringDueTime: event.target.value })} onBlur={() => void update({ recurringDueTime: settings.recurringDueTime })} className="mt-1 min-h-10 w-full max-w-[180px] rounded-[10px] border border-border bg-background px-3 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-4 focus:ring-primary/10" />
+            </label>
+          </div>
+        ) : null}
         <div className="flex items-center gap-3 px-4 py-4">
           <div className="min-w-0 flex-1"><p className="text-sm font-medium">Loan payment reminders</p><p className="mt-0.5 text-xs text-muted-foreground">Know when a loan payment is due.</p></div>
           <Toggle label="Loan payment reminders" checked={settings.loanPaymentDueEnabled} onChange={(value) => void update({ loanPaymentDueEnabled: value })} />
         </div>
         <div className="px-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1"><p className="text-sm font-medium">Add recurring transaction</p><p className="mt-0.5 text-xs text-muted-foreground">Remind me to record a recurring transaction.</p></div>
+            <div className="min-w-0 flex-1"><p className="text-sm font-medium">Add recurring transaction</p><p className="mt-0.5 text-xs text-muted-foreground">Remind me to record a recurring transaction at its own time and frequency.</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">This is separate from recurring payment due alerts.</p></div>
             <Toggle label="Add recurring transaction reminders" checked={settings.recurringTransactionEnabled} onChange={(value) => void update({ recurringTransactionEnabled: value })} />
           </div>
           {settings.recurringTransactionEnabled ? (

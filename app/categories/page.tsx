@@ -59,11 +59,14 @@ function CategoryRow({
   return (
     <Link
       href={withReturnTo(`/categories/${category.id}`, currentRoute)}
-      aria-label={`${category.name}, ${category.type} category, ${categoryActivityLabel(category.usageFrequency)}`}
+      aria-label={`${category.name}, ${categoryActivityLabel(category.usageFrequency)}`}
       className="group flex min-h-[76px] min-w-0 items-start gap-3 rounded-[14px] border border-border bg-card px-3.5 py-3 transition-[border-color,background-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-surface-subtle hover:shadow-[0_8px_22px_rgb(23_32_29_/_0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
     >
       <span
-        style={{ color: iconColor }}
+        style={{
+          backgroundColor: category.color ?? "#f0f2ef",
+          color: iconColor,
+        }}
         className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-surface-subtle"
       >
         {createElement(Icon, {
@@ -77,10 +80,6 @@ function CategoryRow({
           {category.name}
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground sm:text-xs">
-          <span className="capitalize">{category.type}</span>
-          <span aria-hidden="true" className="text-border-strong">
-            ·
-          </span>
           <span>{categoryActivityLabel(category.usageFrequency)}</span>
         </span>
       </span>
@@ -142,33 +141,14 @@ export default function CategoriesPage() {
     .sort(
       (left, right) =>
         right.usageFrequency - left.usageFrequency ||
-        left.type.localeCompare(right.type) ||
         left.name.localeCompare(right.name),
     );
   const filteredCategories = sortedCategories.filter((category) =>
     category.name.toLocaleLowerCase().includes(normalizedSearch),
   );
-  const expenseCategories = filteredCategories.filter(
-    (category) => category.type === "expense",
-  );
-  const incomeCategories = filteredCategories.filter(
-    (category) => category.type === "income",
-  );
-  const totalExpenseCategories = categories.filter(
-    (category) => category.type === "expense",
-  ).length;
-  const totalIncomeCategories = categories.filter(
-    (category) => category.type === "income",
-  ).length;
   const frequentlyUsed = normalizedSearch
     ? []
     : sortedCategories.filter((category) => category.usageFrequency > 0).slice(0, 4);
-
-  function groupCount(visible: number, total: number) {
-    return normalizedSearch
-      ? `${visible} of ${total} categories`
-      : `${total} ${total === 1 ? "category" : "categories"}`;
-  }
 
   return (
     <main className="page-route-enter min-h-dvh bg-background">
@@ -303,55 +283,30 @@ export default function CategoriesPage() {
                 </section>
               ) : null}
 
-              {expenseCategories.length > 0 ? (
-                <section aria-labelledby="expense-categories-heading">
-                  <div className="flex items-baseline justify-between gap-3 px-1">
-                    <h3
-                      id="expense-categories-heading"
-                      className="text-sm font-semibold tracking-[-0.01em]"
-                    >
-                      Expense
-                    </h3>
-                    <span className="text-xs text-muted-foreground">
-                      {groupCount(expenseCategories.length, totalExpenseCategories)}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-2.5 min-[520px]:grid-cols-2 min-[900px]:grid-cols-3 min-[520px]:gap-3">
-                    {expenseCategories.map((category) => (
-                      <CategoryRow
-                        category={category}
-                        currentRoute={currentRoute}
-                        key={category.id}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              {incomeCategories.length > 0 ? (
-                <section aria-labelledby="income-categories-heading">
-                  <div className="flex items-baseline justify-between gap-3 px-1">
-                    <h3
-                      id="income-categories-heading"
-                      className="text-sm font-semibold tracking-[-0.01em]"
-                    >
-                      Income
-                    </h3>
-                    <span className="text-xs text-muted-foreground">
-                      {groupCount(incomeCategories.length, totalIncomeCategories)}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-2.5 min-[520px]:grid-cols-2 min-[900px]:grid-cols-3 min-[520px]:gap-3">
-                    {incomeCategories.map((category) => (
-                      <CategoryRow
-                        category={category}
-                        currentRoute={currentRoute}
-                        key={category.id}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+              <section aria-labelledby="all-categories-heading">
+                <div className="flex items-baseline justify-between gap-3 px-1">
+                  <h3
+                    id="all-categories-heading"
+                    className="text-sm font-semibold tracking-[-0.01em]"
+                  >
+                    All categories
+                  </h3>
+                  <span className="text-xs text-muted-foreground">
+                    {normalizedSearch
+                      ? `${filteredCategories.length} of ${categories.length} categories`
+                      : `${categories.length} ${categories.length === 1 ? "category" : "categories"}`}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2.5 min-[520px]:grid-cols-2 min-[900px]:grid-cols-3 min-[520px]:gap-3">
+                  {filteredCategories.map((category) => (
+                    <CategoryRow
+                      category={category}
+                      currentRoute={currentRoute}
+                      key={category.id}
+                    />
+                  ))}
+                </div>
+              </section>
             </div>
           )}
         </section>

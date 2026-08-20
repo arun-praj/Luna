@@ -7,6 +7,7 @@ import { RouteTransition } from "@/components/layout/route-transition";
 import { OfflineRuntime } from "@/components/offline/offline-runtime";
 import { DrawerInteractions } from "@/components/layout/drawer-interactions";
 import { AppleDockNavigation } from "@/components/layout/apple-dock";
+import { NotificationRuntime } from "@/components/notifications/notification-runtime";
 
 export const metadata: Metadata = {
   title: "Luna — personal finance",
@@ -34,6 +35,7 @@ export default function RootLayout({
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col overflow-x-clip">
         <PwaRuntime />
+        <NotificationRuntime />
         <OfflineRuntime />
         <AuthRedirectListener />
         <RouteTransition />

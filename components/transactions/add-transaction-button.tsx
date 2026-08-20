@@ -162,6 +162,20 @@ export function AddTransactionButton() {
     setSelectedBalanceAccount(initialAccount); setBalanceEditorOpen(true);
   }
 
+  function selectTransactionType(type: (typeof quickActions)[number]["type"]) {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setClosing(false);
+    setOpen(false);
+    if (type === "adjust_balance") {
+      void startBalanceFlow();
+      return;
+    }
+    router.push(`/transactions/new?type=${type}`);
+  }
+
   if (!isMounted) return null;
 
   return createPortal((
@@ -210,7 +224,7 @@ export function AddTransactionButton() {
                   key={action.type}
                   type="button"
                   aria-label={`Add ${action.label.toLowerCase()}`}
-                  onClick={() => closeMenu(() => { if (action.type === "adjust_balance") void startBalanceFlow(); else router.push(`/transactions/new?type=${action.type}`); })}
+                  onClick={() => selectTransactionType(action.type)}
                   className="flex min-h-14 w-full items-center gap-3 rounded-[14px] border border-border bg-background px-3 text-left transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
                 >
                   <span className={`flex size-10 shrink-0 items-center justify-center rounded-[11px] ${action.className}`}>

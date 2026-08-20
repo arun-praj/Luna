@@ -28,15 +28,29 @@ export function EmailVerificationForm() {
   const emailSent = searchParams.get("emailSent");
   const [code, setCode] = useState("");
   const [message, setMessage] = useState(() => {
-    if (emailDelivery === "failed" || emailDelivery === "unavailable" || emailSent === "0") return "We couldn’t send the code yet. Try sending a new code below.";
-    if (emailDelivery === "queued") return "We’re sending your six-digit code now. If it doesn’t arrive, send a new code below.";
+    if (emailDelivery === "failed" || emailDelivery === "unavailable" || emailSent === "0") return "We couldn’t send the code yet. Try sending a new code above.";
+    if (emailDelivery === "queued") return "We’re sending your six-digit code now. If it doesn’t arrive, send a new code above.";
     return "A six-digit code was sent to your inbox. It stays valid for 10 minutes.";
   });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
+  const [resendSeconds, setResendSeconds] = useState(0);
   const [pendingToken] = useState(() => getPendingRegistrationToken());
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  useEffect(() => {
+    if (resendAvailableAt === null) return;
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((resendAvailableAt - Date.now()) / 1000));
+      setResendSeconds(remaining);
+      if (remaining === 0) setResendAvailableAt(null);
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendAvailableAt]);
 
   useEffect(() => {
     if (pendingToken) return;
@@ -68,11 +82,25 @@ export function EmailVerificationForm() {
     setIsResending(true);
     setError("");
     const response = await (pendingToken ? fetch("/api/auth/email-verification/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pendingToken }) }) : authenticatedFetch("/api/auth/email-verification/request", { method: "POST" }));
-    const result = await response.json().catch(() => ({})) as { message?: string; error?: string };
+    const result = await response.json().catch(() => ({})) as { message?: string; error?: string; resendAfterSeconds?: number; retryAfterSeconds?: number };
+    const retryAfterSeconds = result.resendAfterSeconds ?? result.retryAfterSeconds ?? Number(response.headers.get("Retry-After") ?? 0);
+    if (retryAfterSeconds > 0) setResendAvailableAt(Date.now() + retryAfterSeconds * 1000);
     if (response.ok) setMessage(result.message ?? "A new code is on its way.");
     else setError(result.error ?? "Could not send a new code");
     setIsResending(false);
   }
+
+  function formatResendTime(seconds: number) {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return minutes ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
+  }
+
+  const resendLabel = isResending
+    ? "Sending…"
+    : resendSeconds > 0
+      ? "You can resend in " + formatResendTime(resendSeconds)
+      : "Send a new code";
 
   function updateCode(index: number, input: string) {
     const digits = input.replace(/\D/g, "");
@@ -111,5 +139,5 @@ export function EmailVerificationForm() {
     inputRefs.current[Math.min(digits.length, CODE_LENGTH - 1)]?.focus();
   }
 
-  return <form onSubmit={submit} className="mt-6 space-y-3"><div role="group" aria-label="Verification code" className="grid grid-cols-6 gap-2"><span className="sr-only">Enter the six-digit verification code</span>{Array.from({ length: CODE_LENGTH }, (_, index) => <input key={index} ref={(element) => { inputRefs.current[index] = element; }} type="text" inputMode="numeric" autoComplete={index === 0 ? "one-time-code" : "off"} pattern="[0-9]" maxLength={1} value={code[index] ?? ""} onChange={(event) => updateCode(index, event.target.value)} onKeyDown={(event) => handleKeyDown(index, event)} onPaste={handlePaste} autoFocus={index === 0} aria-label={`Verification code digit ${index + 1} of ${CODE_LENGTH}`} className="size-full min-h-14 rounded-[13px] border border-border bg-card text-center text-2xl font-bold tabular-nums outline-none transition-colors focus:border-primary focus:ring-4 focus:ring-primary/10" />)}</div>{error ? <p role="alert" className="rounded-[11px] bg-expense-soft px-3 py-2.5 text-sm font-semibold text-expense">{error}</p> : <p className="text-center text-xs text-muted-foreground">{message}</p>}<button type="submit" disabled={isSubmitting || code.length !== CODE_LENGTH} className="min-h-12 w-full rounded-[13px] bg-primary px-5 text-[15px] font-semibold text-primary-foreground disabled:opacity-60">{isSubmitting ? "Checking…" : "Verify email"}</button><button type="button" onClick={() => void resend()} disabled={isResending} className="min-h-10 w-full rounded-[13px] border border-border text-sm font-semibold text-primary">{isResending ? "Sending…" : "Send a new code"}</button><button type="button" onClick={() => void signOut().then(() => router.replace("/login"))} className="w-full pt-2 text-xs font-semibold text-muted-foreground">Use a different account</button></form>;
+  return <form onSubmit={submit} className="mt-6 space-y-3"><div role="group" aria-label="Verification code" className="grid grid-cols-6 gap-2"><span className="sr-only">Enter the six-digit verification code</span>{Array.from({ length: CODE_LENGTH }, (_, index) => <input key={index} ref={(element) => { inputRefs.current[index] = element; }} type="text" inputMode="numeric" autoComplete={index === 0 ? "one-time-code" : "off"} pattern="[0-9]" maxLength={1} value={code[index] ?? ""} onChange={(event) => updateCode(index, event.target.value)} onKeyDown={(event) => handleKeyDown(index, event)} onPaste={handlePaste} autoFocus={index === 0} aria-label={`Verification code digit ${index + 1} of ${CODE_LENGTH}`} className="size-full min-h-14 rounded-[13px] border border-border bg-card text-center text-2xl font-bold tabular-nums outline-none transition-colors focus:border-primary focus:ring-4 focus:ring-primary/10" />)}</div>{error ? <p role="alert" className="rounded-[11px] bg-expense-soft px-3 py-2.5 text-sm font-semibold text-expense">{error}</p> : <p className="text-center text-xs text-muted-foreground">{message}</p>}<button type="button" onClick={() => void resend()} disabled={isResending || resendSeconds > 0} className="w-full py-1 text-sm font-semibold text-primary transition-colors hover:text-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 disabled:opacity-60">{resendLabel}</button><button type="submit" disabled={isSubmitting || code.length !== CODE_LENGTH} className="min-h-12 w-full rounded-[13px] bg-primary px-5 text-[15px] font-semibold text-primary-foreground disabled:opacity-60">{isSubmitting ? "Checking…" : "Verify email"}</button><button type="button" onClick={() => void signOut().then(() => router.replace("/login"))} className="w-full pt-2 text-xs font-semibold text-muted-foreground">Use a different account</button></form>;
 }

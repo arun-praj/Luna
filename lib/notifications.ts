@@ -1,11 +1,12 @@
 "use client";
 
-import { authenticatedFetch } from "@/lib/auth-client";
+import { authenticatedFetch } from "./auth-client.ts";
 
 export type PushSubscriptionJSON = {
   endpoint: string;
   expirationTime?: number | null;
   keys?: Record<string, string>;
+  [key: string]: unknown;
 };
 
 export type RecurringReminderFrequency = "daily" | "weekly" | "monthly";
@@ -17,6 +18,7 @@ export type NotificationSettings = {
   loanPaymentDueEnabled: boolean;
   recurringTransactionEnabled: boolean;
   recurringTransactionTime: string;
+  recurringDueTime: string;
   timezone: string;
   recurringTransactionFrequency: RecurringReminderFrequency;
   lowBalanceEnabled: boolean;
@@ -24,7 +26,7 @@ export type NotificationSettings = {
   pushSubscription: PushSubscriptionJSON | null;
 };
 
-export type NotificationSettingsPatch = Partial<Omit<NotificationSettings, "userId">>;
+export type NotificationSettingsPatch = Partial<Omit<NotificationSettings, "userId">> & { deviceId?: string };
 
 const SETTINGS_CACHE_PREFIX = "budget_notification_settings:";
 const DEFAULT_SETTINGS = {
@@ -33,6 +35,7 @@ const DEFAULT_SETTINGS = {
   loanPaymentDueEnabled: true,
   recurringTransactionEnabled: false,
   recurringTransactionTime: "09:00",
+  recurringDueTime: "09:00",
   timezone: "UTC",
   recurringTransactionFrequency: "monthly",
   lowBalanceEnabled: false,
@@ -40,18 +43,41 @@ const DEFAULT_SETTINGS = {
   pushSubscription: null,
 } satisfies Omit<NotificationSettings, "userId">;
 
+const NOTIFICATION_DEVICE_ID_KEY = "luna_notification_device_id";
+
 function cacheKey(userId: string) {
   return `${SETTINGS_CACHE_PREFIX}${userId}`;
+}
+
+function normalizeNotificationSettings(userId: string, settings: Partial<NotificationSettings>) {
+  return {
+    ...defaultNotificationSettings(userId),
+    ...settings,
+    userId,
+  } satisfies NotificationSettings;
 }
 
 export function defaultNotificationSettings(userId: string): NotificationSettings {
   return { userId, ...DEFAULT_SETTINGS };
 }
 
+export function notificationDeviceId() {
+  if (typeof window === "undefined") return null;
+  try {
+    const existing = window.localStorage.getItem(NOTIFICATION_DEVICE_ID_KEY);
+    if (existing) return existing;
+    const created = window.crypto.randomUUID();
+    window.localStorage.setItem(NOTIFICATION_DEVICE_ID_KEY, created);
+    return created;
+  } catch {
+    return null;
+  }
+}
+
 export function readCachedNotificationSettings(userId: string) {
   try {
     const cached = window.localStorage.getItem(cacheKey(userId));
-    return cached ? JSON.parse(cached) as NotificationSettings : null;
+    return cached ? normalizeNotificationSettings(userId, JSON.parse(cached) as Partial<NotificationSettings>) : null;
   } catch {
     return null;
   }
@@ -71,8 +97,9 @@ export async function loadNotificationSettings(userId: string) {
     const response = await authenticatedFetch("/api/notifications/settings");
     if (response.ok) {
       const result = await response.json() as { settings: NotificationSettings };
-      cacheNotificationSettings(result.settings);
-      return result.settings;
+      const settings = normalizeNotificationSettings(userId, result.settings);
+      cacheNotificationSettings(settings);
+      return settings;
     }
   } catch {
     // Offline: continue with the last local snapshot.
@@ -82,19 +109,25 @@ export async function loadNotificationSettings(userId: string) {
 
 export async function saveNotificationSettings(userId: string, patch: NotificationSettingsPatch) {
   const current = readCachedNotificationSettings(userId) ?? defaultNotificationSettings(userId);
-  const optimistic = { ...current, ...patch, userId };
+  const settingsPatch = { ...patch };
+  delete settingsPatch.deviceId;
+  const optimistic = { ...current, ...settingsPatch, userId };
   cacheNotificationSettings(optimistic);
 
   try {
+    const requestPatch = patch.pushSubscription && !patch.deviceId
+      ? { ...patch, deviceId: notificationDeviceId() ?? undefined }
+      : patch;
     const response = await authenticatedFetch("/api/notifications/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
+      body: JSON.stringify(requestPatch),
     });
     if (response.ok) {
       const result = await response.json() as { settings: NotificationSettings };
-      cacheNotificationSettings(result.settings);
-      return { settings: result.settings, synced: true };
+      const settings = normalizeNotificationSettings(userId, result.settings);
+      cacheNotificationSettings(settings);
+      return { settings, synced: true };
     }
   } catch {
     // Keep the optimistic local value and reconcile on the next online save.
@@ -135,6 +168,16 @@ export function pushNotificationsConfigured() {
   return Boolean(vapidKey());
 }
 
+export function pushSubscriptionFingerprint(subscription: PushSubscriptionJSON | null) {
+  if (!subscription) return null;
+  return JSON.stringify({
+    endpoint: subscription.endpoint,
+    expirationTime: subscription.expirationTime ?? null,
+    auth: subscription.keys?.auth ?? null,
+    p256dh: subscription.keys?.p256dh ?? null,
+  });
+}
+
 function decodeVapidKey(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -162,8 +205,9 @@ export async function getCurrentPushSubscription() {
 
 export async function subscribeToPush() {
   const key = vapidKey();
+  if (!key || notificationPermission() !== "granted") return null;
   const registration = await registerNotificationServiceWorker();
-  if (!key || !registration?.pushManager) return null;
+  if (!registration?.pushManager) return null;
   try {
     let existing = await registration.pushManager.getSubscription();
     if (existing && !subscriptionUsesVapidKey(existing, key)) {
@@ -177,6 +221,51 @@ export async function subscribeToPush() {
     return subscription.toJSON() as PushSubscriptionJSON;
   } catch {
     return null;
+  }
+}
+
+type NotificationSubscriptionReconciliation = {
+  subscription: PushSubscriptionJSON | null;
+  synced: boolean;
+  skipped: boolean;
+};
+
+const subscriptionSyncState = new Map<string, string>();
+const subscriptionReconciliations = new Map<string, Promise<NotificationSubscriptionReconciliation>>();
+
+export async function reconcileNotificationSubscription(userId: string): Promise<NotificationSubscriptionReconciliation> {
+  const key = vapidKey();
+  if (typeof window === "undefined" || notificationPermission() !== "granted" || !key) {
+    return { subscription: null, synced: false, skipped: true };
+  }
+
+  const reconciliationKey = `${userId}:${key}`;
+  const pending = subscriptionReconciliations.get(reconciliationKey);
+  if (pending) return pending;
+
+  const task = (async () => {
+    const subscription = await subscribeToPush();
+    if (!subscription) return { subscription: null, synced: false, skipped: false };
+
+    const fingerprint = pushSubscriptionFingerprint(subscription);
+    if (fingerprint && subscriptionSyncState.get(reconciliationKey) === fingerprint) {
+      return { subscription, synced: true, skipped: false };
+    }
+
+    const result = await saveNotificationSettings(userId, { pushSubscription: subscription });
+    if (result.synced && fingerprint) subscriptionSyncState.set(reconciliationKey, fingerprint);
+    return { subscription, synced: result.synced, skipped: false };
+  })().finally(() => {
+    if (subscriptionReconciliations.get(reconciliationKey) === task) subscriptionReconciliations.delete(reconciliationKey);
+  });
+
+  subscriptionReconciliations.set(reconciliationKey, task);
+  return task;
+}
+
+export function forgetNotificationSubscriptionSync(userId: string) {
+  for (const key of subscriptionSyncState.keys()) {
+    if (key.startsWith(`${userId}:`)) subscriptionSyncState.delete(key);
   }
 }
 

@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { ArrowLeftRight, ChevronRight, HandCoins, Tags, Target } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { authenticatedFetch, getAccessTokenSubject } from "@/lib/auth-client";
+import { getAccessTokenSubject, getTransactionRefreshGeneration, revalidateAuthenticatedFetch } from "@/lib/auth-client";
 
 export type ActivityAlert = {
   id: string;
@@ -22,9 +22,8 @@ export type ActivityAlert = {
 
 const ACTIVITY_ALERTS_CACHE_PREFIX = "luna.activity-alerts.cache:";
 
-function readCachedActivityAlerts() {
+function readCachedActivityAlerts(userId = getAccessTokenSubject()) {
   if (typeof window === "undefined") return [];
-  const userId = getAccessTokenSubject();
   if (!userId) return [];
   try {
     return JSON.parse(window.localStorage.getItem(`${ACTIVITY_ALERTS_CACHE_PREFIX}${userId}`) ?? "[]") as ActivityAlert[];
@@ -33,9 +32,8 @@ function readCachedActivityAlerts() {
   }
 }
 
-function writeCachedActivityAlerts(alerts: ActivityAlert[]) {
+function writeCachedActivityAlerts(alerts: ActivityAlert[], userId = getAccessTokenSubject()) {
   if (typeof window === "undefined") return;
-  const userId = getAccessTokenSubject();
   if (!userId) return;
   try {
     window.localStorage.setItem(`${ACTIVITY_ALERTS_CACHE_PREFIX}${userId}`, JSON.stringify(alerts));
@@ -80,20 +78,42 @@ function budgetScope(detail: string) {
 }
 
 export function useActivityAlerts(enabled: boolean) {
-  const [alerts, setAlerts] = useState<ActivityAlert[]>(readCachedActivityAlerts);
+  const [subject, setSubject] = useState<string | null>(getAccessTokenSubject);
+  const [alerts, setAlerts] = useState<ActivityAlert[]>(() => readCachedActivityAlerts(getAccessTokenSubject()));
+  const latestRequestId = useRef(0);
+  const latestGeneration = useRef(getTransactionRefreshGeneration());
 
   useEffect(() => {
-    if (!enabled) return;
+    const handleAuthChanged = () => {
+      const nextSubject = getAccessTokenSubject();
+      if (nextSubject === subject) return;
+      latestRequestId.current += 1;
+      latestGeneration.current = getTransactionRefreshGeneration();
+      setSubject(nextSubject);
+      setAlerts([]);
+    };
+    window.addEventListener("cocomelon:auth-changed", handleAuthChanged);
+    return () => window.removeEventListener("cocomelon:auth-changed", handleAuthChanged);
+  }, [subject]);
+
+  useEffect(() => {
+    if (!enabled || !subject) return;
     let active = true;
-    const refresh = () => {
-      void authenticatedFetch("/api/home-alerts?view=activity")
+    const refresh = (event?: Event) => {
+      const generation = event instanceof CustomEvent && typeof event.detail?.generation === "number"
+        ? event.detail.generation
+        : getTransactionRefreshGeneration();
+      const requestId = latestRequestId.current + 1;
+      const requestGeneration = Math.max(generation, getTransactionRefreshGeneration());
+      latestRequestId.current = requestId;
+      latestGeneration.current = Math.max(latestGeneration.current, requestGeneration);
+      void revalidateAuthenticatedFetch("/api/home-alerts?view=activity", {}, { generation: requestGeneration })
         .then(async (response) => {
-          if (!response.ok) return;
+          if (!response.ok || !active || requestId !== latestRequestId.current || requestGeneration !== latestGeneration.current || subject !== getAccessTokenSubject()) return;
           const result = await response.json() as { alerts?: ActivityAlert[] };
-          if (!active) return;
           const next = result.alerts ?? [];
-          setAlerts(next);
-          writeCachedActivityAlerts(next);
+          setAlerts((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+          writeCachedActivityAlerts(next, subject);
         })
         .catch(() => undefined);
     };
@@ -103,7 +123,7 @@ export function useActivityAlerts(enabled: boolean) {
       active = false;
       window.removeEventListener("cocomelon:transactions-changed", refresh);
     };
-  }, [enabled]);
+  }, [enabled, subject]);
 
   return enabled ? alerts : [];
 }

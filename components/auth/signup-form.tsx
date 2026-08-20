@@ -10,6 +10,7 @@ import { waitForRegistrationHandoff } from "@/lib/auth-flow";
 export function SignupForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
+  const [accountExists, setAccountExists] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
@@ -18,6 +19,7 @@ export function SignupForm() {
     const handoffStartedAt = Date.now();
     setIsSubmitting(true);
     setMessage("");
+    setAccountExists(false);
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch("/api/auth/signup", {
@@ -41,7 +43,14 @@ export function SignupForm() {
           onboardingCompleted?: boolean;
         };
       };
-      if (!response.ok) throw new Error(result.error ?? "Unable to create account");
+      if (!response.ok) {
+        if (response.status === 409) {
+          setAccountExists(true);
+          setMessage("An account with these details already exists.");
+          return;
+        }
+        throw new Error(result.error ?? "Unable to create account");
+      }
       const verificationToken = result.pendingToken ?? result.verificationToken;
       if (!verificationToken) throw new Error("Unable to start email verification");
       clearApiCache();
@@ -140,9 +149,21 @@ export function SignupForm() {
       </form>
       <p
         aria-live="polite"
+        role={message ? "alert" : undefined}
         className="mt-3 min-h-5 text-center text-xs text-muted-foreground"
       >
         {message}
+        {accountExists ? (
+          <>
+            {" "}
+            <Link
+              href="/login"
+              className="font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            >
+              Log in instead
+            </Link>
+          </>
+        ) : null}
       </p>
       <p className="mt-2 text-center text-[13px] text-muted-foreground">
         Already have an account?{" "}

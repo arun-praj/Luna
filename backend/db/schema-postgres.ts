@@ -255,6 +255,9 @@ export const notificationSettings = pgTable("notification_settings", {
   recurringTransactionTime: text("recurring_transaction_time")
     .notNull()
     .default("09:00"),
+  recurringDueTime: text("recurring_due_time")
+    .notNull()
+    .default("09:00"),
   timezone: text("timezone")
     .notNull()
     .default("UTC"),
@@ -270,6 +273,34 @@ export const notificationSettings = pgTable("notification_settings", {
   pushSubscription: text("push_subscription"),
 });
 
+export const notificationPushSubscriptions = pgTable(
+  "notification_push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    subscriptionJson: text("subscription_json").notNull(),
+    active: boolean("active").notNull().default(true),
+    lastSeenAt: optionalIsoTimestamp("last_seen_at"),
+    lastDeliveryAt: optionalIsoTimestamp("last_delivery_at"),
+    lastDeliveryStatus: text("last_delivery_status", {
+      enum: ["sent", "subscription_expired", "rejected", "failed", "not_configured"],
+    }),
+    lastDeliveryHttpStatus: integer("last_delivery_http_status"),
+    lastDeliveryError: text("last_delivery_error"),
+    createdAt: isoTimestamp("created_at"),
+    updatedAt: isoTimestamp("updated_at"),
+  },
+  (table) => [
+    uniqueIndex("notification_push_subscriptions_user_device_unique").on(table.userId, table.deviceId),
+    uniqueIndex("notification_push_subscriptions_endpoint_unique").on(table.endpoint),
+    index("notification_push_subscriptions_user_active_idx").on(table.userId, table.active),
+  ],
+);
+
 export const notificationDeliveries = pgTable(
   "notification_deliveries",
   {
@@ -283,6 +314,13 @@ export const notificationDeliveries = pgTable(
     referenceId: text("reference_id").notNull(),
     occurrenceKey: text("occurrence_key").notNull(),
     sentAt: isoTimestamp("sent_at"),
+    deliveryStatus: text("delivery_status", {
+      enum: ["pending", "sent", "partial", "subscription_expired", "rejected", "failed", "not_configured"],
+    }).notNull().default("sent"),
+    deliveryHttpStatus: integer("delivery_http_status"),
+    deliveryError: text("delivery_error"),
+    attemptedDeviceCount: integer("attempted_device_count").notNull().default(0),
+    deliveredDeviceCount: integer("delivered_device_count").notNull().default(0),
   },
   (table) => [
     uniqueIndex("notification_deliveries_unique").on(table.userId, table.kind, table.referenceId, table.occurrenceKey),
@@ -771,6 +809,7 @@ export const schema = {
   refreshTokens,
   passwordResetTokens,
   notificationSettings,
+  notificationPushSubscriptions,
   accounts,
   homeAlerts,
   reportDeliveries,

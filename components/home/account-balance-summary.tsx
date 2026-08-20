@@ -5,7 +5,8 @@ import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDownLeft, ArrowLeftRight, ArrowRight, Check, ChevronRight, Clock3, HandCoins, SkipForward, Tags, Target, WalletCards, X } from "lucide-react";
 
-import { authenticatedFetch, getAccessTokenSubject, notifyTransactionsChanged } from "@/lib/auth-client";
+import { authenticatedFetch, getAccessTokenSubject, getTransactionRefreshGeneration, notifyTransactionsChanged, revalidateAuthenticatedFetch } from "@/lib/auth-client";
+import { hasFreshDataChanged, useHomeSnapshot, writeHomeSnapshot } from "@/lib/home-snapshot-cache";
 import { addCurrencyAmount, currencyEntries, formatCurrencyAmount } from "@/lib/currency";
 import { Skeleton } from "@/components/ui/data-skeleton";
 import { MonthlyOverviewCards } from "@/components/home/monthly-summary";
@@ -24,6 +25,7 @@ type Account = {
   includeInTotalBalance?: boolean;
 };
 type Loan = { id: string; accountId: string; direction: "borrowed" | "lent"; currency: string; outstandingPrincipal: number; status: string; nextDueDate: string | null };
+type BalanceSnapshot = { accounts: Account[]; displayCurrency: string; hideTotalBalance: boolean; loans: Loan[] };
 type Goal = { id: string; name: string; targetAmount: number; allocatedAmount: number; monthlyContribution: number; status: "active" | "completed" | "archived"; targetDate: string | null; accountId: string | null };
 
 type HomeInsight = {
@@ -82,18 +84,40 @@ function writeCachedHomeAlerts(alerts: HomeInsight[]) {
   }
 }
 
+function isBalanceSnapshot(value: unknown): value is BalanceSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<BalanceSnapshot>;
+  return Array.isArray(snapshot.accounts)
+    && Array.isArray(snapshot.loans)
+    && typeof snapshot.displayCurrency === "string"
+    && typeof snapshot.hideTotalBalance === "boolean";
+}
+
 export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (hasAlerts: boolean) => void }) {
   const reduceMotion = useReducedMotion();
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [displayCurrency, setDisplayCurrency] = useState("NPR");
-  const [hideTotalBalance, setHideTotalBalance] = useState(false);
+  const [authSubject, setAuthSubject] = useState<string | null>(getAccessTokenSubject);
+  const userId = authSubject;
+  const cachedBalance = useHomeSnapshot("balance", userId, "default", isBalanceSnapshot);
+  const balanceKey = userId ?? "";
+  const [accounts, setAccounts] = useState<Account[]>(() => cachedBalance?.data.accounts ?? []);
+  const [displayCurrency, setDisplayCurrency] = useState(() => cachedBalance?.data.displayCurrency ?? "NPR");
+  const [hideTotalBalance, setHideTotalBalance] = useState(() => cachedBalance?.data.hideTotalBalance ?? false);
   const [balanceRevealed, setBalanceRevealed] = useState(false);
   const [revealSecondsRemaining, setRevealSecondsRemaining] = useState(0);
-  const [loans, setLoans] = useState<Loan[]>([]);
+  const [loans, setLoans] = useState<Loan[]>(() => cachedBalance?.data.loans ?? []);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [serverInsights, setServerInsights] = useState<HomeInsight[]>([]);
   const serverInsightsRef = useRef<HomeInsight[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !cachedBalance);
+  const [freshBalanceKey, setFreshBalanceKey] = useState<string | null>(null);
+  const [freshBalanceChangedKey, setFreshBalanceChangedKey] = useState<string | null>(null);
+  const [freshBalanceChangeVersion, setFreshBalanceChangeVersion] = useState(0);
+  const latestBalanceRequestId = useRef(0);
+  const latestBalanceGeneration = useRef(getTransactionRefreshGeneration());
+  const latestAlertRequestId = useRef(0);
+  const latestAlertGeneration = useRef(getTransactionRefreshGeneration());
+  const lastBalanceUserKey = useRef(balanceKey);
+  const lastBalanceSnapshot = useRef<BalanceSnapshot | null>(cachedBalance?.data ?? null);
   const revealTimer = useRef<number | null>(null);
   const revealCountdownTimer = useRef<number | null>(null);
   const dismissTimers = useRef<Record<string, number>>({});
@@ -109,46 +133,118 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
     setServerInsights(next);
   }
 
+  function applyBalanceSnapshot(next: BalanceSnapshot) {
+    setAccounts((current) => JSON.stringify(current) === JSON.stringify(next.accounts) ? current : next.accounts);
+    setLoans((current) => JSON.stringify(current) === JSON.stringify(next.loans) ? current : next.loans);
+    setDisplayCurrency((current) => current === next.displayCurrency ? current : next.displayCurrency);
+    setHideTotalBalance((current) => current === next.hideTotalBalance ? current : next.hideTotalBalance);
+  }
+
+  useEffect(() => {
+    const handleAuthChanged = () => {
+      const nextSubject = getAccessTokenSubject();
+      if (nextSubject === userId) return;
+      setAuthSubject(nextSubject);
+      setAccounts([]);
+      setLoans([]);
+      setDisplayCurrency("NPR");
+      setHideTotalBalance(false);
+      setBalanceRevealed(false);
+      setRevealSecondsRemaining(0);
+      setGoals([]);
+      setServerInsights([]);
+      serverInsightsRef.current = [];
+      setIsLoading(Boolean(nextSubject));
+      setFreshBalanceKey(null);
+      setFreshBalanceChangedKey(null);
+      setFreshBalanceChangeVersion(0);
+      latestBalanceRequestId.current += 1;
+      latestAlertRequestId.current += 1;
+      latestBalanceGeneration.current = getTransactionRefreshGeneration();
+      latestAlertGeneration.current = getTransactionRefreshGeneration();
+      setExitingInsightIds([]);
+      setExitingInsightDirections({});
+      setSwipeOffsets({});
+      setActionErrors({});
+    };
+    window.addEventListener("cocomelon:auth-changed", handleAuthChanged);
+    return () => window.removeEventListener("cocomelon:auth-changed", handleAuthChanged);
+  }, [userId]);
+
+  useEffect(() => {
+    if (lastBalanceUserKey.current !== balanceKey || (lastBalanceSnapshot.current === null && cachedBalance)) {
+      lastBalanceUserKey.current = balanceKey;
+      lastBalanceSnapshot.current = cachedBalance?.data ?? null;
+    }
+  }, [balanceKey, cachedBalance]);
+
   useEffect(() => {
     let active = true;
     const dismissTimerMap = dismissTimers.current;
-
-    void Promise.all([
-      authenticatedFetch("/api/accounts"),
-      authenticatedFetch("/api/auth/me"),
-      authenticatedFetch("/api/loans"),
-      authenticatedFetch("/api/home-alerts"),
-    ])
-      .then(async ([accountsResponse, profileResponse, loansResponse, alertsResponse]) => {
-        const result = accountsResponse.ok ? (await accountsResponse.json()) as { accounts?: Account[] } : { accounts: [] };
-        const profile = profileResponse.ok
-          ? (await profileResponse.json()) as { user?: { currency?: string; hideTotalBalance?: boolean } }
-          : null;
-        if (active) {
-          if (accountsResponse.ok) setAccounts(result.accounts ?? []);
-          if (loansResponse.ok) setLoans(((await loansResponse.json()) as { loans?: Loan[] }).loans ?? []);
-          if (alertsResponse.ok) {
-            const result = (await alertsResponse.json()) as { alerts?: ApiHomeAlert[] };
-            const nextAlerts = mapHomeAlerts(result.alerts ?? []);
-            applyServerInsights(nextAlerts);
-            writeCachedHomeAlerts(nextAlerts);
-          } else {
-            const cached = readCachedHomeAlerts();
-            applyServerInsights(mapHomeAlerts(cached.slice(0, 3)));
+    const refreshBalance = (generation = getTransactionRefreshGeneration()) => {
+      const requestId = latestBalanceRequestId.current + 1;
+      const requestGeneration = Math.max(generation, getTransactionRefreshGeneration());
+      latestBalanceRequestId.current = requestId;
+      latestBalanceGeneration.current = Math.max(latestBalanceGeneration.current, requestGeneration);
+      void Promise.all([
+        revalidateAuthenticatedFetch("/api/accounts", {}, { generation: requestGeneration }),
+        revalidateAuthenticatedFetch("/api/auth/me", {}, { generation: requestGeneration }),
+        revalidateAuthenticatedFetch("/api/loans", {}, { generation: requestGeneration }),
+      ])
+        .then(async ([accountsResponse, profileResponse, loansResponse]) => {
+          if (!accountsResponse.ok || !profileResponse.ok || !loansResponse.ok) throw new Error("Balance refresh failed");
+          const accountsResult = await accountsResponse.json() as { accounts?: Account[] };
+          const profile = await profileResponse.json() as { user?: { currency?: string; hideTotalBalance?: boolean } };
+          const loansResult = await loansResponse.json() as { loans?: Loan[] };
+          const next: BalanceSnapshot = {
+            accounts: accountsResult.accounts ?? [],
+            displayCurrency: profile.user?.currency ?? "NPR",
+            hideTotalBalance: profile.user?.hideTotalBalance === true,
+            loans: loansResult.loans ?? [],
+          };
+          const currentUserId = getAccessTokenSubject();
+          if (!active || requestId !== latestBalanceRequestId.current || requestGeneration !== latestBalanceGeneration.current || !currentUserId || (userId && userId !== currentUserId)) return;
+          const freshChanged = hasFreshDataChanged(lastBalanceSnapshot.current, next);
+          lastBalanceSnapshot.current = next;
+          writeHomeSnapshot("balance", currentUserId, "default", next);
+          applyBalanceSnapshot(next);
+          setFreshBalanceKey(currentUserId);
+          if (freshChanged) {
+            setFreshBalanceChangedKey(currentUserId);
+            setFreshBalanceChangeVersion((current) => current + 1);
           }
-          if (profile?.user?.currency) setDisplayCurrency(profile.user.currency);
-          setHideTotalBalance(profile?.user?.hideTotalBalance === true);
-          setBalanceRevealed(false);
-        }
-      })
-      .catch(() => {
-        if (!active) return;
-        const cached = readCachedHomeAlerts();
-        applyServerInsights(mapHomeAlerts(cached.slice(0, 3)));
-      })
-      .finally(() => {
-        if (active) setIsLoading(false);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (active && requestId === latestBalanceRequestId.current && requestGeneration === latestBalanceGeneration.current) setIsLoading(false);
+        });
+    };
+
+    const refreshAlerts = (generation = getTransactionRefreshGeneration()) => {
+      const requestId = latestAlertRequestId.current + 1;
+      const requestGeneration = Math.max(generation, getTransactionRefreshGeneration());
+      latestAlertRequestId.current = requestId;
+      latestAlertGeneration.current = Math.max(latestAlertGeneration.current, requestGeneration);
+      void revalidateAuthenticatedFetch("/api/home-alerts", {}, { generation: requestGeneration })
+        .then(async (response) => {
+          if (!active || requestId !== latestAlertRequestId.current || requestGeneration !== latestAlertGeneration.current || !response.ok) return;
+          const result = (await response.json()) as { alerts?: ApiHomeAlert[] };
+          const nextAlerts = mapHomeAlerts(result.alerts ?? []);
+          if (JSON.stringify(serverInsightsRef.current) !== JSON.stringify(nextAlerts)) applyServerInsights(nextAlerts);
+          serverInsightsRef.current = nextAlerts;
+          writeCachedHomeAlerts(nextAlerts);
+        })
+        .catch(() => undefined);
+    };
+
+    refreshBalance(getTransactionRefreshGeneration());
+    refreshAlerts(getTransactionRefreshGeneration());
+    const cachedAlerts = readCachedHomeAlerts();
+    if (cachedAlerts.length) {
+      queueMicrotask(() => {
+        if (active) applyServerInsights(mapHomeAlerts(cachedAlerts.slice(0, 3)));
       });
+    }
 
     // Recurring overview also creates due occurrences. Keep it off the critical
     // balance path so a slow reminder query never delays the home screen.
@@ -159,30 +255,31 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
       })
       .catch(() => undefined);
 
-    const refreshAlerts = () => {
-      void authenticatedFetch("/api/home-alerts")
-        .then(async (response) => {
-          if (!active || !response.ok) return;
-          const result = (await response.json()) as { alerts?: ApiHomeAlert[] };
-          const nextAlerts = mapHomeAlerts(result.alerts ?? []);
-          applyServerInsights(nextAlerts);
-          writeCachedHomeAlerts(nextAlerts);
-        })
-        .catch(() => undefined);
+    const refreshAfterMutation = (event: Event) => {
+      const generation = event instanceof CustomEvent && typeof event.detail?.generation === "number" ? event.detail.generation : getTransactionRefreshGeneration();
+      refreshBalance(generation);
+      refreshAlerts(generation);
     };
-    window.addEventListener("cocomelon:transactions-changed", refreshAlerts);
+    window.addEventListener("cocomelon:transactions-changed", refreshAfterMutation);
 
     return () => {
       active = false;
-      window.removeEventListener("cocomelon:transactions-changed", refreshAlerts);
+      window.removeEventListener("cocomelon:transactions-changed", refreshAfterMutation);
       if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
       if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
       Object.values(dismissTimerMap).forEach((timer) => window.clearTimeout(timer));
     };
-  }, []);
+  }, [balanceKey, userId]);
+
+  const cachedBalanceForDisplay = freshBalanceKey === balanceKey ? null : cachedBalance?.data;
+  const displayedAccounts = cachedBalanceForDisplay?.accounts ?? accounts;
+  const displayedLoans = cachedBalanceForDisplay?.loans ?? loans;
+  const displayedCurrency = cachedBalanceForDisplay?.displayCurrency ?? displayCurrency;
+  const displayedHideTotalBalance = cachedBalanceForDisplay?.hideTotalBalance ?? hideTotalBalance;
+  const displayedIsLoading = !cachedBalanceForDisplay && freshBalanceKey !== balanceKey && isLoading;
 
   function revealBalance() {
-    if (!hideTotalBalance) return;
+    if (!displayedHideTotalBalance) return;
     if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
     if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
     const startedAt = Date.now();
@@ -201,7 +298,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
   }
 
   function toggleBalanceVisibility() {
-    if (!hideTotalBalance) return;
+    if (!displayedHideTotalBalance) return;
     if (balanceRevealed) {
       if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
       if (revealCountdownTimer.current !== null) window.clearInterval(revealCountdownTimer.current);
@@ -216,17 +313,17 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
 
   const balanceByCurrency = useMemo(() => {
     const totals = {} as Record<string, number>;
-    const detailedLoanAccounts = new Set(loans.map((loan) => loan.accountId));
-    for (const account of accounts) {
+    const detailedLoanAccounts = new Set(displayedLoans.map((loan) => loan.accountId));
+    for (const account of displayedAccounts) {
       if (account.includeInTotalBalance === false) continue;
       if (detailedLoanAccounts.has(account.id)) continue;
       addCurrencyAmount(totals, account.currency, account.currentBalance);
     }
     return currencyEntries(totals);
-  }, [accounts, loans]);
-  const primaryCurrency = balanceByCurrency.some(([currency]) => currency === displayCurrency)
-    ? displayCurrency
-    : balanceByCurrency[0]?.[0] ?? displayCurrency;
+  }, [displayedAccounts, displayedLoans]);
+  const primaryCurrency = balanceByCurrency.some(([currency]) => currency === displayedCurrency)
+    ? displayedCurrency
+    : balanceByCurrency[0]?.[0] ?? displayedCurrency;
   const primaryBalance = balanceByCurrency.find(([currency]) => currency === primaryCurrency)?.[1] ?? 0;
   const otherBalances = balanceByCurrency.filter(([currency]) => currency !== primaryCurrency);
   const visibleInsights = serverInsights;
@@ -369,7 +466,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
       <div className={hasVisibleInsights ? "flex items-center justify-between gap-3" : ""}>
         <div className="min-w-0">
           <p id="balance-heading" className={hasVisibleInsights ? "text-xs font-medium text-muted-foreground" : "text-sm font-medium text-muted-foreground"}>Total balance</p>
-          {isLoading ? (
+          {displayedIsLoading ? (
             <p className="mt-2"><Skeleton className={`${hasVisibleInsights ? "h-8 w-32" : "h-10 w-44"} inline-block align-middle rounded-md`} /></p>
           ) : (
             <p className={`${hasVisibleInsights ? "mt-1 text-[27px]" : "mt-2 text-[36px] sm:text-[40px]"} font-sans font-semibold leading-none tracking-[-0.045em] tabular-nums text-foreground`}>
@@ -379,11 +476,12 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
                 </span>
                 <AnimatedBalanceAmount
                   amount={formatCurrencyAmount(primaryBalance)}
-                  hideTotalBalance={hideTotalBalance}
+                  hideTotalBalance={displayedHideTotalBalance}
                   balanceRevealed={balanceRevealed}
                   revealSecondsRemaining={revealSecondsRemaining}
                   onToggleVisibility={toggleBalanceVisibility}
                   href="/accounts"
+                  animate={freshBalanceChangedKey === balanceKey && freshBalanceChangeVersion > 0}
                   className={`hover:text-primary ${primaryBalance < 0 ? "text-expense" : "text-income"}`}
                 />
               </span>
@@ -391,12 +489,12 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
           )}
         </div>
       </div>
-      {!isLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([currency, amount], index) => <span key={currency}>{index ? " · " : ""}{currency} {hideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>)}</p> : null}
+      {!displayedIsLoading && otherBalances.length ? <p className="mt-2 text-xs font-semibold tabular-nums text-muted-foreground" aria-label="Other currency balances">{otherBalances.map(([currency, amount], index) => <span key={currency}>{index ? " · " : ""}{currency} {displayedHideTotalBalance && !balanceRevealed ? "****" : formatCurrencyAmount(amount)}</span>)}</p> : null}
 
       <MonthlyOverviewCards compact />
 
       <AnimatePresence initial={false}>
-        {!isLoading && visibleInsights.length ? (
+        {!displayedIsLoading && visibleInsights.length ? (
           <motion.section key="money-reminders" aria-label="Money reminders" initial={reduceMotion ? false : { opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: "auto", marginTop: 16 }} exit={{ opacity: reduceMotion ? 1 : 0, height: 0, marginTop: 0 }} transition={reduceMotion ? { duration: 0 } : { duration: 0.38, ease: [0.22, 1, 0.36, 1] }} className="relative overflow-visible">
           <AnimatePresence initial={false}>
             {groupedInsights.map((insight, index) => {
@@ -443,7 +541,7 @@ export function AccountBalanceSummary({ onAlertsChange }: { onAlertsChange?: (ha
                       </div>
                       <div className="mt-3 flex min-w-0 items-center gap-2 rounded-[12px] bg-primary-soft/55 px-3 py-2.5 text-xs font-semibold text-foreground"><Target aria-hidden="true" className="size-4 shrink-0 text-primary" /><span className="truncate">{insight.value} saved for this goal</span></div>
                       {insight.progress !== undefined ? <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary-soft"><span className="block h-full rounded-full bg-primary" style={{ width: `${insight.progress}%` }} /></div> : null}
-                      <GoalAlertActions insight={insight} goal={goals.find((goal) => goal.id === insight.goalId)} accounts={accounts} onComplete={() => dismissInsight(insight.id, false)} />
+                      <GoalAlertActions insight={insight} goal={goals.find((goal) => goal.id === insight.goalId)} accounts={displayedAccounts} onComplete={() => dismissInsight(insight.id, false)} />
                       </div>
                     </motion.article>
                   </Fragment>

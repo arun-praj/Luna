@@ -27,7 +27,7 @@ export const accountInput = z.object({
 
 export const categoryInput = z.object({
   name: z.string().trim().min(1).max(100),
-  type: z.enum(["expense", "income"]),
+  type: z.enum(["expense", "income"]).optional().default("expense"),
   icon: z.string().trim().max(100).nullable().optional(),
   color: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
 });

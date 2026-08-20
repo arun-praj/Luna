@@ -3,6 +3,8 @@
 // Access tokens are intentionally process-local. A reload restores the session
 // through the HttpOnly refresh cookie instead of exposing a bearer token to
 // JavaScript-readable storage.
+import { clearHomeSnapshots } from "./home-snapshot-cache.ts";
+
 const LEGACY_ACCESS_TOKEN_KEY = "budget_access_token";
 const REFRESH_WINDOW_SECONDS = 60;
 const API_CACHE_TTL_MS = 120_000;
@@ -17,12 +19,16 @@ let accessToken: string | null = null;
 class RefreshUnavailableError extends Error {}
 
 type ApiCacheEntry = {
+  subject: string;
   data: unknown;
   expiresAt: number;
 };
 
 const apiCache = new Map<string, ApiCacheEntry>();
 const apiRequests = new Map<string, Promise<Response>>();
+const freshApiRequests = new Map<string, Promise<Response>>();
+let apiCacheEpoch = 0;
+let transactionRefreshGeneration = 0;
 
 const publicAuthPaths = new Set(["/login", "/signup", "/forgot-password", "/reset-password", "/verify-email"]);
 
@@ -67,7 +73,10 @@ export function getAccessToken() {
 }
 
 export function getAccessTokenSubject() {
-  const token = getAccessToken();
+  return getAccessTokenSubjectFromToken(getAccessToken());
+}
+
+function getAccessTokenSubjectFromToken(token: string | null) {
   if (!token) return null;
   try {
     const payload = JSON.parse(
@@ -79,7 +88,18 @@ export function getAccessTokenSubject() {
   }
 }
 
+function clearHomeClientCaches() {
+  clearHomeSnapshots();
+  if (typeof window !== "undefined") clearHomeSnapshots(window.localStorage);
+}
+
 export function setAccessToken(token: string) {
+  const previousSubject = getAccessTokenSubject();
+  const nextSubject = getAccessTokenSubjectFromToken(token);
+  if (shouldResetAuthenticatedApiCache(previousSubject, nextSubject)) {
+    clearApiCache();
+    if (didAuthenticatedSubjectChange(previousSubject, nextSubject)) clearHomeClientCaches();
+  }
   accessToken = token;
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
 }
@@ -92,7 +112,7 @@ function readPersistedCache() {
     ) as Record<string, ApiCacheEntry> | null;
     if (!persisted) return;
     for (const [key, entry] of Object.entries(persisted)) {
-      if (entry.expiresAt > Date.now()) apiCache.set(key, entry);
+      if (typeof entry.subject === "string" && entry.expiresAt > Date.now()) apiCache.set(key, entry);
     }
   } catch {
     window.sessionStorage.removeItem(API_CACHE_STORAGE_KEY);
@@ -112,23 +132,45 @@ function persistCache() {
 }
 
 export function clearApiCache() {
+  apiCacheEpoch += 1;
   apiCache.clear();
+  apiRequests.clear();
+  freshApiRequests.clear();
   if (typeof window !== "undefined")
     window.sessionStorage.removeItem(API_CACHE_STORAGE_KEY);
 }
 
+export function didAuthenticatedSubjectChange(previousSubject: string | null, nextSubject: string | null) {
+  return Boolean(previousSubject && nextSubject && previousSubject !== nextSubject);
+}
+
+export function shouldResetAuthenticatedApiCache(previousSubject: string | null, nextSubject: string | null) {
+  return Boolean(nextSubject) && previousSubject !== nextSubject;
+}
+
+export function isCurrentApiCacheEpoch(requestEpoch: number, currentEpoch: number) {
+  return requestEpoch === currentEpoch;
+}
+
 export function primeApiCache(path: string, data: unknown) {
   if (typeof window === "undefined") return;
+  const subject = getAccessTokenSubject();
+  if (!subject) return;
   const cacheKey = new URL(path, window.location.origin).toString();
-  apiCache.set(cacheKey, { data, expiresAt: Date.now() + API_CACHE_TTL_MS });
+  apiCache.set(cacheKey, { subject, data, expiresAt: Date.now() + API_CACHE_TTL_MS });
   persistCache();
 }
 
 export function notifyTransactionsChanged() {
   clearApiCache();
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("cocomelon:transactions-changed"));
+    transactionRefreshGeneration += 1;
+    window.dispatchEvent(new CustomEvent("cocomelon:transactions-changed", { detail: { generation: transactionRefreshGeneration } }));
   }
+}
+
+export function getTransactionRefreshGeneration() {
+  return transactionRefreshGeneration;
 }
 
 export function notifyOnlineDataChanged() {
@@ -146,6 +188,7 @@ export function clearAccessToken() {
   // logout or token expiry on a shared device.
   window.localStorage.removeItem("cocomelon.offline-active-user");
   clearApiCache();
+  clearHomeClientCaches();
   window.dispatchEvent(new CustomEvent("cocomelon:auth-changed"));
 }
 
@@ -312,37 +355,120 @@ export async function authenticatedFetch(
           window.location.origin,
         ).toString()
       : null;
+  let subjectAtStart = getAccessTokenSubject();
+  if (!subjectAtStart) {
+    await refreshSessionIfNeeded();
+    subjectAtStart = getAccessTokenSubject();
+  }
+  if (!subjectAtStart) return fetchWithAuth(input, init);
+
   if (cacheKey) {
+    const requestKey = apiRequestKey(subjectAtStart, cacheKey);
     readPersistedCache();
     const cached = apiCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      if (!apiRequests.has(cacheKey))
-        void startApiRequest(input, init, cacheKey).catch(() => undefined);
-      return new Response(JSON.stringify(cached.data), {
+    if (cached && cached.expiresAt > Date.now() && isOwnedApiCacheEntry(cached.subject, subjectAtStart)) {
+      if (!apiRequests.has(requestKey))
+        void startApiRequest(input, init, cacheKey, subjectAtStart).catch(() => undefined);
+      return responseForStableSubject(new Response(JSON.stringify(cached.data), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      });
+      }), subjectAtStart);
     }
-    const pending = apiRequests.get(cacheKey);
-    if (pending) return pending.then((response) => response.clone());
-    return startApiRequest(input, init, cacheKey);
+    const pending = apiRequests.get(requestKey);
+    if (pending) return pending.then((response) => responseForStableSubject(response.clone(), subjectAtStart));
+    return startApiRequest(input, init, cacheKey, subjectAtStart).then((response) => responseForStableSubject(response, subjectAtStart));
   }
 
   clearApiCache();
-  return fetchWithAuth(input, init);
+  return fetchWithAuth(input, init).then((response) => responseForStableSubject(response, subjectAtStart));
+}
+
+export function buildRevalidationKey(subject: string, method: string, url: string, generation?: string | number) {
+  return `${subject}:${method}:${url}:generation=${generation ?? "normal"}`;
+}
+
+export function isStableAuthenticatedSubject(startSubject: string | null, currentSubject: string | null) {
+  return Boolean(startSubject) && startSubject === currentSubject;
+}
+
+export function isOwnedApiCacheEntry(entrySubject: string | null, currentSubject: string | null) {
+  return isStableAuthenticatedSubject(entrySubject, currentSubject);
+}
+
+function apiRequestKey(subject: string, cacheKey: string) {
+  return `${encodeURIComponent(subject)}:${cacheKey}`;
+}
+
+function responseForStableSubject(response: Response, subjectAtStart: string) {
+  if (isStableAuthenticatedSubject(subjectAtStart, getAccessTokenSubject())) return response;
+  return new Response(null, { status: 409, statusText: "Authentication changed" });
+}
+
+function freshRequestKey(input: RequestInfo | URL, init: RequestInit, subject: string, generation?: string | number) {
+  const method = (
+    init.method ??
+    (typeof input === "string"
+      ? "GET"
+      : input instanceof Request
+        ? input.method
+        : "GET")
+  ).toUpperCase();
+  const url = new URL(
+    input instanceof Request ? input.url : input.toString(),
+    window.location.origin,
+  ).toString();
+  return buildRevalidationKey(subject, method, url, generation);
+}
+
+/**
+ * Fetch a current authenticated value, bypassing the general API response
+ * cache while deduplicating identical requests for the same signed-in user.
+ * Consumers receive a clone so each caller may consume its response body.
+ */
+export function revalidateAuthenticatedFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  options: { generation?: string | number } = {},
+) {
+  return (async () => {
+    const initialSubject = getAccessTokenSubject();
+    let subjectAtStart = initialSubject;
+    if (!subjectAtStart) {
+      await refreshSessionIfNeeded();
+      subjectAtStart = getAccessTokenSubject();
+    }
+    if (!subjectAtStart) return new Response(null, { status: 401, statusText: "Authentication required" });
+
+    const key = freshRequestKey(input, init, subjectAtStart, options.generation);
+    const pending = freshApiRequests.get(key);
+    if (pending) return pending.then((response) => response.clone());
+
+    const request = fetchWithAuth(input, { ...init, cache: "no-store" }).then((response) => {
+      const currentSubject = getAccessTokenSubject();
+      if (isStableAuthenticatedSubject(subjectAtStart, currentSubject)) return response;
+      return new Response(null, { status: 409, statusText: "Authentication changed" });
+    });
+    const trackedRequest = request.finally(() => {
+      if (freshApiRequests.get(key) === trackedRequest) freshApiRequests.delete(key);
+    });
+    freshApiRequests.set(key, trackedRequest);
+    return trackedRequest.then((response) => response.clone());
+  })();
 }
 
 function startApiRequest(
   input: RequestInfo | URL,
   init: RequestInit,
   cacheKey: string,
+  subject: string,
 ) {
-  const request = fetchAndCache(input, init, cacheKey);
+  const requestKey = apiRequestKey(subject, cacheKey);
+  const request = fetchAndCache(input, init, cacheKey, subject, apiCacheEpoch);
   const trackedRequest = request.finally(() => {
-    if (apiRequests.get(cacheKey) === trackedRequest)
-      apiRequests.delete(cacheKey);
+    if (apiRequests.get(requestKey) === trackedRequest)
+      apiRequests.delete(requestKey);
   });
-  apiRequests.set(cacheKey, trackedRequest);
+  apiRequests.set(requestKey, trackedRequest);
   return trackedRequest;
 }
 
@@ -350,13 +476,17 @@ async function fetchAndCache(
   input: RequestInfo | URL,
   init: RequestInit,
   cacheKey: string,
+  subject: string,
+  requestEpoch: number,
 ) {
   const response = await fetchWithAuth(input, init);
   if (!response.ok) return response;
   try {
     const data = (await response.clone().json()) as unknown;
-    apiCache.set(cacheKey, { data, expiresAt: Date.now() + API_CACHE_TTL_MS });
-    persistCache();
+    if (isCurrentApiCacheEpoch(requestEpoch, apiCacheEpoch) && isOwnedApiCacheEntry(subject, getAccessTokenSubject())) {
+      apiCache.set(cacheKey, { subject, data, expiresAt: Date.now() + API_CACHE_TTL_MS });
+      persistCache();
+    }
   } catch {
     // Some successful GET endpoints may return an empty or non-JSON response.
   }

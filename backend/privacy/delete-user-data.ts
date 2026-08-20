@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/backend/db/client";
-import { accountDeletionRequests, accounts, budgetAllocations, budgetCategoryBuckets, budgetIncomeSources, budgetMoves, budgetPeriods, budgetTemplates, categories, goals, homeAlerts, loanInstallments, loanPaymentEvents, loanRatePeriods, loans, notificationDeliveries, notificationSettings, otpCodes, passwordResetTokens, pendingRegistrations, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, storageUsage, storedObjects, transactionHistory, transactions, userTags, users, webauthnChallenges, webauthnCredentials, webauthnUnlockGrants } from "@/backend/db/schema";
+import { accountDeletionRequests, accounts, budgetAllocations, budgetCategoryBuckets, budgetIncomeSources, budgetMoves, budgetPeriods, budgetTemplates, categories, goals, homeAlerts, loanInstallments, loanPaymentEvents, loanRatePeriods, loans, notificationDeliveries, notificationPushSubscriptions, notificationSettings, otpCodes, passwordResetTokens, pendingRegistrations, recurringOccurrences, recurringTemplates, refreshTokens, savingsInstrumentTypes, savingsInstruments, spendingBudgets, storageUsage, storedObjects, transactionHistory, transactions, userTags, users, webauthnChallenges, webauthnCredentials, webauthnUnlockGrants } from "@/backend/db/schema";
 import { deleteUserUploadObjects, type AccountDeletionStorage } from "@/backend/privacy/delete-user-data-helpers";
 
 type BatchStatement = Parameters<typeof db.batch>[0][number];
@@ -30,6 +30,7 @@ export const accountDeletionTableOrder = [
   "goals",
   "user_tags",
   "notification_deliveries",
+  "notification_push_subscriptions",
   "notification_settings",
   "otp_codes",
   "pending_registrations",
@@ -80,6 +81,7 @@ export async function deleteUserData(executor: DatabaseLike, userId: string, opt
     executor.delete(goals).where(eq(goals.userId, userId)),
     executor.delete(userTags).where(eq(userTags.userId, userId)),
     executor.delete(notificationDeliveries).where(eq(notificationDeliveries.userId, userId)),
+    executor.delete(notificationPushSubscriptions).where(eq(notificationPushSubscriptions.userId, userId)),
     executor.delete(notificationSettings).where(eq(notificationSettings.userId, userId)),
     executor.delete(otpCodes).where(eq(otpCodes.userId, userId)),
     executor.delete(pendingRegistrations).where(eq(pendingRegistrations.email, executor.select({ email: users.email }).from(users).where(eq(users.id, userId)))),

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
@@ -12,6 +13,7 @@ import { UserGreeting } from "@/components/home/user-greeting";
 import { UserAvatar } from "@/components/home/user-avatar";
 import { AddTransactionButton } from "@/components/transactions/add-transaction-button";
 import { TransactionList } from "@/components/transactions/transaction-list";
+import { ActiveTransactionFilters, hasTransactionFilters, transactionFiltersFromSearchParams, transactionFiltersQuery, type TransactionFilterState } from "@/components/transactions/transaction-filter-bar";
 import { AppTutorial } from "@/components/tutorial/app-tutorial";
 import { InstallAppCard } from "@/components/pwa/install-app-card";
 
@@ -26,8 +28,25 @@ function currentMonthPeriod(): AppliedPeriod {
 }
 
 export function HomeContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [period, setPeriod] = useState<AppliedPeriod>(currentMonthPeriod);
   const [hasHomeAlerts, setHasHomeAlerts] = useState(false);
+  const searchParamString = searchParams.toString();
+  const filters = transactionFiltersFromSearchParams(searchParams);
+
+  const updateFilters = (next: TransactionFilterState) => {
+    const nextSearchParams = new URLSearchParams(searchParamString);
+    for (const key of ["categoryId", "tag", "merchant"] as const) {
+      if (next[key]) nextSearchParams.set(key, next[key]);
+      else nextSearchParams.delete(key);
+    }
+    const query = nextSearchParams.toString();
+    router.replace(query ? `/?${query}` : "/", { scroll: false });
+  };
+
+  const filterQuery = transactionFiltersQuery(filters);
+  const transactionsHref = filterQuery ? `/transactions?${filterQuery}` : "/transactions";
 
   return (
     <>
@@ -64,13 +83,14 @@ export function HomeContent() {
                   <h2 id="activity-heading" className="mt-1 text-[22px] font-semibold tracking-[-0.03em]">Activity</h2>
                 </div>
                 <div className="flex flex-col items-end">
-                  <Link href="/transactions" className="min-h-8 px-1 text-sm font-semibold text-primary underline underline-offset-4 hover:text-primary-hover focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">See all</Link>
+                  <Link href={transactionsHref} className="min-h-8 px-1 text-sm font-semibold text-primary underline underline-offset-4 hover:text-primary-hover focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">See all</Link>
                   <p className="mt-1 text-[11px] font-medium text-muted-foreground">Cash flow</p>
                   <MonthlyCashFlow />
                 </div>
               </div>
 
-              <TransactionList period={period} includeAlerts />
+              {hasTransactionFilters(filters) ? <ActiveTransactionFilters value={filters} onChange={updateFilters} /> : null}
+              <TransactionList period={period} includeAlerts filters={filters} />
             </section>
           </MonthlySummaryProvider>
         </div>

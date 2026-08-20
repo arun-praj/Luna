@@ -6,13 +6,15 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-import { authenticatedFetch } from "@/lib/auth-client";
+import { getAccessTokenSubject, getTransactionRefreshGeneration, revalidateAuthenticatedFetch } from "@/lib/auth-client";
 import { currencyEntries, formatCurrencyAmount, type CurrencyTotals } from "@/lib/currency";
 import { addMoney } from "@/lib/money";
+import { hasFreshDataChanged, useHomeSnapshot, writeHomeSnapshot } from "@/lib/home-snapshot-cache";
 import type { ApiTransaction } from "@/components/transactions/transaction-list";
 import { Skeleton } from "@/components/ui/data-skeleton";
 import type { AppliedPeriod } from "@/components/home/date-picker";
@@ -25,7 +27,10 @@ type MonthlySummary = {
   totalsByCurrency: Record<string, { income: number; expenses: number; savings: number }>;
   currency: string;
   isLoading: boolean;
+  freshChangedVersion: number;
 };
+
+type MonthlySummarySnapshot = Omit<MonthlySummary, "isLoading" | "freshChangedVersion">;
 
 const MonthlySummaryContext = createContext<MonthlySummary | null>(null);
 
@@ -48,6 +53,32 @@ function currentMonthRange() {
   };
 }
 
+function monthlySummaryScope(period?: AppliedPeriod) {
+  if (period?.mode === "all") return "all";
+  if (period?.from && period.to) return `from=${dateKey(period.from)}&to=${dateKey(period.to)}`;
+  const range = currentMonthRange();
+  return `from=${range.from}&to=${range.to}`;
+}
+
+function sameSummary(left: MonthlySummarySnapshot, right: MonthlySummarySnapshot) {
+  return left.currency === right.currency && JSON.stringify(left.totalsByCurrency) === JSON.stringify(right.totalsByCurrency);
+}
+
+function isMonthlySummarySnapshot(value: unknown): value is MonthlySummarySnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<MonthlySummarySnapshot>;
+  return typeof snapshot.currency === "string"
+    && Boolean(snapshot.totalsByCurrency)
+    && typeof snapshot.totalsByCurrency === "object";
+}
+
+const emptySummary: MonthlySummary = {
+  totalsByCurrency: { NPR: { income: 0, expenses: 0, savings: 0 } },
+  currency: "NPR",
+  isLoading: true,
+  freshChangedVersion: 0,
+};
+
 export function useMonthlySummary() {
   const summary = useContext(MonthlySummaryContext);
   if (!summary) {
@@ -59,11 +90,51 @@ export function useMonthlySummary() {
 }
 
 export function MonthlySummaryProvider({ children, period }: { children: ReactNode; period?: AppliedPeriod }) {
-  const [summary, setSummary] = useState<MonthlySummary>({
-    totalsByCurrency: { NPR: { income: 0, expenses: 0, savings: 0 } },
-    currency: "NPR",
-    isLoading: true,
-  });
+  const [authSubject, setAuthSubject] = useState<string | null>(getAccessTokenSubject);
+  const userId = authSubject;
+  const scope = monthlySummaryScope(period);
+  const displayKey = `${userId ?? ""}:${scope}`;
+  const cached = useHomeSnapshot("monthly-summary", userId, scope, isMonthlySummarySnapshot);
+  const [summary, setSummary] = useState<MonthlySummary>(emptySummary);
+  const [freshSummaryKey, setFreshSummaryKey] = useState<string | null>(null);
+  const [refreshGeneration, setRefreshGeneration] = useState(() => getTransactionRefreshGeneration());
+  const [freshChangeVersion, setFreshChangeVersion] = useState(0);
+  const [freshChangeScope, setFreshChangeScope] = useState<string | null>(null);
+  const lastSummaryScopeRef = useRef(displayKey);
+  const lastSummaryRef = useRef<MonthlySummarySnapshot | null>(cached?.data ?? null);
+
+  useEffect(() => {
+    const handleAuthChanged = () => {
+      const nextSubject = getAccessTokenSubject();
+      if (nextSubject === userId) return;
+      setAuthSubject(nextSubject);
+      setSummary(emptySummary);
+      setFreshSummaryKey(null);
+      setFreshChangeScope(null);
+      setFreshChangeVersion(0);
+      setRefreshGeneration(getTransactionRefreshGeneration());
+    };
+    window.addEventListener("cocomelon:auth-changed", handleAuthChanged);
+    return () => window.removeEventListener("cocomelon:auth-changed", handleAuthChanged);
+  }, [userId]);
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const generation = event instanceof CustomEvent && typeof event.detail?.generation === "number"
+        ? event.detail.generation
+        : null;
+      setRefreshGeneration((current) => Math.max(current + 1, generation ?? getTransactionRefreshGeneration()));
+    };
+    window.addEventListener("cocomelon:transactions-changed", refresh);
+    return () => window.removeEventListener("cocomelon:transactions-changed", refresh);
+  }, []);
+
+  useEffect(() => {
+    if (lastSummaryScopeRef.current !== displayKey || (lastSummaryRef.current === null && cached)) {
+      lastSummaryScopeRef.current = displayKey;
+      lastSummaryRef.current = cached?.data ?? null;
+    }
+  }, [cached, displayKey]);
 
   useEffect(() => {
     let active = true;
@@ -81,12 +152,12 @@ export function MonthlySummaryProvider({ children, period }: { children: ReactNo
     }
 
     void Promise.all([
-      authenticatedFetch(`/api/transactions${query.toString() ? `?${query.toString()}` : ""}`),
-      authenticatedFetch(`/api/accounts${accountsQuery.toString() ? `?${accountsQuery.toString()}` : ""}`),
-      authenticatedFetch("/api/auth/me"),
+      revalidateAuthenticatedFetch(`/api/transactions${query.toString() ? `?${query.toString()}` : ""}`, {}, { generation: refreshGeneration }),
+      revalidateAuthenticatedFetch(`/api/accounts${accountsQuery.toString() ? `?${accountsQuery.toString()}` : ""}`, {}, { generation: refreshGeneration }),
+      revalidateAuthenticatedFetch("/api/auth/me", {}, { generation: refreshGeneration }),
     ])
       .then(async ([transactionsResponse, accountsResponse, profileResponse]) => {
-        if (!transactionsResponse.ok || !accountsResponse.ok) return;
+        if (!transactionsResponse.ok || !accountsResponse.ok || !profileResponse.ok) throw new Error("Monthly summary refresh failed");
 
         const transactionsResult = (await transactionsResponse.json()) as {
           transactions?: ApiTransaction[];
@@ -117,25 +188,44 @@ export function MonthlySummaryProvider({ children, period }: { children: ReactNo
         }
         const currencies = Object.keys(totalsByCurrency).sort();
 
-        if (active) {
-          setSummary({
+        const nextSummary: MonthlySummarySnapshot = {
             totalsByCurrency,
             currency: currencies.length === 1 ? currencies[0] : "Mixed",
-            isLoading: false,
-          });
+        };
+        const currentUserId = getAccessTokenSubject();
+        if (active && currentUserId && (!userId || userId === currentUserId)) {
+          writeHomeSnapshot("monthly-summary", currentUserId, scope, nextSummary);
+          const freshChanged = hasFreshDataChanged(lastSummaryRef.current, nextSummary);
+          lastSummaryRef.current = nextSummary;
+          setSummary((current) => sameSummary(current, nextSummary) && !current.isLoading
+            ? current
+            : { ...nextSummary, isLoading: false, freshChangedVersion: 0 });
+          setFreshSummaryKey(displayKey);
+          if (freshChanged) {
+            setFreshChangeScope(displayKey);
+            setFreshChangeVersion((current) => current + 1);
+          }
         }
       })
       .catch(() => {
-        if (active) setSummary((current) => ({ ...current, isLoading: false }));
+        if (active && !cached) {
+          setSummary((current) => ({ ...emptySummary, currency: current.currency, isLoading: false, freshChangedVersion: 0 }));
+          setFreshSummaryKey(displayKey);
+        }
       });
 
     return () => {
       active = false;
     };
-  }, [period]);
+  }, [cached, displayKey, period, refreshGeneration, scope, userId]);
 
+  const displayedSummary = freshSummaryKey === displayKey
+    ? { ...summary, freshChangedVersion: freshChangeScope === displayKey ? freshChangeVersion : 0 }
+    : cached
+      ? { ...cached.data, isLoading: false, freshChangedVersion: 0 }
+      : { ...emptySummary, isLoading: true, freshChangedVersion: 0 };
   return (
-    <MonthlySummaryContext.Provider value={summary}>
+    <MonthlySummaryContext.Provider value={displayedSummary}>
       {children}
     </MonthlySummaryContext.Provider>
   );
@@ -197,7 +287,7 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
                 {summary.isLoading
                   ? <Skeleton className="h-4 w-full max-w-20" />
                   : visibleValues.map(([currency, value]) => (
-                    <span className="flex min-w-0 items-baseline justify-between gap-1 whitespace-nowrap" key={currency}>
+                    <span className="flex min-w-0 items-baseline justify-between gap-1 whitespace-nowrap" key={`${currency}:${value}`}>
                       <span className="shrink-0 text-[12px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">{currency}</span>
                       <span className="text-[clamp(14px,3.5vw,17px)] leading-5">{formatCurrencyAmount(value)}</span>
                     </span>
@@ -215,7 +305,8 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
       <section
         aria-label="Monthly overview"
         data-tour="monthly-overview"
-        className={`grid divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card min-[360px]:grid-cols-3 min-[360px]:divide-x min-[360px]:divide-y-0 ${summary.isLoading ? "" : "route-data-reveal"}`}
+        key={`monthly-overview:${summary.freshChangedVersion}`}
+        className={`grid divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card min-[360px]:grid-cols-3 min-[360px]:divide-x min-[360px]:divide-y-0 ${summary.freshChangedVersion ? "route-data-reveal" : ""}`}
       >
         {overview.map((item) => {
           const Icon = item.icon;
@@ -248,7 +339,7 @@ export function MonthlyOverviewCards({ compact = false }: { compact?: boolean })
                   <Skeleton className="h-5 w-16" />
                 ) : (
                   <span className={visibleValues.length > 1 ? "space-y-0.5" : ""}>
-                    {visibleValues.map(([currency, value]) => <span className="block" key={currency}>{currency} {formatCurrencyAmount(value)}</span>)}
+                    {visibleValues.map(([currency, value]) => <span className="block" key={`${currency}:${value}`}>{currency} {formatCurrencyAmount(value)}</span>)}
                   </span>
                 )}
               </p>
@@ -274,9 +365,9 @@ export function MonthlyCashFlow() {
       {summary.isLoading ? (
         <Skeleton className="h-5 w-24" />
       ) : (
-        <span className="inline-block route-data-reveal">
+        <span key={`cash-flow:${summary.freshChangedVersion}`} className={summary.freshChangedVersion ? "inline-block route-data-reveal" : "inline-block"}>
           <span className={visibleCashFlows.length > 1 ? "space-y-0.5" : ""}>
-            {visibleCashFlows.map(([currency, value]) => <span className="block" key={currency}>{value < 0 ? "−" : "+"}{currency} {formatCurrencyAmount(Math.abs(value))}</span>)}
+            {visibleCashFlows.map(([currency, value]) => <span className="block" key={`${currency}:${value}`}>{value < 0 ? "−" : "+"}{currency} {formatCurrencyAmount(Math.abs(value))}</span>)}
           </span>
         </span>
       )}

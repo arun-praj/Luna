@@ -110,16 +110,14 @@ function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 top-24 size-64 rounded-full bg-[#D7A34E]/10 blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute -right-20 bottom-20 size-80 rounded-full bg-primary/10 blur-3xl" />
 
-        <header className="relative z-10 flex items-center justify-between">
+        <header className="relative z-10 flex shrink-0 items-center justify-between">
           <span className="text-sm font-bold tracking-[-0.03em] text-primary">Luna</span>
-          <span className="hidden rounded-full border border-border bg-card/70 px-3 py-1.5 text-xs font-semibold text-muted-foreground shadow-sm sm:inline-flex">money, made calmer</span>
         </header>
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-start gap-6 overflow-hidden pt-4 pb-2 lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:justify-center lg:gap-12 lg:overflow-visible lg:py-4">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-start gap-6 overflow-x-hidden overflow-y-auto overscroll-contain pt-4 pb-6 lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:justify-center lg:gap-12 lg:overflow-visible lg:py-4">
           <section className="max-w-[510px]">
-            <span className="inline-flex items-center gap-2 rounded-full bg-primary-soft px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-primary"><Sparkles aria-hidden="true" className="size-3.5" /> A calmer way to manage money</span>
-            <h1 className="mt-4 max-w-[500px] text-[40px] font-semibold leading-[0.96] tracking-[-0.065em] sm:mt-5 sm:text-[62px]">Give every rupee a job.</h1>
-            <p className="mt-4 max-w-[455px] text-[15px] leading-6 text-muted-foreground sm:mt-6 sm:text-lg sm:leading-7">Luna turns everyday spending into a clear, calm picture of your life — online or offline.</p>
+            <h1 className="max-w-[500px] text-[40px] font-semibold leading-[0.96] tracking-[-0.065em] sm:text-[62px]">Give every rupee a job.</h1>
+            <p className="mt-4 max-w-[455px] text-[15px] leading-6 text-muted-foreground sm:mt-6 sm:text-lg sm:leading-7">Track spending, plan ahead, and understand your money — online or offline.</p>
             <div className="mt-5 flex flex-wrap gap-2 sm:mt-8 sm:gap-2.5">
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2.5 text-sm font-semibold shadow-sm"><TrendingUp aria-hidden="true" className="size-4 text-income" /> See your flow</span>
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2.5 text-sm font-semibold shadow-sm"><Sprout aria-hidden="true" className="size-4 text-primary" /> Build good habits</span>
@@ -146,7 +144,7 @@ function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
           </div>
         </div>
 
-        <footer className="relative z-10 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pt-5">
+        <footer className="relative z-10 flex shrink-0 flex-col gap-2 border-t border-border bg-background/95 pt-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pt-5">
           <p className="text-xs leading-5 text-muted-foreground">A simple start for a more intentional money life.</p>
           <MagneticContinueButton onClick={onContinue}>Continue Onboarding<ArrowRight aria-hidden="true" className="size-4" /></MagneticContinueButton>
         </footer>
@@ -160,7 +158,7 @@ function CategoryPicker({ categories, categorySelected, onToggle, onToggleAll, c
 
   return (
     <>
-      <div className="mt-8 flex items-center justify-end"><button type="button" onClick={onToggleAll} className="rounded-md px-2 py-1 text-sm font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">{allSelected ? "Clear all" : "Select all"}</button></div>
+      <div className="mt-8 flex items-center justify-end gap-3"><span className="text-xs font-medium text-muted-foreground">{categories.length} selected</span><button type="button" onClick={onToggleAll} className="rounded-md px-2 py-1 text-sm font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">{allSelected ? "Clear all" : "Select all"}</button></div>
       <div className="mt-3 flex max-h-[370px] flex-wrap gap-2.5 overflow-y-auto pr-1">{CATEGORY_SUGGESTIONS.map((category) => { const isSelected = categorySelected(category.name); return <button key={category.name} type="button" aria-pressed={isSelected} onClick={() => onToggle(category)} className={isSelected ? "flex items-center gap-2 rounded-full border border-primary bg-primary px-3.5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all" : "flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2.5 text-sm font-semibold transition-all hover:border-primary/50"}><span className={isSelected ? "grid size-7 place-items-center rounded-full bg-white/20" : "grid size-7 place-items-center rounded-full bg-surface-subtle text-primary"}><Icon name={category.icon} /></span>{category.name}{isSelected && <Check aria-hidden="true" className="size-4 text-white" strokeWidth={2.5} />}</button>; })}</div>
       <div className="mt-6 flex gap-2"><input value={customCategory} onChange={(event) => onCustomCategoryChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onAddCustomCategory(); }} placeholder="Add your own category" className="min-h-12 min-w-0 flex-1 rounded-[13px] border border-border bg-card px-4 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10" /><button type="button" onClick={onAddCustomCategory} className="flex size-12 shrink-0 items-center justify-center rounded-[13px] bg-surface-subtle text-primary hover:bg-primary-soft" aria-label="Add category"><Plus className="size-5" /></button></div>{categories.length > 0 && <p className="mt-4 text-sm text-muted-foreground">{categories.length} categor{categories.length === 1 ? "y" : "ies"} selected</p>}
     </>
@@ -177,7 +175,7 @@ export default function OnboardingPage() {
   const [currencySearch, setCurrencySearch] = useState("");
   const [avatarPreset, setAvatarPreset] = useState("sunrise");
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
-  const [categories, setCategories] = useState<CategoryChoice[]>([]);
+  const [categories, setCategories] = useState<CategoryChoice[]>(() => [...CATEGORY_SUGGESTIONS]);
   const [customAccount, setCustomAccount] = useState("");
   const [customCategory, setCustomCategory] = useState("");
   const [message, setMessage] = useState("");
@@ -237,12 +235,20 @@ export default function OnboardingPage() {
   }
 
   async function finish() {
+    if (!name.trim()) { setMessage("Please add your name before finishing setup."); return; }
+    if (accounts.length === 0) { setMessage("Please choose at least one account."); return; }
+    if (accounts.length > 12) { setMessage("Please choose no more than 12 accounts."); return; }
+    if (new Set(accounts.map((account) => account.name.trim().toLocaleLowerCase())).size !== accounts.length) {
+      setMessage("Please use a different name for each account.");
+      return;
+    }
     if (categories.length === 0) { setMessage("Choose at least one category to continue."); return; }
+    if (categories.length > 50) { setMessage("Please choose no more than 50 categories."); return; }
     setIsSaving(true); setMessage("");
     try {
       const response = await authenticatedFetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), currency, avatarPreset, accounts, categories }) });
       if (response.ok) {
-        router.replace("/budgets/onboarding?returnTo=/");
+        router.replace("/");
         return;
       }
       const result = await response.json().catch(() => ({})) as { error?: string };
