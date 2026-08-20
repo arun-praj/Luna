@@ -74,7 +74,7 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
 
     void reconcileNotificationSubscription(userId).then((result) => {
       if (cancelled || !result.subscription) return;
-      setIsCurrentDeviceSubscribed(true);
+      setIsCurrentDeviceSubscribed(result.synced);
       if (!result.synced)
         setMessage("Background alerts are enabled on this device and will sync when you’re online.");
     }).catch(() => undefined);
@@ -190,33 +190,58 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
   async function enableNotifications() {
     setIsEnabling(true);
     setMessage("");
-    if (permission === "denied") {
-      setMessage("Notifications are blocked. Open this site’s permissions from your browser or device settings, choose Allow, then try again.");
+    try {
+      if (permission === "denied") {
+        setMessage("Notifications are blocked. Open this site’s permissions from your browser or device settings, choose Allow, then try again.");
+        return;
+      }
+      const nextPermission = await requestNotificationPermission();
+      setPermission(nextPermission);
+      if (nextPermission === "granted") {
+        const result = await reconcileNotificationSubscription(userId);
+        if (result.subscription) {
+          setIsCurrentDeviceSubscribed(result.synced);
+          setMessage(result.synced
+            ? "This device is connected. You can now test an alert."
+            : "The browser subscription was created, but Luna could not save it. Check your connection and try again.");
+        } else setMessage(pushNotificationsConfigured()
+          ? "Could not create a push subscription. Make sure notifications are allowed for this site and that Luna is installed or open in a supported browser."
+          : "Background alerts are not configured for this deployment yet. Add the VAPID public key, then reload Luna.");
+      } else if (nextPermission === "denied") {
+        setMessage("Notifications are blocked. Allow them in your device or browser settings.");
+      } else if (nextPermission === "unsupported") {
+        setMessage("This browser does not support native notifications.");
+      }
+    } catch {
+      setIsCurrentDeviceSubscribed(false);
+      setMessage("Could not connect this device to Luna’s notification service. Check your connection and try again.");
+    } finally {
       setIsEnabling(false);
-      return;
     }
-    const nextPermission = await requestNotificationPermission();
-    setPermission(nextPermission);
-    if (nextPermission === "granted") {
-      const result = await reconcileNotificationSubscription(userId);
-      if (result.subscription) {
-        setIsCurrentDeviceSubscribed(true);
-        if (!result.synced) setMessage("Background alerts are enabled on this device and will sync when you’re online.");
-      } else setMessage(pushNotificationsConfigured()
-        ? "Background alerts could not be enabled. Check that this site is installed or open in a supported browser, then try again."
-        : "Background alerts are not configured for this deployment yet. Add the VAPID public key, then reload Luna.");
-    } else if (nextPermission === "denied") {
-      setMessage("Notifications are blocked. Allow them in your device or browser settings.");
-    } else if (nextPermission === "unsupported") {
-      setMessage("This browser does not support native notifications.");
-    }
-    setIsEnabling(false);
   }
 
   async function sendTestNotification() {
     setIsTestingNotification(true);
     setMessage("");
     try {
+      // Repair a stale/missing server row before asking the Worker to deliver.
+      // Browser permission and a local PushSubscription do not prove that the
+      // current subscription is present in notification_push_subscriptions.
+      forgetNotificationSubscriptionSync(userId);
+      const sync = await reconcileNotificationSubscription(userId);
+      if (!sync.subscription) {
+        setIsCurrentDeviceSubscribed(false);
+        setMessage(pushNotificationsConfigured()
+          ? "This device has no usable push subscription. Enable background alerts again, then retry."
+          : "Background notifications are not configured for this deployment yet.");
+        return;
+      }
+      if (!sync.synced) {
+        setIsCurrentDeviceSubscribed(false);
+        setMessage("The device subscription could not be saved to Luna. Check your connection, then retry.");
+        return;
+      }
+      setIsCurrentDeviceSubscribed(true);
       const response = await authenticatedFetch("/api/notifications/test", { method: "POST" });
       const result = await response.json().catch(() => null) as { error?: string } | null;
       setMessage(response.ok
@@ -319,11 +344,13 @@ export function NotificationSettingsCard({ userId, monthlyReportEnabled, onMonth
           ) : null}
         </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle/50 px-4 py-3">
+        <div className="border-t border-border bg-surface-subtle/50 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
       {permission === "granted" && isCurrentDeviceSubscribed ? <><Smartphone aria-hidden="true" className="size-4 text-primary" /><span className="text-xs text-muted-foreground">Background alerts enabled on this device</span></> : <><CloudOff aria-hidden="true" className="size-4 text-muted-foreground" /><span className="text-xs text-muted-foreground">{permission === "denied" ? "Notifications are blocked in this browser." : permission === "unsupported" ? "This browser does not support notifications." : permission === "granted" ? "Connect this device for scheduled alerts." : "Enable alerts for reminders and low balances."}</span><button type="button" onClick={() => void enableNotifications()} disabled={isEnabling || permission === "unsupported"} className="ml-auto min-h-8 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60">{isEnabling ? "Enabling…" : permission === "denied" ? "How to allow" : permission === "granted" ? "Connect device" : "Enable alerts"}</button></>}
         {permission === "granted" && isCurrentDeviceSubscribed ? <button type="button" onClick={() => void sendTestNotification()} disabled={isTestingNotification} className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-semibold text-primary hover:bg-primary-soft disabled:cursor-wait disabled:opacity-45">{isTestingNotification ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Check aria-hidden="true" className="size-3.5" />} Test alert</button> : null}
         </div>
-        {message ? <p className="px-4 pb-3 text-[11px] text-muted-foreground">{message}</p> : null}
+        {message ? <p role="status" className="mt-2 text-[11px] leading-4 text-expense">{message}</p> : null}
+        </div>
       </> : null}
     </section>
   );

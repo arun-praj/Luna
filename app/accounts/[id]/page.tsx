@@ -45,6 +45,7 @@ type Account = {
 
 type AccountTransaction = {
   id: string;
+  accountId: string;
   type: "expense" | "income" | "savings" | "transfer" | "adjust_balance" | "goal_spend";
   amount: number;
   title: string;
@@ -110,6 +111,16 @@ function formatDate(date: string) {
     month: "short",
     day: "numeric",
   }).format(parsed);
+}
+
+function formatGroupDate(date: string) {
+  const today = new Date();
+  const key = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date === key(today)) return "Today";
+  if (date === key(yesterday)) return "Yesterday";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date}T00:00:00`));
 }
 
 export default function AccountActivityPage({
@@ -239,6 +250,11 @@ export default function AccountActivityPage({
     .filter((transaction) => transaction.type === "expense")
     .reduce((total, transaction) => sumMoney([total, transaction.amount]), 0);
   const isLoadingTransactions = loadedPeriod !== period;
+  const transactionGroups = useMemo(() => {
+    const groups = new Map<string, AccountTransaction[]>();
+    for (const transaction of transactions) groups.set(transaction.date, [...(groups.get(transaction.date) ?? []), transaction]);
+    return [...groups.entries()];
+  }, [transactions]);
   if (isLoading) return <PageDataSkeleton label="Loading account" />;
   if (!account)
     return (
@@ -357,8 +373,13 @@ export default function AccountActivityPage({
               </p>
             </div>
           ) : (
-            <div className="mt-4 overflow-hidden rounded-[14px] border border-border bg-card">
-              {transactions.map((transaction, index) => {
+            <div className="mt-4 space-y-6">
+              {transactionGroups.map(([date, group]) => <section aria-labelledby={`account-transactions-${date}`} key={date}>
+                <div className="flex items-center justify-between px-1">
+                  <h3 id={`account-transactions-${date}`} className="text-[15px] font-semibold">{formatGroupDate(date)}</h3>
+                </div>
+                <div className="mt-3 overflow-hidden rounded-[14px] border border-border bg-card">
+              {group.map((transaction, index) => {
                 const meta = transactionMeta[transaction.type];
                 const detail = transaction.categoryId
                   ? categoryNames.get(transaction.categoryId)
@@ -393,7 +414,11 @@ export default function AccountActivityPage({
                         <p
                           className={`shrink-0 text-[14px] font-semibold tabular-nums ${meta.amountClassName}`}
                         >
-                          {transaction.type === "adjust_balance"
+                          {transaction.transferToAccountId === account.id && transaction.accountId !== account.id
+                            ? "+"
+                            : transaction.transferToAccountId && transaction.accountId === account.id
+                              ? "−"
+                              : transaction.type === "adjust_balance"
                             ? transaction.amount >= 0 ? "+" : "−"
                             : transaction.type === "savings" && transaction.goalId
                               ? transaction.amount < 0 ? "+" : "−"
@@ -415,6 +440,8 @@ export default function AccountActivityPage({
                   </div>
                 );
               })}
+                </div>
+              </section>)}
             </div>
           )}
         </section>

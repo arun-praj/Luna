@@ -53,7 +53,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url); const accountId = url.searchParams.get("accountId"); const categoryId = url.searchParams.get("categoryId"); const savingsInstrumentId = url.searchParams.get("savingsInstrumentId"); const goalId = url.searchParams.get("goalId"); const from = url.searchParams.get("from"); const to = url.searchParams.get("to"); const status = url.searchParams.get("syncStatus"); const type = url.searchParams.get("type"); const tag = url.searchParams.get("tag")?.trim().slice(0, 50) ?? ""; const merchant = url.searchParams.get("merchant")?.trim().slice(0, 120) ?? ""; const search = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
   const filters = [eq(transactions.userId, userId)];
   if (type === "expense" || type === "income" || type === "savings") filters.push(eq(transactions.type, type));
-  if (accountId) filters.push(eq(transactions.accountId, accountId));
+  if (accountId) filters.push(sql`(${transactions.accountId} = ${accountId} OR ${transactions.transferToAccountId} = ${accountId})`);
   if (savingsInstrumentId) filters.push(eq(transactions.savingsInstrumentId, savingsInstrumentId));
   if (goalId) filters.push(eq(transactions.goalId, goalId));
   if (from) filters.push(sql`${transactions.date} >= ${from}` as never);

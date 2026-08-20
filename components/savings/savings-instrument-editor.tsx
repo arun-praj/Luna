@@ -179,7 +179,15 @@ export function SavingsInstrumentEditor({ instrumentId }: { instrumentId?: strin
     if (!instrumentId) return;
     setIsDeleting(true);
     const response = await authenticatedFetch(`/api/savings/instruments/${instrumentId}`, { method: "DELETE" });
-    if (response.ok) navigateWithRouteExit(() => router.push(backHref)); else { setError("Could not delete savings instrument."); setIsDeleting(false); }
+    if (response.ok) {
+      // The editor may have been opened from the deleted detail route. Always
+      // land on the collection page after deletion instead of replaying that
+      // stale URL through returnTo/browser history.
+      navigateWithRouteExit(() => router.push("/savings-instruments"));
+    } else {
+      setError("Could not delete savings instrument.");
+      setIsDeleting(false);
+    }
   }
 
   return (

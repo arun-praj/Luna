@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
@@ -8,7 +9,21 @@ export function StickyPageHeader({
   className,
   children,
 }: React.ComponentProps<"header">) {
+  const router = useRouter();
+  const headerRef = React.useRef<HTMLElement>(null);
   const [scrolled, setScrolled] = React.useState(false);
+
+  React.useEffect(() => {
+    const handleNativeBack = () => {
+      if (!window.matchMedia("(max-width: 639px)").matches) return;
+      const backLink = headerRef.current?.querySelector<HTMLAnchorElement>('a[aria-label="Back"], a[aria-label^="Back to"]');
+      if (!backLink) return;
+      const destination = new URL(backLink.href, window.location.origin);
+      router.replace(`${destination.pathname}${destination.search}${destination.hash}`);
+    };
+    window.addEventListener("popstate", handleNativeBack);
+    return () => window.removeEventListener("popstate", handleNativeBack);
+  }, [router]);
 
   React.useEffect(() => {
     const update = () => setScrolled(window.scrollY > 4);
@@ -19,6 +34,7 @@ export function StickyPageHeader({
 
   return (
     <header
+      ref={headerRef}
       className={cn(
         "luna-sticky-page-header sticky top-0 z-20 w-[calc(100%+2rem)] self-start border-b bg-background/72 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl backdrop-saturate-150 transition-[background-color,border-color,box-shadow] supports-[backdrop-filter]:bg-background/68 sm:w-[calc(100%+2.5rem)] sm:pt-8",
         scrolled

@@ -13,6 +13,7 @@ import { StickyPageHeader } from "@/components/layout/sticky-page-header";
 import { PageHeader } from "@/components/layout/page-header";
 import { GuideIcon } from "@/components/guides/feature-guide";
 import { authenticatedFetch } from "@/lib/auth-client";
+import { formatCurrencyAmount } from "@/lib/currency";
 import { getCategoryIcon } from "@/lib/category-appearance";
 import { getCurrentRoute, getReturnTo, withReturnTo } from "@/lib/navigation";
 import { Skeleton } from "@/components/ui/data-skeleton";
@@ -24,6 +25,13 @@ type Category = {
   icon: string | null;
   color: string | null;
   usageFrequency: number;
+};
+
+type CategoryBudget = {
+  categoryId: string | null;
+  spent: number;
+  limitAmount: number;
+  percentage: number;
 };
 
 const categoryForegrounds: Record<string, string> = {
@@ -48,9 +56,11 @@ function categoryActivityLabel(usageFrequency: number) {
 
 function CategoryRow({
   category,
+  budget,
   currentRoute,
 }: {
   category: Category;
+  budget: CategoryBudget | undefined;
   currentRoute: string;
 }) {
   const iconColor = categoryForeground(category.color);
@@ -82,6 +92,17 @@ function CategoryRow({
         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground sm:text-xs">
           <span>{categoryActivityLabel(category.usageFrequency)}</span>
         </span>
+        {budget ? (
+          <span className="mt-2 block max-w-[260px]" aria-label={`Budget: ${formatCurrencyAmount(budget.spent)} of ${formatCurrencyAmount(budget.limitAmount)} spent`}>
+            <span className="flex items-center justify-between gap-2 text-[10px] font-medium leading-4 text-muted-foreground">
+              <span>Budget · {formatCurrencyAmount(budget.spent)} / {formatCurrencyAmount(budget.limitAmount)}</span>
+              <span>{Math.round(budget.percentage)}%</span>
+            </span>
+            <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-subtle">
+              <span className={`block h-full rounded-full ${budget.percentage > 100 ? "bg-expense" : "bg-primary"}`} style={{ width: `${Math.min(100, Math.max(0, budget.percentage))}%` }} />
+            </span>
+          </span>
+        ) : null}
       </span>
       <ChevronRight
         aria-hidden="true"
@@ -95,6 +116,7 @@ export default function CategoriesPage() {
   const [backHref, setBackHref] = useState("/");
   const [currentRoute, setCurrentRoute] = useState("/");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [budgets, setBudgets] = useState<CategoryBudget[]>([]);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -135,6 +157,22 @@ export default function CategoriesPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void authenticatedFetch("/api/budgets?period=monthly")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = (await response.json()) as { budgets?: CategoryBudget[] };
+        if (active) setBudgets((result.budgets ?? []).filter((budget) => budget.categoryId !== null));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const budgetByCategoryId = new Map(budgets.map((budget) => [budget.categoryId, budget]));
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const sortedCategories = [...categories]
@@ -275,6 +313,7 @@ export default function CategoriesPage() {
                     {frequentlyUsed.map((category) => (
                       <CategoryRow
                         category={category}
+                        budget={budgetByCategoryId.get(category.id)}
                         currentRoute={currentRoute}
                         key={`frequent-${category.id}`}
                       />
@@ -301,6 +340,7 @@ export default function CategoriesPage() {
                   {filteredCategories.map((category) => (
                     <CategoryRow
                       category={category}
+                      budget={budgetByCategoryId.get(category.id)}
                       currentRoute={currentRoute}
                       key={category.id}
                     />
